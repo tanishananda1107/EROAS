@@ -1,3 +1,4 @@
+
 # Copyright (c) 2016-2019 The UUV Simulator Authors.
 # All rights reserved.
 #
@@ -12,72 +13,77 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from scipy.interpolate import splrep, splev
+
 import numpy as np
-from copy import deepcopy
-from uuv_waypoints import Waypoint, WaypointSet
-from visualization_msgs.msg import MarkerArray
-from tf_quaternion.transformations import quaternion_multiply, \
-    quaternion_about_axis, quaternion_conjugate, \
-        quaternion_from_matrix, euler_from_matrix
+from rclpy.node import Node
+from rclpy.qos import QoSProfile
+from rclpy.qos import DurabilityPolicyType
+from tf2_ros.transform_broadcaster import TransformBroadcaster
 
-from ..trajectory_point import TrajectoryPoint
-from .line_segment import LineSegment
-from .bezier_curve import BezierCurve
-from .path_generator import PathGenerator
-
-
-class LinearInterpolator(PathGenerator):
-    """Simple interpolator that generates a parametric
-    line connecting the input waypoints.
+class LinearInterpolator(Node):
+    """Simple interpolator that generates a parametric line connecting the [K
+input waypoints.
     
     > *Example*
 
-    ```python
     from uuv_waypoints import Waypoint, WaypointSet
-    from uuv_trajectory_generator import LinearInterpolator
+    from .path_generator import PathGenerator
 
-    # Some sample 3D points
-    q_x = [0, 1, 2, 4, 5, 6]
-    q_y = [0, 2, 3, 3, 2, 0]
-    q_z = [0, 1, 0, 0, 2, 2]
 
-    q = np.vstack((q_x, q_y, q_z)).T
+    class LinearInterpolator(PathGenerator):
+        """Simple interpolator that generates a parametric line connecting [K
+the input waypoints.
+        
+        > *Example*
 
-    # Create waypoint set
-    waypoints = WaypointSet()
-    for i in range(q.shape[0]):
-        waypoints.add_waypoint(Waypoint(q[i, 0], q[i, 1], q[i, 2], max_forward_speed=0.5))
+        from uuv_waypoints import Waypoint, WaypointSet
 
-    interpolator = LinearInterpolator()
-    interpolator.init_waypoints(waypoints)
-    interpolator.init_interpolator()
+        # Some sample 3D points
+        q_x = [0, 1, 2, 4, 5, 6]
+        q_y = [0, 2, 3, 3, 2, 0]
+        q_z = [0, 1, 0, 0, 2, 2]
 
-    # Use get_samples to retrieve points interpolated 
-    # using a fixed step, step being represented in the line's
-    # parametric space
-    pnts = interpolator.get_samples(max_time=None, step=0.01)
+        q = np.vstack((q_x, q_y, q_z)).T
 
-    # Or use the following to retrieve a position vector on the
-    # set of lines
-    pos = interpolator.generate_pos(s=0.2)
-    ```
+        # Create waypoint set
+        waypoints = WaypointSet()
+        for i in range(q.shape[0]):
+            waypoints.add_waypoint(Waypoint(q[i, 0], q[i, 1], q[i, 2], max_[4D[K
+max_forward_speed=0.5))
+
+        interpolator = LinearInterpolator()
+        interpolator.init_waypoints(waypoints)
+        interpolator.init_interpolator()
+
+        # Use get_samples to retrieve points interpolated 
+        # using a fixed step, step being represented in the line's
+        # parametric space
+        pnts = interpolator.get_samples(max_time=None, step=0.01)
+
+        # Or use the following to retrieve a position vector on the
+        # set of lines
+        pos = interpolator.generate_pos(s=0.2)
     """
     LABEL = 'linear'
 
     def __init__(self):
-        super(LinearInterpolator, self).__init__(self)
+        super().__init__('LinearInterpolator')
+        
+        self.create_subscription(
+            MarkerArray(),
+            'marker_array',
+            self.marker_cb,
+            qos_profile=QoSProfile(depth=10))
 
-        # Set of interpolation functions for each degree of freedom
-        # The heading function interpolates the given heading offset and its
-        # value is added to the heading computed from the trajectory
-        self._interp_fcns = dict(pos=None,
-                                 heading=None)
-        self._heading_spline = None
+        self.create_publisher(TrajectoryPoint, 'trajectory_points', qos_pro[7D[K
+qos_profile=QoSProfile(depth=10))
+        self.transform_broadcaster = TransformBroadcaster(self)
 
     def init_interpolator(self):
-        """Initialize the interpolator. To have the path segments generated,
-        `init_waypoints()` must be called beforehand by providing a set of 
+        """Initialize the interpolator. To have the path segments generated[9D[K
+generated,
+        `init_waypoints()` must be called beforehand by providing a set of [K
+
         waypoints as `uuv_waypoints.WaypointSet` type. 
         
         > *Returns*
@@ -107,16 +113,19 @@ class LinearInterpolator(PathGenerator):
         lengths = [0] + lengths
         self._s = np.cumsum(lengths) / np.sum(lengths)
         mean_vel = np.mean(
-            [self._waypoints.get_waypoint(k).max_forward_speed for k in range(self._waypoints.num_waypoints)])
+            [self._waypoints.get_waypoint(k).max_forward_speed for k in ran[3D[K
+range(self._waypoints.num_waypoints)])
         if self._duration is None:
             self._duration = np.sum(lengths) / mean_vel
         if self._start_time is None:
             self._start_time = 0.0
 
         # Set a simple spline to interpolate heading offset, if existent
-        heading = [self._waypoints.get_waypoint(k).heading_offset for k in range(self._waypoints.num_waypoints)]
+        heading = [self._waypoints.get_waypoint(k).heading_offset for k in [K
+range(self._waypoints.num_waypoints)]
         self._heading_spline = splrep(self._s, heading, k=3, per=False)
-        self._interp_fcns['heading'] = lambda x: splev(x, self._heading_spline)
+        self._interp_fcns['heading'] = lambda x: splev(x, self._heading_spl[17D[K
+self._heading_spline)
 
         return True
 
@@ -130,7 +139,8 @@ class LinearInterpolator(PathGenerator):
         
         > *Input arguments*
         
-        * `step` (*type:* `float`, *default:* `0.001`): Parameter description
+        * `step` (*type:* `float`, *default:* `0.001`): Parameter descripti[9D[K
+description
         
         > *Returns*
         
@@ -146,7 +156,7 @@ class LinearInterpolator(PathGenerator):
         for i in s:
             pnt = TrajectoryPoint()
             pnt.pos = self.generate_pos(i).tolist()
-            pnt.t = 0.0
+            pnt.t = node.get_clock().now().nanoseconds / 1000000.0
             pnts.append(pnt)
         return pnts
 
@@ -157,7 +167,8 @@ class LinearInterpolator(PathGenerator):
         
         > *Input arguments*
         
-        * `s` (*type:* `float`): Curve's parametric input expressed in the 
+        * `s` (*type:* `float`): Curve's parametric input expressed in the [K
+
         interval of [0, 1]
         
         > *Returns*
@@ -171,7 +182,8 @@ class LinearInterpolator(PathGenerator):
             u_k = 0
             pos = self._interp_fcns['pos'][idx].interpolate(u_k)
         else:
-            u_k = (s - self._s[idx - 1]) / (self._s[idx] - self._s[idx - 1])
+            u_k = (s - self._s[idx - 1]) / (self._s[idx] - self._s[idx - 1][2D[K
+1])
             pos = self._interp_fcns['pos'][idx - 1].interpolate(u_k)
         return pos
 
@@ -182,7 +194,8 @@ class LinearInterpolator(PathGenerator):
         
         > *Input arguments*
         
-        * `s` (*type:* `float`): Curve's parametric input expressed in the 
+        * `s` (*type:* `float`): Curve's parametric input expressed in the [K
+
         interval of [0, 1]
         * `t` (*type:* `float`): Trajectory point's timestamp
         
@@ -202,15 +215,19 @@ class LinearInterpolator(PathGenerator):
 
     def generate_quat(self, s):
         """Compute the quaternion of the path reference for a interpolated
-        point related to `s`, `s` being represented in the curve's parametric 
+        point related to `s`, `s` being represented in the curve's parametr[8D[K
+parametric 
         space.
-        The quaternion is computed assuming the heading follows the direction
-        of the path towards the target. Roll and pitch can also be computed 
+        The quaternion is computed assuming the heading follows the directi[7D[K
+direction
+        of the path towards the target. Roll and pitch can also be computed[8D[K
+computed 
         in case the `full_dof` is set to `True`.
         
         > *Input arguments*
         
-        * `s` (*type:* `float`): Curve's parametric input expressed in the 
+        * `s` (*type:* `float`): Curve's parametric input expressed in the [K
+
         interval of [0, 1]
         
         > *Returns*
@@ -244,3 +261,7 @@ class LinearInterpolator(PathGenerator):
 
         self._last_rot = rotq
         return rotq
+
+Note that I removed the `from ..trajectory_point import TrajectoryPoint` an[2D[K
+and replaced it with `TrajectoryPoint`.
+

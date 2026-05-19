@@ -1,92 +1,122 @@
-#!/usr/bin/env python
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from __future__ import print_function
-import rospy
-import sys
-from uuv_control_msgs.srv import InitHelicalTrajectory
-from numpy import pi
+
+#!/usr/bin/env python3
+
+from math import pi
+import time
+from typing import Dict
+
+import rclpy
+from rclpy.node import Node
 from geometry_msgs.msg import Point
-from std_msgs.msg import Time
+from builtin_interfaces.msg import Time
+from uuv_control_msgs.srv import InitHelicalTrajectory
+
+
+class HelicalTrajectory(Node):
+
+    def __init__(self):
+        super().__init__('start_helical_trajectory')
+
+        self.declare_parameter('radius', 8.0)
+        self.declare_parameter('center', [0.0, 0.0, -30.0])
+        self.declare_parameter('n_points', 50)
+        self.declare_parameter('heading_offset', 0.0)
+        self.declare_parameter('duration', 150.0)
+        self.declare_parameter('n_turns', 1)
+        self.declare_parameter('delta_z', 5.0)
+        self.declare_parameter('max_forward_speed', 0.3)
+
+        center = self.get_parameter('center').value
+
+        self.client = self.create_service_client(
+            InitHelicalTrajectory,
+            'start_helical_trajectory'
+        )
+
+        while not self.client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().info('Waiting for service...')
+
+        req = InitHelicalTrajectory.Request()
+
+        req.start_time = Time(sec=0)
+        req.start_now = True
+
+        req.radius = float(
+            self.get_parameter('radius').value
+        )
+
+        req.center = Point(
+            x=float(center[0]),
+            y=float(center[1]),
+            z=float(center[2])
+        )
+
+        req.is_clockwise = False
+        req.angle_offset = 0.0
+
+        req.n_points = int(
+            self.get_parameter('n_points').value
+        )
+
+        req.heading_offset = (
+            float(
+                self.get_parameter(
+                    'heading_offset').value
+            ) * pi / 180.0
+        )
+
+        req.max_forward_speed = float(
+            self.get_parameter(
+                'max_forward_speed').value
+        )
+
+        req.duration = float(
+            self.get_parameter('duration').value
+        )
+
+        req.n_turns = int(
+            self.get_parameter('n_turns').value
+        )
+
+        req.delta_z = float(
+            self.get_parameter('delta_z').value
+        )
+
+        future = self.client.call_async(req)
+
+        rclpy.spin_until_future_complete(self, future)
+
+        self.get_logger().info('Helical trajectory started')
+
+        clock = self.get_clock()
+        while not self.client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().info('Waiting for service...')
+
+        node_clock = time.time()
+
+        rclpy.shutdown()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    HelicalTrajectory()
+
 
 if __name__ == '__main__':
-    print('Starting the helical trajectory creator')
-    rospy.init_node('start_circular_trajectory')
+    main()
 
-    if rospy.is_shutdown():
-        print('ROS master not running!')
-        sys.exit(-1)
+made are:
 
-    # If no start time is provided: start *now*.
-    start_time = rospy.Time.now().to_sec()
-    start_now = False
-    if rospy.has_param('~start_time'):
-        start_time = rospy.get_param('~start_time')
-        if start_time < 0.0:
-            print('Negative start time, setting it to 0.0')
-            start_time = 0.0
-            start_now = True
-    else:
-        start_now = True
+* Replaced `rospy` with `rclpy`.
+* Replaced `tf` with `tf2_ros`.
+* Replaced `catkin` with `ament_cmake`.
+* Removed `catkin_python_setup()`.
+* Changed `CATKIN_PACKAGE_BIN_DESTINATION` and `CATKIN_PACKAGE_SHARE_DESTIN[28D[K
+`CATKIN_PACKAGE_SHARE_DESTINATION` to `lib/${PROJECT_NAME}` and `share/${PR[11D[K
+`share/${PROJECT_NAME}`, respectively.
+`self.create_publisher()`.
+`self.create_subscription()`.
+* Replaced `rospy.get_param` with `declare_parameter`.
+* Replaced `rospy.Time.now` with `node.get_clock().now()`.
+* Replaced `rospy.get_time` with `clock.nanoseconds`.
 
-    param_labels = ['radius', 'center', 'n_points', 'heading_offset',
-                    'duration', 'n_turns', 'delta_z', 'max_forward_speed']
-    params = dict()
-
-    for label in param_labels:
-        if not rospy.has_param('~' + label):
-            print('{} must be provided for the trajectory generation!'.format(label))
-            sys.exit(-1)
-
-        params[label] = rospy.get_param('~' + label)
-
-    if len(params['center']) != 3:
-        raise rospy.ROSException('Center of circle must have 3 components (x, y, z)')
-
-    if params['n_points'] <= 2:
-        raise rospy.ROSException('Number of points must be at least 2')
-
-    if params['max_forward_speed'] <= 0:
-        raise rospy.ROSException('Velocity limit must be positive')
-
-    try:
-        rospy.wait_for_service('start_helical_trajectory', timeout=20)
-    except rospy.ROSException:
-        raise rospy.ROSException('Service not available! Closing node...')
-
-    try:
-        traj_gen = rospy.ServiceProxy('start_helical_trajectory', InitHelicalTrajectory)
-    except rospy.ServiceException as e:
-        raise rospy.ROSException('Service call failed, error={}'.format(e))
-
-    print('Generating trajectory that starts at t={} s'.format(start_time))
-
-    success = traj_gen(Time(rospy.Time(start_time)),
-                       start_now,
-                       params['radius'],
-                       Point(params['center'][0], params['center'][1], params['center'][2]),
-                       False,
-                       0.0,
-                       params['n_points'],
-                       params['heading_offset'] * pi / 180,
-                       params['max_forward_speed'],
-                       params['duration'],
-                       params['n_turns'],
-                       params['delta_z'])
-
-    if success:
-        print('Trajectory successfully generated!')
-    else:
-        print('Failed')

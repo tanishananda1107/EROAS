@@ -1,137 +1,95 @@
-#!/usr/bin/env python
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from __future__ import print_function
-import rospy
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+import numpy as np
 from copy import deepcopy
-from tf_quaternion.transformations import euler_from_quaternion
+
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PolygonStamped, Point32
 from visualization_msgs.msg import Marker
-import numpy as np
 
 
-class VehicleFootprint:
+class VehicleFootprint(Node):
+
     MARKER = np.array([[0, 0.75], [-0.5, -0.25], [0.5, -0.25]])
 
     def __init__(self):
-        self._namespace = rospy.get_namespace().replace('/', '')
+        super().__init__('vehicle_footprint')
 
-        self._scale_footprint = 10
+        self.namespace = self.get_namespace().replace('/', '')
 
-        if rospy.has_param('~scale_footprint'):
-            scale = rospy.get_param('~scale_footprint')
-            if scale > 0:
-                self._scale_footprint = scale
-            else:
-                print('Scale factor should be greater than zero')
-        
-        print('Footprint marker scale factor= ', self._scale_footprint)
+        self.scale = 10.0
+        self.label_scale = 10.0
+        self.label_offset = 60.0
 
-        self._scale_label = 10
+        self.sub = self.create_subscription(
+            Odometry,
+            'odom',
+            self.callback,
+            10
+        )
 
-        if rospy.has_param('~_scale_label'):
-            scale = rospy.get_param('~_scale_label')
-            if scale > 0:
-                self._scale_label = scale
-            else:
-                print('Scale factor should be greater than zero')
-        
-        print('Label marker scale factor = ', self._scale_label)
+        self.pub_fp = self.create_publisher(PolygonStamped, 'footprint', 10)
+        self.pub_label = self.create_publisher(Marker, 'label', 10)
 
-        self._label_x_offset = 60
-        if rospy.get_param('~label_x_offset'):
-            self._label_x_offset = rospy.get_param('~label_x_offset')
-            
-        self._label_marker = Marker()
-        self._label_marker.header.frame_id = 'world'
-        self._label_marker.header.stamp = rospy.Time.now()
-        self._label_marker.ns = self._namespace
-        self._label_marker.type = Marker.TEXT_VIEW_FACING
-        self._label_marker.text = self._namespace
-        self._label_marker.action = Marker.ADD
-        self._label_marker.pose.orientation.x = 0.0
-        self._label_marker.pose.orientation.y = 0.0
-        self._label_marker.pose.orientation.z = 0.0
-        self._label_marker.pose.orientation.w = 1.0
-        self._label_marker.scale.x = 0.0
-        self._label_marker.scale.y = 0.0
-        self._label_marker.scale.z = self._scale_label
-        self._label_marker.color.a = 1.0
-        self._label_marker.color.r = 0.0
-        self._label_marker.color.g = 1.0
-        self._label_marker.color.b = 0.0
+        self.label = Marker()
+        self.label.header.frame_id = 'world'
+        self.label.ns = self.namespace
+        self.label.type = Marker.TEXT_VIEW_FACING
+        self.label.text = self.namespace
+        self.label.scale.z = self.label_scale
+        self.label.color.a = 1.0
+        self.label.color.g = 1.0
 
-        # Odometry subscriber (remap this topic in the launch file if necessary)
-        self._odom_sub = rospy.Subscriber('odom', Odometry, self.odometry_callback)
-        # Footprint marker publisher (remap this topic in the launch file if necessary)
-        self._footprint_pub = rospy.Publisher('footprint', PolygonStamped, queue_size=1)
-        # Vehicle label marker (remap this topic in the launch file if necessary)
-        self._label_pub = rospy.Publisher('label', Marker, queue_size=1)
-    
-    @staticmethod
-    def rot(alpha):
-        return np.array([[np.cos(alpha), -np.sin(alpha)],
-                         [np.sin(alpha), np.cos(alpha)]])
+    def rot(self, a):
+        return np.array([[np.cos(a), -np.sin(a)],
+                         [np.sin(a), np.cos(a)]])
 
-    def odometry_callback(self, msg):
+    def quat_to_yaw(self, q):
+        import math
+        siny = 2 * (q.w*q.z + q.x*q.y)
+        cosy = 1 - 2 * (q.y*q.y + q.z*q.z)
+        return math.atan2(siny, cosy)
+
+    def callback(self, msg):
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
 
-        orientation = np.array([msg.pose.pose.orientation.x,
-                                msg.pose.pose.orientation.y,
-                                msg.pose.pose.orientation.z,
-                                msg.pose.pose.orientation.w])
+        yaw = self.quat_to_yaw(msg.pose.pose.orientation)
 
-        yaw = euler_from_quaternion(orientation)[2]
+        marker = deepcopy(self.MARKER) * self.scale
 
-        # Generating the vehicle footprint marker
-        new_marker = self._scale_footprint * deepcopy(self.MARKER)
-
-        points = list()
-        for i in range(new_marker.shape[0]):
-            new_marker[i, :] = np.dot(self.rot(yaw - np.pi / 2), new_marker[i, :])
-            new_marker[i, 0] += x
-            new_marker[i, 1] += y
+        points = []
+        for i in range(3):
+            marker[i] = self.rot(yaw - np.pi/2).dot(marker[i])
+            marker[i][0] += x
+            marker[i][1] += y
 
             p = Point32()
-            p.x = new_marker[i, 0]
-            p.y = new_marker[i, 1]
+            p.x, p.y = float(marker[i][0]), float(marker[i][1])
             points.append(p)
 
-        new_poly = PolygonStamped()
-        new_poly.header.stamp = rospy.Time.now()
-        new_poly.header.frame_id = 'world'
-        new_poly.polygon.points = points
+        poly = PolygonStamped()
+        poly.header.frame_id = 'world'
+        poly.header.stamp = self.get_clock().now().to_msg()
+        poly.polygon.points = points
 
-        self._footprint_pub.publish(new_poly)
+        self.pub_fp.publish(poly)
 
-        # Generating the label marker
-        self._label_marker.pose.position.x = msg.pose.pose.position.x + self._label_x_offset
-        self._label_marker.pose.position.y = msg.pose.pose.position.y
-        self._label_marker.pose.position.z = msg.pose.pose.position.z 
+        self.label.pose.position.x = x + self.label_offset
+        self.label.pose.position.y = y
 
-        self._label_pub.publish(self._label_marker)
+        self.pub_label.publish(self.label)
+
+
+def main():
+    rclpy.init()
+    node = VehicleFootprint()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
 
 if __name__ == '__main__':
-    print('Generate RViz footprint and markers for 2D visualization')
-    rospy.init_node('generate_vehicle_footprint')
-
-    try:
-        node = VehicleFootprint()
-        rospy.spin()
-    except rospy.ROSInterruptException:
-        print('caught exception')
-    print('exiting')
+    main()

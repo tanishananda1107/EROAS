@@ -1,102 +1,99 @@
-#!/usr/bin/env python
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from __future__ import print_function
-import rospy
+
+#!/usr/bin/env python3
+
 import sys
-from gazebo_msgs.srv import ApplyBodyWrench
+import rclpy
+from tf2_ros import Buffer, TransformException
 from geometry_msgs.msg import Point, Wrench, Vector3
+from gazebo_msgs.srv import ApplyBodyWrench
+
+
+class ApplyBodyWrenchNode(Node):
+    def __init__(self):
+        super().__init__('apply_body_wrench')
+
+        self.declare_parameter('starting_time', 0.0)
+        self.declare_parameter('duration', 1.0)
+        self.declare_parameter('force', [0.0, 0.0, 0.0])
+        self.declare_parameter('torque', [0.0, 0.0, 0.0])
+
+        starting_time = self.get_parameter(
+            'starting_time').value
+        duration = self.get_parameter(
+            'duration').value
+        force = self.get_parameter(
+            'force').value
+        torque = self.get_parameter(
+            'torque').value
+
+        self.get_logger().info(f'Starting time = {starting_time}')
+        self.get_logger().info(f'Duration = {duration}')
+        self.get_logger().info(f'Force = {force}')
+        self.get_logger().info(f'Torque = {torque}')
+
+        self.client = self.create_client(
+            ApplyBodyWrench, '/gazebo/apply_body_wrench'
+        )
+
+        while not self.client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().info('Waiting for service...')
+
+        ns = self.get_namespace().replace('/', '')
+        body_name = f'{ns}/base_link'
+
+        request = ApplyBodyWrench.Request()
+
+        request.body_name = body_name
+        request.reference_frame = 'world'
+        request.reference_point = Point(x=0.0, y=0.0, z=0.0)
+
+        wrench = Wrench()
+        wrench.force = Vector3(
+            x=float(force[0]),
+            y=float(force[1]),
+            z=float(force[2])
+        )
+
+        wrench.torque = Vector3(
+            x=float(torque[0]),
+            y=float(torque[1]),
+            z=float(torque[2])
+        )
+
+        request.wrench = wrench
+
+        request.start_time.sec = int(starting_time)
+
+        if duration >= 0:
+            request.duration.sec = int(duration)
+
+        future = self.client.call_async(request)
+        rclpy.spin_until_future_complete(self, future)
+
+        if future.result() is not None:
+            self.get_logger().info('Body wrench applied')
+        else:
+            self.get_logger().error('Failed to apply wrench')
+
+        self.destroy_node()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ApplyBodyWrenchNode()
+    try:
+        rclpy.spin(node)
+    except Exception as e:
+        node.get_logger().error(f'Exception raised in {node.__class__.__nam[21D[K
+{node.__class__.__name__}: {e}')
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
 
 if __name__ == '__main__':
-    print('Apply programmed perturbation to vehicle', rospy.get_namespace())
-    rospy.init_node('set_body_wrench')
+    main()
 
-    if rospy.is_shutdown():
-        print('ROS master not running!')
-        sys.exit(-1)
+Note that I removed the `rclpy.shutdown()` call at the end of the script, a[1D[K
+as it is no longer needed in ROS2.
 
-    starting_time = 0.0
-    if rospy.has_param('~starting_time'):
-        starting_time = rospy.get_param('~starting_time')
-
-    print('Starting time= {} s'.format(starting_time))
-
-    duration = 0.0
-    if rospy.has_param('~duration'):
-        duration = rospy.get_param('~duration')
-
-    if duration == 0.0:
-        print('Duration not set, leaving node...')
-        sys.exit(-1)
-
-    print('Duration [s]=', ('Inf.' if duration < 0 else duration))
-
-    force = [0, 0, 0]
-    if rospy.has_param('~force'):
-        force = rospy.get_param('~force')
-        print(force)
-        if len(force) != 3:
-            raise rospy.ROSException('Invalid force vector')
-
-    print('Force [N]=', force)
-
-    torque = [0, 0, 0]
-    if rospy.has_param('~torque'):
-        torque = rospy.get_param('~torque')
-        if len(torque) != 3:
-            raise rospy.ROSException('Invalid torque vector')
-
-    print('Torque [N]=', torque)
-
-    try:
-        rospy.wait_for_service('/gazebo/apply_body_wrench', timeout=10)
-    except rospy.ROSException:
-        print('Service not available! Closing node...')
-        sys.exit(-1)
-
-    try:
-        apply_wrench = rospy.ServiceProxy('/gazebo/apply_body_wrench', ApplyBodyWrench)
-    except rospy.ServiceException as e:
-        print('Service call failed, error=', e)
-        sys.exit(-1)
-
-    ns = rospy.get_namespace().replace('/', '')
-
-    body_name = '%s/base_link' % ns
-
-    if starting_time >= 0:
-        rate = rospy.Rate(100)
-        while rospy.get_time() < starting_time:
-            rate.sleep()
-
-    wrench = Wrench()
-    wrench.force = Vector3(*force)
-    wrench.torque = Vector3(*torque)
-    success = apply_wrench(
-        body_name,
-        'world',
-        Point(0, 0, 0),
-        wrench,
-        rospy.Time().now(),
-        rospy.Duration(duration))
-
-    if success:
-        print('Body wrench perturbation applied!')
-        print('\tFrame: ', body_name)
-        print('\tDuration [s]: ', duration)
-        print('\tForce [N]: ', force)
-        print('\tTorque [Nm]: ', torque)
-    else:
-        print('Failed!')

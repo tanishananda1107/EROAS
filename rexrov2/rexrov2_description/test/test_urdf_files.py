@@ -1,60 +1,56 @@
-#!/usr/bin/env python
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from __future__ import print_function
-import rospy
-import unittest
-import subprocess
+#!/usr/bin/env python3
+
 import os
-
-PKG = 'rexrov2_description'
-NAME = 'test_urdf_files'
-
-import roslib
-roslib.load_manifest(PKG)
+import subprocess
+import unittest
+from ament_index_python.packages import get_package_share_directory
 
 
-def call_xacro(xml_file):
-    assert os.path.isfile(xml_file), 'Invalid XML xacro file'
-    return subprocess.check_output(['xacro', '--inorder', xml_file])
+def call_xacro(file_path):
+    assert os.path.isfile(file_path), f"Invalid xacro file: {file_path}"
+
+    return subprocess.check_output(
+        ['xacro', file_path],
+        text=True
+    )
 
 
 class TestRexROVURDFFiles(unittest.TestCase):
-    def test_xacro(self):
-        # Retrieve the root folder for the tests
-        test_dir = os.path.abspath(os.path.dirname(__file__))
-        robots_dir = os.path.join(test_dir, '..', 'robots')
+
+    def test_xacro_files(self):
+        pkg_path = get_package_share_directory('rexrov2_description')
+        robots_dir = os.path.join(pkg_path, 'robots')
+
+        self.assertTrue(os.path.isdir(robots_dir), "robots directory missing")
 
         for item in os.listdir(robots_dir):
             if 'oberon' in item:
                 continue
-            if not os.path.isfile(os.path.join(robots_dir, item)):
+
+            file_path = os.path.join(robots_dir, item)
+
+            if not os.path.isfile(file_path):
                 continue
-            output = call_xacro(os.path.join(robots_dir, item))
-            self.assertNotIn(
-                output, 
-                'XML parsing error',
-                'Parsing error found for file {}'.format(item))
-            self.assertNotIn(
-                output, 
-                'No such file or directory', 
-                'Some file not found in {}'.format(item))
+
+            try:
+                output = call_xacro(file_path)
+
+                self.assertNotIn(
+                    "XML parsing error",
+                    output,
+                    f"Parsing error found in {item}"
+                )
+
+                self.assertNotIn(
+                    "No such file or directory",
+                    output,
+                    f"Missing file reference in {item}"
+                )
+
+            except subprocess.CalledProcessError as e:
+                self.fail(f"xacro failed for {item}: {e}")
+
 
 if __name__ == '__main__':
-    import rosunit
-    rosunit.unitrun(PKG, NAME, TestRexROVURDFFiles)
-
-
-
+    import pytest
+    pytest.main()

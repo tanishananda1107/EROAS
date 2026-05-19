@@ -1,55 +1,49 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(uuv_control_msgs)
 
-find_package(catkin REQUIRED COMPONENTS 
-  std_msgs
-  geometry_msgs 
-  message_generation)
+if(CMAKE_VERSION VERSION_LESS 3.10)
+  set(CMAKE_CXX_STANDARD 11)
+else()
+  set(CMAKE_CXX_STANDARD 14)
+endif()
 
-add_message_files(
-  FILES
-  Trajectory.msg
-  TrajectoryPoint.msg
-  Waypoint.msg
-  WaypointSet.msg
- )
+if(CMAKE_COMPILER_IS_GNUCXX || CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
- ## Generate services in the 'srv' folder
- add_service_files(
-   FILES
-   AddWaypoint.srv
-   ClearWaypoints.srv
-   InitCircularTrajectory.srv
-   InitHelicalTrajectory.srv
-   InitWaypointsFromFile.srv
-   GetWaypoints.srv
-   GoTo.srv
-   GoToIncremental.srv
-   Hold.srv
-   IsRunningTrajectory.srv
-   InitWaypointSet.srv
-   InitRectTrajectory.srv
-   StartTrajectory.srv
-   SwitchToAutomatic.srv
-   SwitchToManual.srv
-   SetPIDParams.srv
-   GetPIDParams.srv
-   SetSMControllerParams.srv
-   GetSMControllerParams.srv
-   SetMBSMControllerParams.srv
-   GetMBSMControllerParams.srv
-   ResetController.srv
- )
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-  geometry_msgs
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Waypoint.msg"
+  "msg/Trajectory.msg"
+  "msg/TrajectoryPoint.msg"
+  "msg/WaypointSet.msg"
+  "srv/SetSMControllerParams.srv"
+  "srv/IsRunningTrajectory.srv"
+  "srv/InitCircularTrajectory.srv"
+  "srv/ClearWaypoints.srv"
+  "srv/SetMBSMControllerParams.srv"
+  "srv/SwitchToManual.srv"
+  "srv/GetMBSMControllerParams.srv"
+  "srv/InitWaypointSet.srv"
+  "srv/InitWaypointsFromFile.srv"
+  "srv/GetSMControllerParams.srv"
+  "srv/GoToIncremental.srv"
+  "srv/InitHelicalTrajectory.srv"
+  "srv/GetWaypoints.srv"
+  "srv/AddWaypoint.srv"
+  "srv/StartTrajectory.srv"
+  "srv/InitRectTrajectory.srv"
+  "srv/SwitchToAutomatic.srv"
+  "srv/ResetController.srv"
+  "srv/GetPIDParams.srv"
+  "srv/GoTo.srv"
+  "srv/SetPIDParams.srv"
+  "srv/Hold.srv"
 )
 
-catkin_package(
-  CATKIN_DEPENDS
-    std_msgs 
-    geometry_msgs 
-    message_runtime
-)
+ament_package()

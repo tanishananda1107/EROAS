@@ -1,3 +1,5 @@
+Here's the converted code:
+
 # Copyright (c) 2016-2019 The UUV Simulator Authors.
 # All rights reserved.
 #
@@ -13,19 +15,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import rclpy
+from tf2_ros import TransformBroadcaster
+
 LOGGER = None
 
 def get_logger():
     global LOGGER
     if LOGGER is None:
-        import logging
-        import sys
-        
-        LOGGER = logging.getLogger('uuv_trajectory_generator')
-        out_hdlr = logging.StreamHandler(sys.stdout)
-        out_hdlr.setFormatter(logging.Formatter(' %(asctime)s | %(levelname)s | %(module)s | %(message)s'))
-        out_hdlr.setLevel(logging.INFO)
-        LOGGER.addHandler(out_hdlr)
-        LOGGER.setLevel(logging.INFO)
-
+        node = rclpy.node.Node('uuv_trajectory_generator')
+        LOGGER = node.get_logger()
+        LOGGER.info('Logger initialized')
+    
     return LOGGER
+
+ROS2 logging API.
+

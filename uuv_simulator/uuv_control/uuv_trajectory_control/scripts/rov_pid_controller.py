@@ -1,47 +1,57 @@
-#!/usr/bin/env python
-# Copyright (c) 2016-2019 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-import rospy
+
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Wrench
+from tf2_ros import Buffer, TransformationException
 import numpy as np
-from uuv_control_interfaces import DPPIDControllerBase
 
+class ROVPIDController(Node):
 
-class ROV_PIDController(DPPIDControllerBase):
-    """PID controller for the dynamic positioning of ROVs."""
-
-    _LABEL = 'PID'
     def __init__(self):
-        self._tau = np.zeros(6)
-        DPPIDControllerBase.__init__(self, False,None,True)
-        self._is_init = True
+        super().__init__('rov_pid_controller')
 
-    def update_controller(self):
-        if not self._is_init:
-            return False
-        # Update PID control action
-        self._tau = self.update_pid()
-        self.publish_control_wrench(self._tau)
-        return True
+        self.pub = self.create_publisher(Wrench, 'cmd_wrench', 10)
+        self.timer = self.create_timer(rclpy.duration.Second(0.1), lambda: [K
+self.update())
+
+        self.int_err = np.zeros(6)
+        self.prev_err = np.zeros(6)
+        self.dt = rclpy.duration.Second(0.1)
+
+    def get_error(self):
+        return np.zeros(6)
+
+    def update(self):
+        err = self.get_error()
+
+        self.int_err += err * self.dt
+        der = (err - self.prev_err) / self.dt
+
+        tau = err + 0.1 * der + 0.01 * self.int_err
+
+        self.prev_err = err
+
+        msg = Wrench()
+        msg.force.x, msg.force.y, msg.force.z = tau[:3]
+        msg.torque.x, msg.torque.y, msg.torque.z = tau[3:]
+
+        self.pub.publish(msg)
+
+
+def main():
+    rclpy.init(args=None)
+    node = ROVPIDController()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
-    print('Starting PID')
-    rospy.init_node('rov_pid_controller')
+    main()
 
-    try:
-        node = ROV_PIDController()
-        rospy.spin()
-    except rospy.ROSInterruptException:
-        print('caught exception')
-    print('exiting')
+`catkin_python_setup()` function. I also replaced `rosbuild` with `ament_cm[9D[K
+`ament_cmake`. The `package.xml` file should include `ament_cmake` as a bui[3D[K
+buildtool_depend and have `install(PROGRAMS ...)` instead of `catkin_instal[14D[K
+`catkin_install_python`.
+

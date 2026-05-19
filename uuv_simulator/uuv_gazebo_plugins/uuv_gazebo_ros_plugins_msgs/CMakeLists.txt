@@ -1,41 +1,35 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(uuv_gazebo_ros_plugins_msgs)
 
-find_package(catkin REQUIRED COMPONENTS
-  std_msgs
-  geometry_msgs
-  message_generation)
+if(CMAKE_VERSION VERSION_LESS 3.10)
+  set(CMAKE_CXX_STANDARD 11)
+else()
+  set(CMAKE_CXX_STANDARD 14)
+endif()
 
-add_message_files(
-  FILES
-  FloatStamped.msg
-  UnderwaterObjectModel.msg
-  ThrusterConversionFcn.msg
+if(CMAKE_COMPILER_IS_GNUCXX || CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/FloatStamped.msg"
+  "msg/UnderwaterObjectModel.msg"
+  "msg/ThrusterConversionFcn.msg"
+  "srv/SetUseGlobalCurrentVel.srv"
+  "srv/GetThrusterState.srv"
+  "srv/GetFloat.srv"
+  "srv/GetThrusterConversionFcn.srv"
+  "srv/SetThrusterState.srv"
+  "srv/GetListParam.srv"
+  "srv/SetFloat.srv"
+  "srv/GetModelProperties.srv"
+  "srv/GetThrusterEfficiency.srv"
+  "srv/SetThrusterEfficiency.srv"
 )
 
-add_service_files(
-  FILES
-  SetThrusterEfficiency.srv
-  SetThrusterState.srv
-  GetThrusterEfficiency.srv
-  GetThrusterState.srv
-  SetUseGlobalCurrentVel.srv
-  GetModelProperties.srv
-  SetFloat.srv
-  GetFloat.srv
-  GetListParam.srv
-  GetThrusterConversionFcn.srv
-)
-
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-  geometry_msgs
-)
-
-catkin_package(
-   CATKIN_DEPENDS
-    std_msgs
-    geometry_msgs
-    message_runtime
-)
+ament_package()

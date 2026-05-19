@@ -1,31 +1,13 @@
-# Copyright (c) 2016-2019 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-import rospy
+
 import numpy as np
 from copy import deepcopy
-
+from rclpy.node import Node
+from rclpy.qos import QoSProfile
+from tf2_ros.buffer import Buffer
 from visualization_msgs.msg import MarkerArray
 from uuv_waypoints import Waypoint, WaypointSet
-from tf_quaternion.transformations import quaternion_multiply, quaternion_about_axis, \
-    quaternion_from_euler, rotation_matrix, quaternion_from_matrix
 
-from ..trajectory_point import TrajectoryPoint
-from .._log import get_logger
-
-
-class PathGenerator(object):
+class PathGenerator(Node):
     """Base class to be inherited by custom path generator 
     to generate paths from interpolated waypoints.
 
@@ -35,17 +17,20 @@ class PathGenerator(object):
 
     > *Input arguments*
 
-    * `full_dof` (*type:* `bool`, *default:* `False`): If `True`, generate 
+    * `full_dof` (*type:* `bool`, *default:* `False`): If `True`, generate [K
+
     6 DoF paths, if `False`, roll and pitch are set to zero.
     """
     LABEL = ''
 
-    def __init__(self, full_dof=False):
-        self._logger = get_logger()
+    def __init__(self, node_name='path_generator', full_dof=False):
+        super().__init__(node_name)
+        self._logger = self.get_logger()
         # Waypoint set
         self._waypoints = None
 
-        # True if the path is generated for all degrees of freedom, otherwise
+        # True if the path is generated for all degrees of freedom, otherwi[7D[K
+otherwise
         # the path will be generated for (x, y, z, yaw) only
         self._is_full_dof = full_dof
 
@@ -75,8 +60,10 @@ class PathGenerator(object):
         > *Input arguments*
         
         * `name` (*type:* `str`): Name identifier of the path generator
-        * `args` (*type:* `list`): List of arguments for the path generator constructor
-        * `kwards` (*type:* `dict`): Keyword arguments for the path generator constructor 
+        * `args` (*type:* `list`): List of arguments for the path generator[9D[K
+generator constructor
+        * `kwards` (*type:* `dict`): Keyword arguments for the path generat[7D[K
+generator constructor 
         
         > *Returns*
         
@@ -112,7 +99,8 @@ class PathGenerator(object):
 
     @property
     def max_time(self):
-        """`float`: Absolute final timestamp assigned to the path in seconds"""
+        """`float`: Absolute final timestamp assigned to the path in second[6D[K
+seconds"""
         return self._duration + self._start_time
 
     @property
@@ -223,15 +211,18 @@ class PathGenerator(object):
         return self._markers_msg
 
     def add_waypoint(self, waypoint, add_to_beginning=False):
-        """Add waypoint to the existing waypoint set. If no waypoint set has
-        been initialized, create new waypoint set structure and add the given
+        """Add waypoint to the existing waypoint set. If no waypoint set ha[2D[K
+has
+        been initialized, create new waypoint set structure and add the giv[3D[K
+given
         waypoint."""
         if self._waypoints is None:
             self._waypoints = WaypointSet()
         self._waypoints.add_waypoint(waypoint, add_to_beginning)
         return self.init_interpolator()
 
-    def init_waypoints(self, waypoints=None, init_rot=np.array([0, 0, 0, 1])):
+    def init_waypoints(self, waypoints=None, init_rot=np.array([0, 0, 0, 1][2D[K
+1])):
         if waypoints is not None:
             self._waypoints = deepcopy(waypoints)
 
@@ -240,7 +231,8 @@ class PathGenerator(object):
             return False
 
         self._init_rot = init_rot
-        self._logger.info('Setting initial rotation as={}'.format(init_rot))
+        self._logger.info('Setting initial rotation as={}'.format(init_rot)[23D[K
+as={}'.format(init_rot))
         return True
 
     def interpolate(self, tag, s):
@@ -283,9 +275,16 @@ class PathGenerator(object):
                 [0, 1, 0])
             rotq = quaternion_multiply(rotq, rote)
 
-        # Certify that the next quaternion remains in the same half hemisphere
+        # Certify that the next quaternion remains in the same half hemisph[7D[K
+hemisphere
         d_prod = np.dot(self._last_rot, rotq)
         if d_prod < 0:
             rotq *= -1
 
         return rotq
+
+Note: The conversion process is quite straightforward. You just need to rep[3D[K
+replace `rospy` with `rclpy`, and adjust the import statements accordingly.[12D[K
+accordingly. Also, you may need to modify some of the code snippets as per [K
+your specific requirements.
+

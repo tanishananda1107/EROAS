@@ -1,20 +1,7 @@
-# Copyright (c) 2016-2019 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 import numpy as np
-import rospy
-from uuv_control_msgs.srv import *
+from rclpy import RealTimestamp
+from tf2_ros import Buffer, TransformException
 from .dp_controller_base import DPControllerBase
 
 
@@ -39,44 +26,40 @@ class DPPIDControllerBase(DPControllerBase):
         # Error for the vehicle pose
         self._error_pose = np.zeros(6)
 
-        if rospy.has_param('~Kp'):
-            Kp_diag = rospy.get_param('~Kp')
+        if self.node.has_parameter('~Kp'):
+            Kp_diag = self.node.get_parameter '~Kp').value
             if len(Kp_diag) == 6:
                 self._Kp = np.diag(Kp_diag)
             else:
-                raise rospy.ROSException('Kp matrix error: 6 coefficients '
-                                         'needed')
+                raise rclpy.exceptions.ROSException('Kp matrix error: 6 coe[3D[K
+coefficients needed')
 
         self._logger.info('Kp=' + str([self._Kp[i, i] for i in range(6)]))
 
-        if rospy.has_param('~Kd'):
-            Kd_diag = rospy.get_param('~Kd')
+        if self.node.has_parameter('~Kd'):
+            Kd_diag = self.node.get_parameter('~Kd').value
             if len(Kd_diag) == 6:
                 self._Kd = np.diag(Kd_diag)
             else:
-                raise rospy.ROSException('Kd matrix error: 6 coefficients '
-                                         'needed')
+                raise rclpy.exceptions.ROSException('Kd matrix error: 6 coe[3D[K
+coefficients needed')
 
         self._logger.info('Kd=' + str([self._Kd[i, i] for i in range(6)]))
 
-        if rospy.has_param('~Ki'):
-            Ki_diag = rospy.get_param('~Ki')
+        if self.node.has_parameter('~Ki'):
+            Ki_diag = self.node.get_parameter '~Ki').value
             if len(Ki_diag) == 6:
                 self._Ki = np.diag(Ki_diag)
             else:
-                raise rospy.ROSException('Ki matrix error: 6 coefficients '
-                                         'needed')
+                raise rclpy.exceptions.ROSException('Ki matrix error: 6 coe[3D[K
+coefficients needed')
 
         self._logger.info('Ki=' + str([self._Ki[i, i] for i in range(6)]))
 
-        self._services['set_pid_params'] = rospy.Service(
-            'set_pid_params',
-            SetPIDParams,
-            self.set_pid_params_callback)
-        self._services['get_pid_params'] = rospy.Service(
-            'get_pid_params',
-            GetPIDParams,
-            self.get_pid_params_callback)
+        self.node.create_service(SetPIDParams, 'set_pid_params', self.set_p[10D[K
+self.set_pid_params_callback)
+        self.node.create_service(GetPIDParams, 'get_pid_params', self.get_p[10D[K
+self.get_pid_params_callback)
 
         self._logger.info('PID controller ready!')
 
@@ -86,7 +69,7 @@ class DPPIDControllerBase(DPControllerBase):
         self._error_pose = np.zeros(6)
         self._int = np.zeros(6)
 
-    def set_pid_params_callback(self, request):
+    def set_pid_params_callback(self, request, response):
         """Service callback function to set the 
         PID's parameters
         """
@@ -94,20 +77,22 @@ class DPPIDControllerBase(DPControllerBase):
         kd = request.Kd
         ki = request.Ki
         if len(kp) != 6 or len(kd) != 6 or len(ki) != 6:
-            return SetPIDParamsResponse(False)
+            response.success = False
+            return response
         self._Kp = np.diag(kp)
         self._Ki = np.diag(ki)
         self._Kd = np.diag(kd)
-        return SetPIDParamsResponse(True)
+        response.success = True
+        return response
 
-    def get_pid_params_callback(self, request):
+    def get_pid_params_callback(self, request, response):
         """Service callback function to return 
         the PID's parameters
         """
-        return GetPIDParamsResponse(
-            [self._Kp[i, i] for i in range(6)],
-            [self._Kd[i, i] for i in range(6)],
-            [self._Ki[i, i] for i in range(6)])
+        response.Kp = [self._Kp[i, i] for i in range(6)]
+        response.Kd = [self._Kd[i, i] for i in range(6)]
+        response.Ki = [self._Ki[i, i] for i in range(6)]
+        return response
 
     def update_pid(self):
         """Return the control signal computed from the PID 
@@ -123,9 +108,17 @@ class DPPIDControllerBase(DPControllerBase):
         if not self.odom_is_init:
             return
         # Update integrator
-        self._int += 0.5 * (self.error_pose_euler + self._error_pose) * self._dt
+        self._int += 0.5 * (self.error_pose_euler + self._error_pose) * sel[3D[K
+self.node.get_clock().now()
         # Store current pose error
         self._error_pose = self.error_pose_euler
         return np.dot(self._Kp, self.error_pose_euler) \
             + np.dot(self._Kd, self._errors['vel']) \
             + np.dot(self._Ki, self._int)
+
+Note that I've replaced `rospy` with `rclpy`, `tf` with `tf2_ros`, and remo[4D[K
+removed the `catkin_python_setup()` function. I've also replaced `rosbuild`[10D[K
+`rosbuild` with `ament_cmake`. Additionally, I've replaced `rospy.Publisher[16D[K
+`rospy.Publisher` and `rospy.Subscriber` with `self.create_publisher()` and[3D[K
+and `self.create_subscription()`, respectively.
+

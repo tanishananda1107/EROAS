@@ -1,20 +1,6 @@
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-import numpy
-
+import rclpy
+from tf2_ros import Buffer, TransformListener
 
 class PIDRegulator:
     """A very basic 1D PID Regulator."""
@@ -48,9 +34,66 @@ class PIDRegulator:
         self.prev_err = err
         self.prev_t = t
 
-        if (numpy.linalg.norm(u) > self.sat):
+        if numpy.linalg.norm(u) > self.sat:
             # controller is in saturation: limit outpt, reset integral
             u = self.sat*u/numpy.linalg.norm(u)
             self.integral = 0.0
 
         return u
+
+class PIDRegulatorNode(rclpy.node.Node):
+    def __init__(self):
+        super().__init__('pid_regulator_node')
+        
+        self.p = self.declare_parameter('p').get_value()
+        self.i = self.declare_parameter('i').get_value()
+        self.d = self.declare_parameter('d').get_value()
+        self.sat = self.declare_parameter('sat').get_value()
+
+        self.integral = 0
+        self.prev_err = 0
+        self.prev_t = -1.0
+
+    def regulate(self, err):
+        derr_dt = 0.0
+        dt = self.get_clock().now().nanoseconds - self.prev_t
+        if self.prev_t > 0 and dt > 0:
+            derr_dt = (err - self.prev_err)/dt
+            self.integral += 0.5*(err + self.prev_err)*dt
+
+        u = self.p*err + self.d*derr_dt + self.i*self.integral
+
+        self.prev_err = err
+        self.prev_t = self.get_clock().now().nanoseconds
+
+        if numpy.linalg.norm(u) > self.sat:
+            # controller is in saturation: limit outpt, reset integral
+            u = self.sat*u/numpy.linalg.norm(u)
+            self.integral = 0.0
+
+        return u
+
+    def main(self):
+        err_pub = self.create_publisher('pid_regulator_err', 10)
+        err_sub = self.create_subscription('pid_regulator_err', 10, self.er[7D[K
+self.err_callback)
+
+        while rclpy.node.get_time() < self.get_clock().now().nanoseconds + [K
+1000:
+            err = # get your error here
+            u = self.regulate(err)
+            err_pub.publish(u)
+
+    def err_callback(self, msg):
+        # callback for errors from the PID regulator node
+        pass
+
+if __name__ == '__main__':
+    rclpy.init()
+    node = PIDRegulatorNode()
+    try:
+        node.main()
+    except KeyboardInterrupt:
+        pass
+
+

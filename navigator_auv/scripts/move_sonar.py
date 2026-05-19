@@ -1,39 +1,77 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-import rospy
-import math
+import rclpy
+
+from rclpy.node import Node
+
 from std_msgs.msg import Float64
 
-def move_sonar():
-    rospy.init_node('move_sonar')
-    pub = rospy.Publisher('/rexrov2/sonar_joint_position_controller/command', Float64, queue_size=10)
 
-    rospy.sleep(10)  # Wait for the publisher to be ready
+class MoveSonar(Node):
 
-    rate = rospy.Rate(10)  # 10 Hz for smoother motion
+    def __init__(self):
 
-    amplitude = 0.45  # Maximum angle (radians) from center
-    frequency = 0.05   # Frequency of the oscillation (Hz)
+        super().__init__('move_sonar')
 
-    while not rospy.is_shutdown():
-        # Calculate the time
-        current_time = rospy.get_time()
-        
-        # Calculate the sinusoidal position
-        #position = amplitude * math.sin(2 * math.pi * frequency * current_time + math.pi/2)
-        position=0.6
-        # Create and publish the Float64 message
+        self.publisher = self.create_publisher(
+            Float64,
+            '/rexrov2/sonar_joint_position_controller/command',
+            10
+        )
+
+        self.angle = -1.0
+
+        self.direction = 1.0
+
+        self.timer = self.create_timer(
+            0.1,
+            self.timer_callback
+        )
+
+        self.get_logger().info(
+            'Move Sonar Started'
+        )
+
+    def timer_callback(self):
+
         msg = Float64()
-        msg.data = position
-        pub.publish(msg)
-        
-        #rospy.loginfo("Publishing position: %.2f radians", position)
-        
-        # Sleep to maintain the rate
-        rate.sleep()
+
+        msg.data = self.angle
+
+        self.publisher.publish(msg)
+
+        self.angle += 0.05 * self.direction
+
+        if self.angle > 1.0:
+
+            self.direction = -1.0
+
+        elif self.angle < -1.0:
+
+            self.direction = 1.0
+
+
+def main(args=None):
+
+    rclpy.init(args=args)
+
+    node = MoveSonar()
+
+    try:
+
+        rclpy.spin(node)
+
+    except KeyboardInterrupt:
+
+        pass
+
+    finally:
+
+        node.destroy_node()
+
+        rclpy.shutdown()
+
 
 if __name__ == '__main__':
-    try:
-        move_sonar()
-    except rospy.ROSInterruptException:
-        pass
+
+    main()

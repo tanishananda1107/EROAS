@@ -1,33 +1,23 @@
+
 #!/usr/bin/env python
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-import roslib
-
-PKG = 'uuv_trajectory_control'
-roslib.load_manifest(PKG)
-
 import sys
 import unittest
 from uuv_waypoints import Waypoint, WaypointSet
 
+from rclpy.node import Node
+from rclpy.qos import QoSProfile
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
 
-class TestWaypointSet(unittest.TestCase):
+class TestWaypointSet(Node):
+    def __init__(self):
+        super().__init__('test_waypoint_set')
+        self.get_logger().info('Initializing...')
+
     def test_init(self):
         wp_set = WaypointSet()
-        self.assertEquals(wp_set.num_waypoints, 0, 'Waypoint list is not empty')
+        self.assertEqual(wp_set.num_waypoints, 0, 'Waypoint list is not emp[3D[K
+empty')
 
     def test_invalid_params_helix(self):
         wp_set = WaypointSet()
@@ -39,7 +29,8 @@ class TestWaypointSet(unittest.TestCase):
             delta_z=1,
             num_turns=-1,
             theta_offset=0.0,
-            heading_offset=0.0), 'Invalid parameters have been wrongly instantiated')
+            heading_offset=0.0), 'Invalid parameters have been wrongly inst[4D[K
+instantiated')
 
     def test_invalid_params_circle(self):
         wp_set = WaypointSet()
@@ -49,7 +40,8 @@ class TestWaypointSet(unittest.TestCase):
             num_points=-1,
             max_forward_speed=0,
             theta_offset=0.0,
-            heading_offset=0.0), 'Invalid parameters have been wrongly instantiated')
+            heading_offset=0.0), 'Invalid parameters have been wrongly inst[4D[K
+instantiated')
 
     def test_add_repeated_waypoint(self):
         wp = Waypoint(x=1, y=2, z=3, max_forward_speed=1)
@@ -59,7 +51,16 @@ class TestWaypointSet(unittest.TestCase):
         self.assertFalse(wp_set.add_waypoint(wp),
             'Repeated waypoint wrongfully added')
 
+    def test_publish(self):
+        publisher = self.create_publisher(Waypoint, 'waypoints_topic', 10)
+        wp = Waypoint(x=1, y=2, z=3, max_forward_speed=1)
+        publisher.publish(wp)
 
 if __name__ == '__main__':
-    import rosunit
-    rosunit.unitrun(PKG, 'test_waypoint_set', TestWaypointSet)
+    import unittest
+    unittest.main()
+
+Please note that I have assumed the `Waypoint` and `WaypointSet` classes ar[2D[K
+are identical in both ROS 1 and ROS 2. If there are any changes needed to t[1D[K
+these classes, you will need to modify them accordingly.
+

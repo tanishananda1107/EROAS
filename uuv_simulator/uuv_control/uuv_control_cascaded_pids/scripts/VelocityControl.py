@@ -1,112 +1,60 @@
-#!/usr/bin/env python
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-import numpy
-import rospy
-from dynamic_reconfigure.server import Server
-import geometry_msgs.msg as geometry_msgs
+import numpy as np
+from typing import Dict, List
+import rclpy
+from rclpy.node import Node
+from tf2_ros import TransformListener
+from geometry_msgs.msg import Twist, Accel
 from nav_msgs.msg import Odometry
-import tf.transformations as trans
-from rospy.numpy_msg import numpy_msg
 
-# Modules included in this package
-from PID import PIDRegulator
-from uuv_control_cascaded_pid.cfg import VelocityControlConfig
-
-
-class VelocityControllerNode:
+class VelocityController(Node):
     def __init__(self):
-        print('VelocityControllerNode: initializing node')
+        super().__init__('velocity_control')
+        
+        self.v_des = np.zeros(3)
+        self.w_des = np.zeros(3)
 
-        self.config = {}
+        self.sub_cmd = self.create_subscription(
+            Twist, 'cmd_vel', self.cb_cmd, 10)
 
-        self.v_linear_des = numpy.zeros(3)
-        self.v_angular_des = numpy.zeros(3)
+        self.sub_odom = self.create_subscription(
+            Odometry, 'odom', self.cb_odom, 10)
 
-        # Initialize pids with default parameters
-        self.pid_angular = PIDRegulator(1, 0, 0, 1)
-        self.pid_linear = PIDRegulator(1, 0, 0, 1)
+        self.pub = self.create_publisher(Accel, 'cmd_accel', 10)
+        
+    def cb_cmd(self, msg):
+        self.v_des = np.array([msg.linear.x, msg.linear.y, msg.linear.z])
+        self.w_des = np.array([msg.angular.x, msg.angular.y, msg.angular.z][14D[K
+msg.angular.z])
 
-        # ROS infrastructure
-        self.sub_cmd_vel = rospy.Subscriber('cmd_vel', numpy_msg(geometry_msgs.Twist), self.cmd_vel_callback)
-        self.sub_odometry = rospy.Subscriber('odom', numpy_msg(Odometry), self.odometry_callback)
-        self.pub_cmd_accel = rospy.Publisher('cmd_accel', geometry_msgs.Accel, queue_size=10)
-        self.srv_reconfigure = Server(VelocityControlConfig, self.config_callback)
+    def cb_odom(self, msg):
 
-    def cmd_vel_callback(self, msg):
-        """Handle updated set velocity callback."""
-        # Just store the desired velocity. The actual control runs on odometry callbacks
-        v_l = msg.linear
-        v_a = msg.angular
-        self.v_linear_des = numpy.array([v_l.x, v_l.y, v_l.z])
-        self.v_angular_des = numpy.array([v_a.x, v_a.y, v_a.z])
+        v = msg.twist.twist.linear
+        w = msg.twist.twist.angular
 
-    def odometry_callback(self, msg):
-        """Handle updated measured velocity callback."""
-        if not bool(self.config):
-            return
+        v = np.array([v.x, v.y, v.z])
+        w = np.array([w.x, w.y, w.z])
 
-        linear = msg.twist.twist.linear
-        angular = msg.twist.twist.angular
-        v_linear = numpy.array([linear.x, linear.y, linear.z])
-        v_angular = numpy.array([angular.x, angular.y, angular.z])
+        err_v = self.v_des - v
+        err_w = self.w_des - w
 
-        if self.config['odom_vel_in_world']:
-            # This is a temp. workaround for gazebo's pos3d plugin not behaving properly:
-            # Twist should be provided wrt child_frame, gazebo provides it wrt world frame
-            # see http://docs.ros.org/api/nav_msgs/html/msg/Odometry.html
-            xyzw_array = lambda o: numpy.array([o.x, o.y, o.z, o.w])
-            q_wb = xyzw_array(msg.pose.pose.orientation)
-            R_bw = trans.quaternion_matrix(q_wb)[0:3, 0:3].transpose()
+        cmd = Accel()
+        cmd.linear.x, cmd.linear.y, cmd.linear.z = err_v
+        cmd.angular.x, cmd.angular.y, cmd.angular.z = err_w
 
-            v_linear = R_bw.dot(v_linear)
-            v_angular = R_bw.dot(v_angular)
+        self.pub.publish(cmd)
 
-        # Compute compute control output:
-        t = msg.header.stamp.to_sec()
-        e_v_linear = (self.v_linear_des - v_linear)
-        e_v_angular = (self.v_angular_des - v_angular)
 
-        a_linear = self.pid_linear.regulate(e_v_linear, t)
-        a_angular = self.pid_angular.regulate(e_v_angular, t)
-
-        # Convert and publish accel. command:
-        cmd_accel = geometry_msgs.Accel()
-        cmd_accel.linear = geometry_msgs.Vector3(*a_linear)
-        cmd_accel.angular = geometry_msgs.Vector3(*a_angular)
-        self.pub_cmd_accel.publish(cmd_accel)
-
-    def config_callback(self, config, level):
-        """Handle updated configuration values."""
-        # config has changed, reset PID controllers
-        self.pid_linear = PIDRegulator(config['linear_p'], config['linear_i'], config['linear_d'], config['linear_sat'])
-        self.pid_angular = PIDRegulator(config['angular_p'], config['angular_i'], config['angular_d'], config['angular_sat'])
-
-        self.config = config
-
-        return config
+def main():
+    rclpy.init()
+    node = VelocityController()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':
-    print('starting VelocityControl.py')
-    rospy.init_node('velocity_control')
+    main()
 
-    try:
-        node = VelocityControllerNode()
-        rospy.spin()
-    except rospy.ROSInterruptException:
-        print('caught exception')
-    print('exiting')

@@ -1,34 +1,28 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(uuv_sensor_ros_plugins_msgs)
 
-find_package(catkin REQUIRED COMPONENTS
-    geometry_msgs
-    message_generation)
+if(CMAKE_VERSION VERSION_LESS 3.10)
+  set(CMAKE_CXX_STANDARD 11)
+else()
+  set(CMAKE_CXX_STANDARD 14)
+endif()
 
-add_message_files(
-  FILES
-  DVL.msg
-  DVLBeam.msg
-  PositionWithCovariance.msg
-  PositionWithCovarianceStamped.msg
-  ChemicalParticleConcentration.msg
-  Salinity.msg
+if(CMAKE_COMPILER_IS_GNUCXX || CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(geometry_msgs REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/ChemicalParticleConcentration.msg"
+  "msg/Salinity.msg"
+  "msg/DVLBeam.msg"
+  "msg/DVL.msg"
+  "msg/PositionWithCovariance.msg"
+  "msg/PositionWithCovarianceStamped.msg"
+  "srv/ChangeSensorState.srv"
 )
 
-add_service_files(
-  FILES
-  ChangeSensorState.srv
-)
-
-
-generate_messages(
-  DEPENDENCIES
-  geometry_msgs
-)
-
-catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES
-  CATKIN_DEPENDS geometry_msgs message_runtime
-# DEPENDS
-)
+ament_package()

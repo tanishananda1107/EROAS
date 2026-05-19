@@ -1,3 +1,5 @@
+Here's the converted code:
+
 #!/usr/bin/env python
 # Copyright (c) 2016 The UUV Simulator Authors.
 # All rights reserved.
@@ -13,81 +15,98 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from __future__ import print_function
-import rospy
+import os
+import rclpy
 from uuv_gazebo_ros_plugins_msgs.srv import SetThrusterState
+from tf2_ros import TransformException
 
+class ThrusterController:
+    def __init__(self):
+        self.create_publisher()
 
-if __name__ == '__main__':
-    print('Set the state of thrusters for vehicle, namespace=', rospy.get_namespace())
-    rospy.init_node('set_thrusters_states')
+    def main(self, *args, **kwargs):
+        print('Set the state of thrusters for vehicle, namespace=', self.ge[7D[K
+self.get_namespace())
+        rclpy.init()
+        node = rclpy.node.Node('set_thrusters_states')
 
-    if rospy.is_shutdown():
-        rospy.ROSException('ROS master not running!')
+        if node.is_shutdown():
+            raise rclpy.exceptions.ROSException('ROS master not running!')
 
-    starting_time = 0.0
-    if rospy.has_param('~starting_time'):
-        starting_time = rospy.get_param('~starting_time')
+        starting_time = 0.0
+        if node.has_parameter('~starting_time'):
+            starting_time = node.get_parameter '~starting_time').value
 
-    print('Starting time={} s'.format(starting_time))
+        print('Starting time={} s'.format(starting_time))
 
-    duration = 0.0
-    if rospy.has_param('~duration'):
-        duration = rospy.get_param('~duration')
+        duration = 0.0
+        if node.has_parameter('~duration'):
+            duration = node.get_parameter '~duration').value
 
-    if duration == 0.0:
-        raise rospy.ROSException('Duration not set, leaving node...')
+        if duration == 0.0:
+            raise rclpy.exceptions.ROSException('Duration not set, leaving [K
+node...')
 
-    print('Duration [s]=', ('Inf.' if duration < 0 else duration))
+        print('Duration [s]=', ('Inf.' if duration < 0 else duration))
 
-    if rospy.has_param('~is_on'):
-        is_on = bool(rospy.get_param('~is_on'))
-    else:
-        raise rospy.ROSException('State flag not provided')
+        is_on = None
+        if node.has_parameter('~is_on'):
+            is_on = node.get_parameter '~is_on').value
+        else:
+            raise rclpy.exceptions.ROSException('State flag not provided')
 
-    if rospy.has_param('~thruster_id'):
-        thruster_id = rospy.get_param('~thruster_id')
-    else:
-        raise rospy.ROSException('Thruster ID not given')
+        thruster_id = None
+        if node.has_parameter('~thruster_id'):
+            thruster_id = node.get_parameter '~thruster_id').value
+        else:
+            raise rclpy.exceptions.ROSException('Thruster ID not given')
 
-    if thruster_id < 0:
-        raise rospy.ROSException('Invalid thruster ID')
+        if thruster_id < 0:
+            raise rclpy.exceptions.ROSException('Invalid thruster ID')
 
-    print('Setting state of thruster #{} as {}'.format(thruster_id, 'ON' if is_on else 'OFF'))
+        print('Setting state of thruster #{} as {}'.format(thruster_id, 'ON[3D[K
+'ON' if is_on else 'OFF'))
 
-    vehicle_name = rospy.get_namespace().replace('/', '')
+        vehicle_name = self.get_namespace().replace('/', '')
 
-    srv_name = '/%s/thrusters/%d/set_thruster_state' % (vehicle_name, thruster_id)
+        srv_name = '/%s/thrusters/%d/set_thruster_state' % (vehicle_name, t[1D[K
+thruster_id)
 
-    try:
-        rospy.wait_for_service(srv_name, timeout=2)
-    except rospy.ROSException:
-        raise rospy.ROSException('Service not available! Closing node...')
+        try:
+            set_state = node.create_service(srv_name, SetThrusterState)
+        except rclpy.exceptions.ROSException as e:
+            raise rclpy.exceptions.ROSException('Service not available! Clo[3D[K
+Closing node...')
 
-    try:
-        set_state = rospy.ServiceProxy(srv_name, SetThrusterState)
-    except rospy.ServiceException as e:
-        raise rospy.ROSException('Service call failed, error=' + e)
-
-    rate = rospy.Rate(100)
-    while rospy.get_time() < starting_time:
-        rate.sleep()
-
-    success = set_state(is_on)
-
-    if success:
-        print('Time={} s'.format(rospy.get_time()))
-        print('Current state of thruster #{}={}'.format(thruster_id, 'ON' if is_on else 'OFF'))
-
-    if duration > 0:
-        rate = rospy.Rate(100)
-        while rospy.get_time() < starting_time + duration:
+        rate = node.get_clock().get_nanoseconds()
+        while node.get_clock().now() < starting_time:
             rate.sleep()
 
-        success = set_state(not is_on)
+        success = set_state(is_on)
 
         if success:
-            print('Time={} s'.format(rospy.get_time()))
-            print('Returning to previous state of thruster #{}={}'.format(thruster_id, 'ON' if not is_on else 'OFF'))
+            print('Time={} s'.format(node.get_clock().now()))
+            print('Current state of thruster #{}={}'.format(thruster_id, 'O[2D[K
+'ON' if is_on else 'OFF'))
 
-    print('Leaving node...')
+        if duration > 0:
+            rate = node.get_clock().get_nanoseconds()
+            while node.get_clock().now() < starting_time + duration:
+                rate.sleep()
+
+            success = set_state(not is_on)
+
+            if success:
+                print('Time={} s'.format(node.get_clock().now()))
+                print('Returning to previous state of thruster #{}={}'.form[12D[K
+#{}={}'.format(thruster_id, 'ON' if not is_on else 'OFF'))
+
+        print('Leaving node...')
+
+    def get_namespace(self):
+        return os.environ['ROS_NAMESPACE']
+
+if __name__ == '__main__':
+    controller = ThrusterController()
+    controller.main()
+

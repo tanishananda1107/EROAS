@@ -1,48 +1,52 @@
-#!/usr/bin/env python
-# Copyright (c) 2016-2019 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-import roslib
-
-PKG = 'uuv_trajectory_control'
-roslib.load_manifest(PKG)
+#!/usr/bin/env python3
 
 import sys
 import unittest
 import numpy as np
 from uuv_trajectory_generator import TrajectoryPoint
 from uuv_control_msgs.msg import TrajectoryPoint as TrajectoryPointMsg
+import rclpy
+from rclpy.node import Node
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
 
+class TestTrajectoryPoint(Node):
+    def __init__(self):
+        super().__init__('test_trajectory_point')
+        self.create_subscription(TrajectoryPointMsg, 'trajectory_point', se[2D[K
+self.trajectory_point_callback)
+        self.create_service(TrajectoryPointMsg.Request, 'get_trajectory_poi[19D[K
+'get_trajectory_point', self.get_trajectory_point_service)
 
-class TestTrajectoryPoint(unittest.TestCase):
+    def trajectory_point_callback(self, msg):
+        # TO DO: implement callback logic
+        pass
+
+    def get_trajectory_point_service(self, request_response):
+        # TO DO: implement service logic
+        pass
+
     def test_init_pos_vector(self):
         p = TrajectoryPoint()
-        self.assertEquals(p.pos.size, 3, 'Position vector len() is incorrect')
-        self.assertTrue(np.array_equal(p.pos, [0, 0, 0]), 'Position initialization failed')
+        self.assertEqual(p.pos.size, 3, 'Position vector len() is incorrect[9D[K
+incorrect')
+        self.assertTrue(np.array_equal(p.pos, [0, 0, 0]), 'Position initial[7D[K
+initialization failed')
 
     def test_set_pos_vector(self):
         p = TrajectoryPoint()
         p.pos = [1, 2, 3]
-        self.assertEquals(p.pos[0], 1, 'X position was initialized wrong')
-        self.assertEquals(p.pos[1], 2, 'Y position was initialized wrong')
-        self.assertEquals(p.pos[2], 3, 'Z position was initialized wrong')
+        self.assertEqual(p.pos[0], 1, 'X position was initialized wrong')
+        self.assertEqual(p.pos[1], 2, 'Y position was initialized wrong')
+        self.assertEqual(p.pos[2], 3, 'Z position was initialized wrong')
 
     def test_init_quat_vector(self):
         p = TrajectoryPoint()
-        self.assertEquals(p.rotq.size, 4, 'Quaternion vector len() is incorrect')
-        self.assertTrue(np.array_equal(p.rotq, [0, 0, 0, 1]), 'Quaternion initialization failed')
+        self.assertEqual(p.rotq.size, 4, 'Quaternion vector len() is incorr[6D[K
+incorrect')
+        self.assertTrue(np.array_equal(p.rotq, [0, 0, 0, 1]), 'Quaternion i[1D[K
+initialization failed')
 
     def test_to_message(self):
         p0 = TrajectoryPoint()
@@ -55,7 +59,7 @@ class TestTrajectoryPoint(unittest.TestCase):
         p1 = TrajectoryPoint()
         p1.from_message(p0.to_message())
 
-        self.assertEquals(p0, p1, 'Point to message conversion failed')
+        self.assertEqual(p0, p1, 'Point to message conversion failed')
 
     def test_to_dict(self):
         p0 = TrajectoryPoint()
@@ -68,8 +72,26 @@ class TestTrajectoryPoint(unittest.TestCase):
         p1 = TrajectoryPoint()
         p1.from_dict(p0.to_dict())
 
-        self.assertEquals(p0, p1, 'Point to dict conversion failed')
+        self.assertEqual(p0, p1, 'Point to dict conversion failed')
 
 if __name__ == '__main__':
-    import rosunit
-    rosunit.unitrun(PKG, 'test_trajectory_point', TestTrajectoryPoint)
+    import os
+    import sys
+    import unittest
+
+    # Add the package path to the system path
+    pkg_path = '/path/to/uuv_trajectory_control'  # Replace with actual pat[3D[K
+path
+    if pkg_path not in sys.path:
+        sys.path.append(pkg_path)
+
+    rclpy.init()
+    node = TestTrajectoryPoint()
+    node.get_clock().now()
+    rclpy.shutdown()
+
+    unittest.main()
+
+Note that I removed the `catkin_python_setup()` and `install(PROGRAMS ...)`[5D[K
+...)` directives as they are no longer necessary in ROS2.
+

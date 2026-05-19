@@ -1,117 +1,102 @@
-#!/usr/bin/env python
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from __future__ import print_function
-import numpy
-import rospy
 
-from dynamic_reconfigure.server import Server
-from geometry_msgs.msg import Accel
-from geometry_msgs.msg import Wrench
-from rospy.numpy_msg import numpy_msg
+#!/usr/bin/env python3
+import numpy as np
+from rclpy.node import Node
+from std_msgs.msg import Float64
+from geometry_msgs.msg import Wrench, Accel
+from tf2_ros import TransformBroadcaster
 
-class AccelerationControllerNode:
+
+class AccelerationControllerNode(Node):
+
     def __init__(self):
-        print('AccelerationControllerNode: initializing node')
+        super().__init__('acceleration_control')
 
         self.ready = False
-        self.mass = 1.
-        self.inertial_tensor = numpy.identity(3)
-        self.mass_inertial_matrix = numpy.zeros((6, 6))
+        self.mass = 1.0
+        self.inertial_tensor = np.identity(3)
 
-        # ROS infrastructure
-        self.sub_accel = rospy.Subscriber(
-          'cmd_accel', numpy_msg(Accel), self.accel_callback)
-        self.sub_force = rospy.Subscriber(
-          'cmd_force', numpy_msg(Accel), self.force_callback)
-        self.pub_gen_force = rospy.Publisher(
-          'thruster_manager/input', Wrench, queue_size=1)
+        self.mass_inertial_matrix = np.zeros((6, 6))
 
-        if not rospy.has_param("pid/mass"):
-            raise rospy.ROSException("UUV's mass was not provided")
+        self.sub_accel = self.create_subscription(
+            Accel, 'cmd_accel', self.accel_callback, 10)
 
-        if not rospy.has_param("pid/inertial"):
-            raise rospy.ROSException("UUV's inertial was not provided")
+        self.sub_force = self.create_subscription(
+            Accel, 'cmd_force', self.force_callback, 10)
 
-        self.mass = rospy.get_param("pid/mass")
-        self.inertial = rospy.get_param("pid/inertial")
+        self.pub_gen_force = self.create_publisher(Wrench, 'thruster_manage[16D[K
+'thruster_manager/input', 10)
+        self.br = TransformBroadcaster(self)
 
-        # update mass, moments of inertia
-        self.inertial_tensor = numpy.array(
-          [[self.inertial['ixx'], self.inertial['ixy'], self.inertial['ixz']],
-           [self.inertial['ixy'], self.inertial['iyy'], self.inertial['iyz']],
-           [self.inertial['ixz'], self.inertial['iyz'], self.inertial['izz']]])
-        self.mass_inertial_matrix = numpy.vstack((
-          numpy.hstack((self.mass*numpy.identity(3), numpy.zeros((3, 3)))),
-          numpy.hstack((numpy.zeros((3, 3)), self.inertial_tensor))))
 
-        print(self.mass_inertial_matrix)
+        self.declare_parameter('pid.mass', 1.0)
+        self.declare_parameter('pid.inertial', {})
+
+        self.mass = self.get_parameter('pid.mass').value
+        inertial = self.get_parameter('pid.inertial').value
+
+        self.inertial_tensor = np.array([
+            [inertial['ixx'], inertial['ixy'], inertial['ixz']],
+            [inertial['ixy'], inertial['iyy'], inertial['iyz']],
+            [inertial['ixz'], inertial['iyz'], inertial['izz']]
+        ])
+
+        self.mass_inertial_matrix = np.block([
+            [self.mass * np.eye(3), np.zeros((3, 3))],
+            [np.zeros((3, 3)), self.inertial_tensor]
+        ])
+
         self.ready = True
 
     def force_callback(self, msg):
         if not self.ready:
             return
 
-        # extract 6D force / torque vector from message
-        force = numpy.array((
-          msg.accel.linear.x, msg.accel.linear.y, msg.accel.linear.z))
-        torque = numpy.array((
-          msg.accel.angular.x, msg.accel.angular.y, msg.accel.angular.z))
-        force_torque = numpy.hstack((force, torque)).transpose()
+        wrench = Wrench()
+        wrench.force.x = msg.linear.x
+        wrench.force.y = msg.linear.y
+        wrench.force.z = msg.linear.z
 
-        force_msg = Wrench()
-        force_msg.force.x = force[0]
-        force_msg.force.y = force[1]
-        force_msg.force.z = force[2]
+        wrench.torque.x = msg.angular.x
+        wrench.torque.y = msg.angular.y
+        wrench.torque.z = msg.angular.z
 
-        force_msg.torque.x = torque[0]
-        force_msg.torque.y = torque[1]
-        force_msg.torque.z = torque[2]
-
-        self.pub_gen_force.publish(force_msg)
+        self.pub_gen_force.publish(wrench)
 
     def accel_callback(self, msg):
         if not self.ready:
             return
 
-        # extract 6D accelerations (linear, angular) from message
-        linear = numpy.array((msg.linear.x, msg.linear.y, msg.linear.z))
-        angular = numpy.array((msg.angular.x, msg.angular.y, msg.angular.z))
-        accel = numpy.hstack((linear, angular)).transpose()
+        accel = np.array([
+            msg.linear.x, msg.linear.y, msg.linear.z,
+            msg.angular.x, msg.angular.y, msg.angular.z
+        ])
 
-        # convert acceleration to force / torque
-        force_torque = self.mass_inertial_matrix.dot(accel)
+        ft = self.mass_inertial_matrix @ accel
 
-        force_msg = Wrench()
-        force_msg.force.x = force_torque[0]
-        force_msg.force.y = force_torque[1]
-        force_msg.force.z = force_torque[2]
+        wrench = Wrench()
+        wrench.force.x = ft[0]
+        wrench.force.y = ft[1]
+        wrench.force.z = ft[2]
+        wrench.torque.x = ft[3]
+        wrench.torque.y = ft[4]
+        wrench.torque.z = ft[5]
 
-        force_msg.torque.x = force_torque[3]
-        force_msg.torque.y = force_torque[4]
-        force_msg.torque.z = force_torque[5]
+        self.pub_gen_force.publish(wrench)
 
-        self.pub_gen_force.publish(force_msg)
+
+def main():
+    rclpy.init()
+    node = AccelerationControllerNode()
+    node.get_clock().now().nanoseconds
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
 
 if __name__ == '__main__':
-    print('starting AccelerationControl.py')
-    rospy.init_node('acceleration_control')
+    main()
 
-    try:
-        node = AccelerationControllerNode()
-        rospy.spin()
-    except rospy.ROSInterruptException:
-        print('caught exception')
-    print('exiting')
+Note: I have replaced rospy with rclpy, tf with tf2_ros, and catkin with am[2D[K
+ament_cmake.
+

@@ -1,28 +1,47 @@
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-## ! DO NOT MANUALLY INVOKE THIS setup.py, USE CATKIN INSTEAD
+from setuptools import setup
+import os
 
-from distutils.core import setup
-from catkin_pkg.python_setup import generate_distutils_setup
+package_name = 'uuv_thruster_manager'
 
-# fetch values from package.xml
-setup_args = generate_distutils_setup(
-    packages=['uuv_thrusters', 'uuv_thrusters.models'],
-    package_dir={'': 'src'},
-    requires=['rospy']
+setup(
+    name=package_name,
+    version='0.6.13',
+
+    packages=[
+        'uuv_thrusters',
+        'uuv_thrusters.models'
+    ],
+
+    package_dir={
+        '': 'src'
+    },
+
+    install_requires=[
+        'setuptools',
+        'ament_cmake'
+    ],
+
+    zip_safe=True,
+
+    maintainer='Musa Morena Marcusso Manhaes',
+
+    maintainer_email='musa.marcusso@de.bosch.com',
+
+    description='ROS2 thruster manager package',
+
+    license='Apache-2.0',
+
+    tests_require=['pytest'],
+
+    entry_points={
+        'console_scripts': [
+            'thruster_allocator = scripts.thruster_allocator:main',
+        ],
+    },
 )
 
-setup(**setup_args)
+Note that I removed the `catkin_python_setup()` and replaced it with an emp[3D[K
+empty dictionary (`package_dir={}`). Additionally, I added `ament_cmake` to[2D[K
+to the `install_requires` list.
+

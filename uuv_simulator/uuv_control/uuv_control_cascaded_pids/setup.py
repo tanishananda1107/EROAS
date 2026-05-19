@@ -1,28 +1,42 @@
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-## ! DO NOT MANUALLY INVOKE THIS setup.py, USE CATKIN INSTEAD
+from setuptools import setup
+from ament_index_python.packages import Packages
 
-from distutils.core import setup
-from catkin_pkg.python_setup import generate_distutils_setup
+package_name = 'uuv_control_cascaded_pid'
 
-# fetch values from package.xml
-setup_args = generate_distutils_setup(
-    packages=['PID'],
-    package_dir={'': 'src'},
-    requires=['rospy']
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=[package_name],
+    package_dir={'': '.'},
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['ament_cmake'],
+    zip_safe=True,
+    maintainer='user',
+    maintainer_email='user@todo.com',
+    description='ROS2 cascaded PID controllers',
+    license='Apache-2.0',
 )
 
-setup(**setup_args)
+And the `package.xml` file:
+
+<?xml version="1.0"?>
+<package>
+  <name>uuv_control_cascaded_pid</name>
+  <version>0.0.0</version>
+  <dependencies>
+    <build_depend>ament_cmake</build_depend>
+  </dependencies>
+  <build_depend>rclpy</build_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+</package>
+
+Note that I removed the `catkin` package and replaced it with `ament_cmake`[13D[K
+`ament_cmake`. I also updated the `install_requires` list to include only `[1D[K
+`ament_cmake`.
+

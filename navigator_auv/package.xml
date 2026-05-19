@@ -1,45 +1,42 @@
 <?xml version="1.0"?>
-<package format="2">
+<package format="3">
+
   <name>navigator_auv</name>
+
   <version>0.0.0</version>
-  <description>The navigator_auv package</description>
 
-  <!-- One maintainer tag required, multiple allowed, one person per tag -->
-  <maintainer email="user@todo.todo">user</maintainer>
+  <description>
+    EROAS ROS2 Navigation Package
+  </description>
 
-  <!-- One license tag required, multiple allowed, one license per tag -->
+  <maintainer email="airl@todo.todo">
+    airl-user
+  </maintainer>
+
   <license>Apache-2.0</license>
 
-  <!-- Url tags are optional, but multiple are allowed, one per tag -->
-  <!-- Optional attribute type can be: website, bugtracker, or repository -->
-  <!-- Example: -->
-  <!-- <url type="website">http://wiki.ros.org/navigator_auv</url> -->
+  <!-- Build tools -->
+  <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- Author tags are optional, multiple are allowed, one per tag -->
-  <!-- Authors do not have to be maintainers, but could be -->
-  <!-- Example: -->
-  <!-- <author email="jane.doe@example.com">Jane Doe</author> -->
+  <!-- ROS2 dependencies -->
+  <depend>rclpy</depend>
 
-  <!-- The *depend tags are used to specify dependencies -->
-  <buildtool_depend>catkin</buildtool_depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>visualization_msgs</depend>
 
-  <exec_depend>rospy</exec_depend>
-  <exec_depend>gazebo_msgs</exec_depend>
-  <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>uuv_world_ros_plugins_msgs</exec_depend>
-  <exec_depend>uuv_gazebo_ros_plugins_msgs</exec_depend>
-  <exec_depend>uuv_control_msgs</exec_depend>
-  <exec_depend>std_msgs</exec_depend>
-  <exec_depend>visualization_msgs</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>uuv_trajectory_control</exec_depend>
+  <depend>rosgraph_msgs</depend>
 
-  <!-- Additional dependencies based on Python version should be handled differently -->
-  <!-- You may need to include them in your code or documentation rather than in package.xml -->
+  <!-- Gazebo bridge -->
+  <depend>ros_gz_bridge</depend>
 
-  <!-- The export tag contains other, unspecified, tags -->
+  <!-- Runtime -->
+  <exec_depend>python3-numpy</exec_depend>
+
   <export>
-    <!-- Other tools can request additional information be placed here -->
+    <build_type>ament_python</build_type>
   </export>
-</package>
 
+</package>

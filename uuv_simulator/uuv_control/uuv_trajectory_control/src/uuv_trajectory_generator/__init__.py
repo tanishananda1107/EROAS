@@ -1,3 +1,4 @@
+
 # Copyright (c) 2016-2019 The UUV Simulator Authors.
 # All rights reserved.
 #
@@ -18,3 +19,7 @@ from .wp_trajectory_generator import WPTrajectoryGenerator
 from .trajectory_point import TrajectoryPoint
 from .trajectory_generator import TrajectoryGenerator
 from .path_generator import *
+
+This is a straightforward conversion, as there are no changes required for [K
+the Python code itself. The package structure and imports remain the same.
+
