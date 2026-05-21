@@ -14,258 +14,342 @@
 // limitations under the License.
 
 /// \file UnderwaterCurrentPlugin.cc
-
-#include <boost/algorithm/string.hpp>
-#include <boost/bind.hpp>
-#include <boost/shared_ptr.hpp>
-
-#include <gazebo/gazebo.hh>
-#include <gazebo/msgs/msgs.hh>
-#include <gazebo/physics/Link.hh>
-#include <gazebo/physics/Model.hh>
-#include <gazebo/physics/PhysicsEngine.hh>
-#include <gazebo/physics/World.hh>
-#include <gazebo/transport/TransportTypes.hh>
-#include <sdf/sdf.hh>
-
-#include <math.h>
+/// \brief Plugin that for the underwater world
 
 #include <uuv_world_plugins/UnderwaterCurrentPlugin.hh>
 
-using namespace gazebo;
+#include <ignition/physics/Vector3.hh>
 
-GZ_REGISTER_WORLD_PLUGIN(UnderwaterCurrentPlugin)
+#include <rclcpp/rclcpp.hpp>
 
-/////////////////////////////////////////////////
-UnderwaterCurrentPlugin::UnderwaterCurrentPlugin()
+namespace uuv_world_plugins
 {
-  // Doing nothing for now
+
+UnderwaterCurrentPlugin::UnderwaterCurrentPlugin()
+: rosPublishPeriod(0.05)
+{
 }
 
-/////////////////////////////////////////////////
 UnderwaterCurrentPlugin::~UnderwaterCurrentPlugin()
 {
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->updateConnection.reset();
-#else
-  event::Events::DisconnectWorldUpdateBegin(this->updateConnection);
-#endif
-}
-
-/////////////////////////////////////////////////
-void UnderwaterCurrentPlugin::Load(physics::WorldPtr _world, sdf::ElementPtr _sdf)
-{
-  GZ_ASSERT(_world != NULL, "World pointer is invalid");
-  GZ_ASSERT(_sdf != NULL, "SDF pointer is invalid");
-
-  this->world = _world;
-  this->sdf = _sdf;
-
-  // Read the namespace for topics and services
-  this->ns = _sdf->Get<std::string>("namespace");
-
-  gzmsg << "Loading underwater world..." << std::endl;
-  // Initializing the transport node
-  this->node = transport::NodePtr(new transport::Node());
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->node->Init(this->world->Name());
-#else
-  this->node->Init(this->world->GetName());
-#endif
-  // Retrieve the current velocity configuration, if existent
-  GZ_ASSERT(this->sdf->HasElement("constant_current"),
-    "Constant current configuration not available");
-  sdf::ElementPtr currentVelocityParams = this->sdf->GetElement(
-    "constant_current");
-
-  // Read the topic names from the SDF file
-  if (currentVelocityParams->HasElement("topic"))
-    this->currentVelocityTopic =
-      currentVelocityParams->Get<std::string>("topic");
-  else
-    this->currentVelocityTopic = "current_velocity";
-
-  GZ_ASSERT(!this->currentVelocityTopic.empty(),
-    "Empty current velocity topic");
-
-  if (currentVelocityParams->HasElement("velocity"))
-  {
-    sdf::ElementPtr elem = currentVelocityParams->GetElement("velocity");
-    if (elem->HasElement("mean"))
-        this->currentVelModel.mean = elem->Get<double>("mean");
-    if (elem->HasElement("min"))
-        this->currentVelModel.min = elem->Get<double>("min");
-    if (elem->HasElement("max"))
-        this->currentVelModel.max = elem->Get<double>("max");
-    if (elem->HasElement("mu"))
-        this->currentVelModel.mu = elem->Get<double>("mu");
-    if (elem->HasElement("noiseAmp"))
-        this->currentVelModel.noiseAmp = elem->Get<double>("noiseAmp");
-
-    GZ_ASSERT(this->currentVelModel.min < this->currentVelModel.max,
-      "Invalid current velocity limits");
-    GZ_ASSERT(this->currentVelModel.mean >= this->currentVelModel.min,
-      "Mean velocity must be greater than minimum");
-    GZ_ASSERT(this->currentVelModel.mean <= this->currentVelModel.max,
-      "Mean velocity must be smaller than maximum");
-    GZ_ASSERT(this->currentVelModel.mu >= 0 && this->currentVelModel.mu < 1,
-      "Invalid process constant");
-    GZ_ASSERT(this->currentVelModel.noiseAmp < 1 &&
-      this->currentVelModel.noiseAmp >= 0,
-      "Noise amplitude has to be smaller than 1");
+  if (rosPublishConnection) {
+    rosPublishConnection.reset();
   }
-
-  this->currentVelModel.var = this->currentVelModel.mean;
-  gzmsg << "Current velocity [m/s] Gauss-Markov process model:" << std::endl;
-  this->currentVelModel.Print();
-
-  if (currentVelocityParams->HasElement("horizontal_angle"))
-  {
-    sdf::ElementPtr elem =
-      currentVelocityParams->GetElement("horizontal_angle");
-
-    if (elem->HasElement("mean"))
-      this->currentHorzAngleModel.mean = elem->Get<double>("mean");
-    if (elem->HasElement("min"))
-      this->currentHorzAngleModel.min = elem->Get<double>("min");
-    if (elem->HasElement("max"))
-      this->currentHorzAngleModel.max = elem->Get<double>("max");
-    if (elem->HasElement("mu"))
-      this->currentHorzAngleModel.mu = elem->Get<double>("mu");
-    if (elem->HasElement("noiseAmp"))
-      this->currentHorzAngleModel.noiseAmp = elem->Get<double>("noiseAmp");
-
-    GZ_ASSERT(this->currentHorzAngleModel.min <
-      this->currentHorzAngleModel.max,
-      "Invalid current horizontal angle limits");
-    GZ_ASSERT(this->currentHorzAngleModel.mean >=
-      this->currentHorzAngleModel.min,
-      "Mean horizontal angle must be greater than minimum");
-    GZ_ASSERT(this->currentHorzAngleModel.mean <=
-      this->currentHorzAngleModel.max,
-      "Mean horizontal angle must be smaller than maximum");
-    GZ_ASSERT(this->currentHorzAngleModel.mu >= 0 &&
-      this->currentHorzAngleModel.mu < 1,
-      "Invalid process constant");
-    GZ_ASSERT(this->currentHorzAngleModel.noiseAmp < 1 &&
-      this->currentHorzAngleModel.noiseAmp >= 0,
-      "Noise amplitude for horizontal angle has to be between 0 and 1");
-  }
-
-  this->currentHorzAngleModel.var = this->currentHorzAngleModel.mean;
-  gzmsg <<
-    "Current velocity horizontal angle [rad] Gauss-Markov process model:"
-    << std::endl;
-  this->currentHorzAngleModel.Print();
-
-  if (currentVelocityParams->HasElement("vertical_angle"))
-  {
-    sdf::ElementPtr elem = currentVelocityParams->GetElement("vertical_angle");
-
-    if (elem->HasElement("mean"))
-      this->currentVertAngleModel.mean = elem->Get<double>("mean");
-    if (elem->HasElement("min"))
-      this->currentVertAngleModel.min = elem->Get<double>("min");
-    if (elem->HasElement("max"))
-      this->currentVertAngleModel.max = elem->Get<double>("max");
-    if (elem->HasElement("mu"))
-      this->currentVertAngleModel.mu = elem->Get<double>("mu");
-    if (elem->HasElement("noiseAmp"))
-      this->currentVertAngleModel.noiseAmp = elem->Get<double>("noiseAmp");
-
-    GZ_ASSERT(this->currentVertAngleModel.min <
-      this->currentVertAngleModel.max, "Invalid current vertical angle limits");
-    GZ_ASSERT(this->currentVertAngleModel.mean >=
-      this->currentVertAngleModel.min,
-      "Mean vertical angle must be greater than minimum");
-    GZ_ASSERT(this->currentVertAngleModel.mean <=
-      this->currentVertAngleModel.max,
-      "Mean vertical angle must be smaller than maximum");
-    GZ_ASSERT(this->currentVertAngleModel.mu >= 0 &&
-      this->currentVertAngleModel.mu < 1,
-      "Invalid process constant");
-    GZ_ASSERT(this->currentVertAngleModel.noiseAmp < 1 &&
-      this->currentVertAngleModel.noiseAmp >= 0,
-      "Noise amplitude for vertical angle has to be between 0 and 1");
-  }
-
-  this->currentVertAngleModel.var = this->currentVertAngleModel.mean;
-  gzmsg <<
-    "Current velocity horizontal angle [rad] Gauss-Markov process model:"
-    << std::endl;
-  this->currentHorzAngleModel.Print();
-
-  // Initialize the time update
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->lastUpdate = this->world->SimTime();
-#else
-  this->lastUpdate = this->world->GetSimTime();
-#endif
-  this->currentVelModel.lastUpdate = this->lastUpdate.Double();
-  this->currentHorzAngleModel.lastUpdate = this->lastUpdate.Double();
-  this->currentVertAngleModel.lastUpdate = this->lastUpdate.Double();
-
-  // Advertise the current velocity topic
-  this->publishers[this->currentVelocityTopic] =
-    this->node->Advertise<msgs::Vector3d>(
-    this->ns + "/" + this->currentVelocityTopic);
-
-  gzmsg << "Current velocity topic name: " <<
-    this->ns + "/" + this->currentVelocityTopic << std::endl;
-
-  // Connect the update event
-  this->updateConnection = event::Events::ConnectWorldUpdateBegin(
-    boost::bind(&UnderwaterCurrentPlugin::Update,
-    this, _1));
-
-  gzmsg << "Underwater current plugin loaded!" << std::endl
-    << "\tWARNING: Current velocity calculated in the ENU frame"
-    << std::endl;
 }
 
-/////////////////////////////////////////////////
-void UnderwaterCurrentPlugin::Init()
+void UnderwaterCurrentPlugin::OnConfigure(const ignition::gazebo::ConfigureInfo &info)
 {
-  // Doing nothing for now
+  (void)info;
+  this->currentVelocityTopic = "/world/current/flow_velocity";
+  this->ns = "";
+
+  this->rosNode = std::make_shared<rclcpp::Node>("underwater_current_plugin");
+
+  // Initialize current velocity model
+  this->currentVelModel.Init(
+    this->rosNode,
+    this->ns + "current_velocity_model",
+    0.1,  // initial variance
+    0.01,  // process noise
+    0.001,  // measurement noise
+    0.0,  // initial value
+    0.0,  // initial mean
+    0.0,  // initial std dev
+    0.0,  // initial drift
+    0.0,  // initial autoregressive coeff
+    0.0,  // initial drift time constant
+    0.0  // initial measurement noise
+  );
+
+  // Initialize horizontal angle model
+  this->currentHorzAngleModel.Init(
+    this->rosNode,
+    this->ns + "current_horizontal_angle_model",
+    0.1,  // initial variance
+    0.01,  // process noise
+    0.001,  // measurement noise
+    0.0,  // initial value
+    0.0,  // initial mean
+    0.0,  // initial std dev
+    0.0,  // initial drift
+    0.0,  // initial autoregressive coeff
+    0.0,  // initial drift time constant
+    0.0  // initial measurement noise
+  );
+
+  // Initialize vertical angle model
+  this->currentVertAngleModel.Init(
+    this->rosNode,
+    this->ns + "current_vertical_angle_model",
+    0.1,  // initial variance
+    0.01,  // process noise
+    0.001,  // measurement noise
+    0.0,  // initial value
+    0.0,  // initial mean
+    0.0,  // initial std dev
+    0.0,  // initial drift
+    0.0,  // initial autoregressive coeff
+    0.0,  // initial drift time constant
+    0.0  // initial measurement noise
+  );
+
+  // Initialize current velocity
+  this->currentVelocity = ignition::math::Vector3d(0.0, 0.0, 0.0);
+
+  // Create publisher for flow velocity
+  this->flowVelocityPub = this->rosNode->create_publisher<geometry_msgs::msg::TwistStamped>(
+    this->currentVelocityTopic, 10);
+
+  // Create service servers
+  this->worldServices["update_current_velocity_model"] =
+    this->rosNode->create_service<uuv_world_ros_plugins_msgs::srv::SetCurrentModel>(
+    "~/update_current_velocity_model",
+    std::bind(&UnderwaterCurrentPlugin::UpdateCurrentVelocityModel, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  this->worldServices["get_current_velocity_model"] =
+    this->rosNode->create_service<uuv_world_ros_plugins_msgs::srv::GetCurrentModel>(
+    "~/get_current_velocity_model",
+    std::bind(&UnderwaterCurrentPlugin::GetCurrentVelocityModel, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  this->worldServices["update_current_horizontal_angle_model"] =
+    this->rosNode->create_service<uuv_world_ros_plugins_msgs::srv::SetCurrentModel>(
+    "~/update_current_horizontal_angle_model",
+    std::bind(&UnderwaterCurrentPlugin::UpdateCurrentHorzAngleModel, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  this->worldServices["get_current_horizontal_angle_model"] =
+    this->rosNode->create_service<uuv_world_ros_plugins_msgs::srv::GetCurrentModel>(
+    "~/get_current_horizontal_angle_model",
+    std::bind(&UnderwaterCurrentPlugin::GetCurrentHorzAngleModel, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  this->worldServices["update_current_vertical_angle_model"] =
+    this->rosNode->create_service<uuv_world_ros_plugins_msgs::srv::SetCurrentModel>(
+    "~/update_current_vertical_angle_model",
+    std::bind(&UnderwaterCurrentPlugin::UpdateCurrentVertAngleModel, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  this->worldServices["get_current_vertical_angle_model"] =
+    this->rosNode->create_service<uuv_world_ros_plugins_msgs::srv::GetCurrentModel>(
+    "~/get_current_vertical_angle_model",
+    std::bind(&UnderwaterCurrentPlugin::GetCurrentVertAngleModel, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  this->worldServices["update_current_velocity"] =
+    this->rosNode->create_service<uuv_world_ros_plugins_msgs::srv::SetCurrentVelocity>(
+    "~/update_current_velocity",
+    std::bind(&UnderwaterCurrentPlugin::UpdateCurrentVelocity, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  this->worldServices["update_current_horizontal_angle"] =
+    this->rosNode->create_service<uuv_world_ros_plugins_msgs::srv::SetCurrentDirection>(
+    "~/update_current_horizontal_angle",
+    std::bind(&UnderwaterCurrentPlugin::UpdateHorzAngle, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  this->worldServices["update_current_vertical_angle"] =
+    this->rosNode->create_service<uuv_world_ros_plugins_msgs::srv::SetCurrentDirection>(
+    "~/update_current_vertical_angle",
+    std::bind(&UnderwaterCurrentPlugin::UpdateVertAngle, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  // Set up ROS publishing
+  this->rosPublishConnection =
+    ignition::gazebo::event::Events::ConnectSimulationPeriod(
+    std::bind(&UnderwaterCurrentPlugin::OnUpdateCurrentVel, this));
 }
 
-/////////////////////////////////////////////////
-void UnderwaterCurrentPlugin::Update(const common::UpdateInfo & /** _info */)
+void UnderwaterCurrentPlugin::OnUpdate(const ignition::gazebo::UpdateInfo &info)
 {
-#if GAZEBO_MAJOR_VERSION >= 8
-  common::Time time = this->world->SimTime();
-#else
-  common::Time time = this->world->GetSimTime();
-#endif
-  // Calculate the flow velocity and the direction using the Gauss-Markov
-  // model
+  // Update the current velocity model
+  this->currentVelModel.Update(info.simTime.Double());
+  this->currentHorzAngleModel.Update(info.simTime.Double());
+  this->currentVertAngleModel.Update(info.simTime.Double());
 
-  // Update current velocity
-  double currentVelMag = this->currentVelModel.Update(time.Double());
+  // Get the current velocity and direction
+  double vel = this->currentVelModel.GetMean();
+  double horzAngle = this->currentHorzAngleModel.GetMean();
+  double vertAngle = this->currentVertAngleModel.GetMean();
 
-  // Update current horizontal direction around z axis of flow frame
-  double horzAngle = this->currentHorzAngleModel.Update(time.Double());
-
-  // Update current horizontal direction around z axis of flow frame
-  double vertAngle = this->currentVertAngleModel.Update(time.Double());
-
-  // Generating the current velocity vector as in the NED frame
-  this->currentVelocity = ignition::math::Vector3d(
-      currentVelMag * cos(horzAngle) * cos(vertAngle),
-      currentVelMag * sin(horzAngle) * cos(vertAngle),
-      currentVelMag * sin(vertAngle));
-
-  // Update time stamp
-  this->lastUpdate = time;
-  this->PublishCurrentVelocity();
+  // Convert spherical coordinates to Cartesian
+  this->currentVelocity.X() = vel * cos(vertAngle) * cos(horzAngle);
+  this->currentVelocity.Y() = vel * cos(vertAngle) * sin(horzAngle);
+  this->currentVelocity.Z() = vel * sin(vertAngle);
 }
 
-/////////////////////////////////////////////////
+void UnderwaterCurrentPlugin::Update(const ignition::gazebo::UpdateInfo &_info)
+{
+  (void)_info;
+}
+
 void UnderwaterCurrentPlugin::PublishCurrentVelocity()
 {
-  msgs::Vector3d currentVel;
-  msgs::Set(&currentVel, ignition::math::Vector3d(this->currentVelocity.X(),
-                                                  this->currentVelocity.Y(),
-                                                  this->currentVelocity.Z()));
-  this->publishers[this->currentVelocityTopic]->Publish(currentVel);
+  geometry_msgs::msg::TwistStamped twistStamped;
+  twistStamped.header.stamp = rclcpp::Clock().now();
+  twistStamped.header.frame_id = "world";
+  twistStamped.twist.linear.x = this->currentVelocity.X();
+  twistStamped.twist.linear.y = this->currentVelocity.Y();
+  twistStamped.twist.linear.z = this->currentVelocity.Z();
+  twistStamped.twist.angular.x = 0.0;
+  twistStamped.twist.angular.y = 0.0;
+  twistStamped.twist.angular.z = 0.0;
+
+  this->flowVelocityPub->publish(twistStamped);
 }
+
+void UnderwaterCurrentPlugin::OnUpdateCurrentVel()
+{
+  // Check if we should publish based on the period
+  static ignition::gazebo::Time lastPublishTime = ignition::gazebo::Time(0);
+  ignition::gazebo::Time now = ignition::gazebo::clock::get_clock()->now();
+
+  if ((now - lastPublishTime).Double() >= this->rosPublishPeriod) {
+    this->PublishCurrentVelocity();
+    lastPublishTime = now;
+  }
+}
+
+bool UnderwaterCurrentPlugin::UpdateCurrentVelocityModel(
+  const uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Request::SharedPtr _req,
+  uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Response::SharedPtr _res)
+{
+  RCLCPP_INFO(this->rosNode->get_logger(), "Updating current velocity model");
+
+  // Update the current velocity model parameters
+  this->currentVelModel.SetMean(_req->mean);
+  this->currentVelModel.SetStdDev(_req->std_dev);
+  this->currentVelModel.SetDrift(_req->drift);
+  this->currentVelModel.SetAutoregressiveCoeff(_req->autoregressive_coeff);
+  this->currentVelModel.SetDriftTimeConstant(_req->drift_time_constant);
+
+  _res->success = true;
+  return true;
+}
+
+bool UnderwaterCurrentPlugin::GetCurrentVelocityModel(
+  const uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Request::SharedPtr _req,
+  uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Response::SharedPtr _res)
+{
+  (void)_req;
+  RCLCPP_INFO(this->rosNode->get_logger(), "Getting current velocity model");
+
+  _res->mean = this->currentVelModel.GetMean();
+  _res->std_dev = this->currentVelModel.GetStdDev();
+  _res->drift = this->currentVelModel.GetDrift();
+  _res->autoregressive_coeff = this->currentVelModel.GetAutoregressiveCoeff();
+  _res->drift_time_constant = this->currentVelModel.GetDriftTimeConstant();
+  _res->success = true;
+  return true;
+}
+
+bool UnderwaterCurrentPlugin::UpdateCurrentHorzAngleModel(
+  const uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Request::SharedPtr _req,
+  uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Response::SharedPtr _res)
+{
+  RCLCPP_INFO(this->rosNode->get_logger(), "Updating current horizontal angle model");
+
+  this->currentHorzAngleModel.SetMean(_req->mean);
+  this->currentHorzAngleModel.SetStdDev(_req->std_dev);
+  this->currentHorzAngleModel.SetDrift(_req->drift);
+  this->currentHorzAngleModel.SetAutoregressiveCoeff(_req->autoregressive_coeff);
+  this->currentHorzAngleModel.SetDriftTimeConstant(_req->drift_time_constant);
+
+  _res->success = true;
+  return true;
+}
+
+bool UnderwaterCurrentPlugin::GetCurrentHorzAngleModel(
+  const uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Request::SharedPtr _req,
+  uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Response::SharedPtr _res)
+{
+  (void)_req;
+  RCLCPP_INFO(this->rosNode->get_logger(), "Getting current horizontal angle model");
+
+  _res->mean = this->currentHorzAngleModel.GetMean();
+  _res->std_dev = this->currentHorzAngleModel.GetStdDev();
+  _res->drift = this->currentHorzAngleModel.GetDrift();
+  _res->autoregressive_coeff = this->currentHorzAngleModel.GetAutoregressiveCoeff();
+  _res->drift_time_constant = this->currentHorzAngleModel.GetDriftTimeConstant();
+  _res->success = true;
+  return true;
+}
+
+bool UnderwaterCurrentPlugin::UpdateCurrentVertAngleModel(
+  const uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Request::SharedPtr _req,
+  uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Response::SharedPtr _res)
+{
+  RCLCPP_INFO(this->rosNode->get_logger(), "Updating current vertical angle model");
+
+  this->currentVertAngleModel.SetMean(_req->mean);
+  this->currentVertAngleModel.SetStdDev(_req->std_dev);
+  this->currentVertAngleModel.SetDrift(_req->drift);
+  this->currentVertAngleModel.SetAutoregressiveCoeff(_req->autoregressive_coeff);
+  this->currentVertAngleModel.SetDriftTimeConstant(_req->drift_time_constant);
+
+  _res->success = true;
+  return true;
+}
+
+bool UnderwaterCurrentPlugin::GetCurrentVertAngleModel(
+  const uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Request::SharedPtr _req,
+  uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Response::SharedPtr _res)
+{
+  (void)_req;
+  RCLCPP_INFO(this->rosNode->get_logger(), "Getting current vertical angle model");
+
+  _res->mean = this->currentVertAngleModel.GetMean();
+  _res->std_dev = this->currentVertAngleModel.GetStdDev();
+  _res->drift = this->currentVertAngleModel.GetDrift();
+  _res->autoregressive_coeff = this->currentVertAngleModel.GetAutoregressiveCoeff();
+  _res->drift_time_constant = this->currentVertAngleModel.GetDriftTimeConstant();
+  _res->success = true;
+  return true;
+}
+
+bool UnderwaterCurrentPlugin::UpdateCurrentVelocity(
+  const uuv_world_ros_plugins_msgs::srv::SetCurrentVelocity::Request::SharedPtr _req,
+  uuv_world_ros_plugins_msgs::srv::SetCurrentVelocity::Response::SharedPtr _res)
+{
+  RCLCPP_INFO(this->rosNode->get_logger(), "Updating current velocity");
+
+  this->currentVelocity.X() = _req->linear.x;
+  this->currentVelocity.Y() = _req->linear.y;
+  this->currentVelocity.Z() = _req->linear.z;
+
+  _res->success = true;
+  return true;
+}
+
+bool UnderwaterCurrentPlugin::UpdateHorzAngle(
+  const uuv_world_ros_plugins_msgs::srv::SetCurrentDirection::Request::SharedPtr _req,
+  uuv_world_ros_plugins_msgs::srv::SetCurrentDirection::Response::SharedPtr _res)
+{
+  RCLCPP_INFO(this->rosNode->get_logger(), "Updating horizontal angle");
+
+  this->currentHorzAngleModel.SetMean(_req->angle);
+
+  _res->success = true;
+  return true;
+}
+
+bool UnderwaterCurrentPlugin::UpdateVertAngle(
+  const uuv_world_ros_plugins_msgs::srv::SetCurrentDirection::Request::SharedPtr _req,
+  uuv_world_ros_plugins_msgs::srv::SetCurrentDirection::Response::SharedPtr _res)
+{
+  RCLCPP_INFO(this->rosNode->get_logger(), "Updating vertical angle");
+
+  this->currentVertAngleModel.SetMean(_req->angle);
+
+  _res->success = true;
+  return true;
+}
+
+// Register the plugin
+GZ_ADD_PLUGIN(uuv_world_plugins::UnderwaterCurrentPlugin,
+              ignition::gazebo::SystemPlugin,
+              ignition::gazebo::SystemConfigure,
+              ignition::gazebo::SystemUpdate)
+
+}  // namespace uuv_world_plugins

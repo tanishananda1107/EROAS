@@ -17,7 +17,7 @@
 
 #include <uuv_world_plugins/GaussMarkovProcess.hh>
 
-namespace gazebo
+namespace uuv_world_plugins
 {
 /////////////////////////////////////////////////
 GaussMarkovProcess::GaussMarkovProcess()
@@ -88,10 +88,8 @@ double GaussMarkovProcess::Update(double _time)
 /////////////////////////////////////////////////
 void GaussMarkovProcess::Print()
 {
-  gzmsg << "\tMean = " << this->mean << std::endl
-    << "\tMin. Limit = " << this->min << std::endl
-    << "\tMax. Limit = " << this->max << std::endl
-    << "\tMu = " << this->mu << std::endl
-    << "\tNoise Amp. = " << this->noiseAmp << std::endl;
+  RCLCPP_INFO(rclcpp::get_logger("uuv_world_plugins"),
+    "\tMean = %f\n\tMin. Limit = %f\n\tMax. Limit = %f\n\tMu = %f\n\tNoise Amp. = %f",
+    this->mean, this->min, this->max, this->mu, this->noiseAmp);
 }
 }

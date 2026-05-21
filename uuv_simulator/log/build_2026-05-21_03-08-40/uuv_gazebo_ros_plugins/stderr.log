@@ -1,0 +1,19 @@
+CMake Error at CMakeLists.txt:16 (find_package):
+  By not providing "Finduuv_gazebo_ros_plugins_msgs.cmake" in
+  CMAKE_MODULE_PATH this project has asked CMake to find a package
+  configuration file provided by "uuv_gazebo_ros_plugins_msgs", but CMake did
+  not find one.
+
+  Could not find a package configuration file provided by
+  "uuv_gazebo_ros_plugins_msgs" with any of the following names:
+
+    uuv_gazebo_ros_plugins_msgsConfig.cmake
+    uuv_gazebo_ros_plugins_msgs-config.cmake
+
+  Add the installation prefix of "uuv_gazebo_ros_plugins_msgs" to
+  CMAKE_PREFIX_PATH or set "uuv_gazebo_ros_plugins_msgs_DIR" to a directory
+  containing one of the above files.  If "uuv_gazebo_ros_plugins_msgs"
+  provides a separate development package or SDK, be sure it has been
+  installed.
+
+

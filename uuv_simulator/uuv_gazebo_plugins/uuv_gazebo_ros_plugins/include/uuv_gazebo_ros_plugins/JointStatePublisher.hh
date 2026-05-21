@@ -20,44 +20,41 @@
 #ifndef __JOINT_STATE_PUBLISHER_HH__
 #define __JOINT_STATE_PUBLISHER_HH__
 
+#include <memory>
 #include <string>
 #include <vector>
 
-#include <boost/scoped_ptr.hpp>
-#include <boost/algorithm/string.hpp>
-#include <gazebo/gazebo.hh>
-#include <gazebo/common/Plugin.hh>
-#include <gazebo/common/Event.hh>
-#include <gazebo/physics/Model.hh>
-#include <gazebo/physics/Joint.hh>
-#include <gazebo/physics/World.hh>
-#include <ros/ros.h>
-#include <sensor_msgs/JointState.h>
-#include <sstream>
+#include <gz/sim/System.hh>
+#include <gz/sim/components/Model.hh>
+#include <gz/sim/components/Joint.hh>
+#include <gz/sim/Entity.hh>
+#include <gz/sim/World.hh>
+#include <gz/msgs/joint_state.pb.h>
+
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 
 namespace uuv_simulator_ros
 {
-class JointStatePublisher : public gazebo::ModelPlugin
+class JointStatePublisher : public gz::sim::System,
+                            public gz::sim::ISystemConfigure,
+                            public gz::sim::ISystemUpdate
 {
   public: JointStatePublisher();
 
-  public: ~JointStatePublisher();
+  public: ~JointStatePublisher() override;
 
-  public: void Load(gazebo::physics::ModelPtr _parent, sdf::ElementPtr _sdf);
+  public: void Configure(const gz::sim::Entity &_entity,
+                         const std::shared_ptr<const sdf::Element> &_sdf,
+                         gz::sim::EntityComponentManager &_ecm,
+                         gz::sim::EventManager &_eventManager) override;
 
-  public: void OnUpdate(const gazebo::common::UpdateInfo &_info);
+  public: void Update(const gz::sim::UpdateInfo &_info,
+                      gz::sim::EntityComponentManager &_ecm) override;
 
-  public: void PublishJointStates();
+  public: void PublishJointStates(const gz::sim::EntityComponentManager &_ecm);
 
-  private: bool IsIgnoredJoint(std::string _jointName);
-
-  private: gazebo::physics::WorldPtr world;
-
-  private: gazebo::physics::ModelPtr model;
-
-  private: gazebo::event::ConnectionPtr updateConnection;
-
-  private: boost::shared_ptr<ros::NodeHandle> node;
+  private: bool IsIgnoredJoint(const std::string &_jointName);
 
   private: std::string robotNamespace;
 
@@ -67,9 +64,13 @@ class JointStatePublisher : public gazebo::ModelPlugin
 
   private: double updatePeriod;
 
-  private: gazebo::common::Time lastUpdate;
+  private: rclcpp::Time lastUpdate;
 
-  private: ros::Publisher jointStatePub;
+  private: std::shared_ptr<rclcpp::Node> node;
+
+  private: rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr jointStatePub;
+
+  private: gz::sim::Entity modelEntity;
 };
 }
 

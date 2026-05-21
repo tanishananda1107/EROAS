@@ -27,17 +27,17 @@
 #define __UUV_POSE_GT_SENSOR_ROS_PLUGIN_HH__
 
 #include <gazebo/gazebo.hh>
-#include <ros/ros.h>
-#include <nav_msgs/Odometry.h>
+#include <rclcpp/rclcpp.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <gazebo/physics/physics.hh>
-#include <geometry_msgs/TransformStamped.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2_ros/transform_listener.h>
-#include <boost/shared_ptr.hpp>
+#include <memory>
 #include <uuv_sensor_ros_plugins/ROSBaseModelPlugin.hh>
 
 namespace gazebo
 {
-  class PoseGTROSPlugin : public ROSBaseModelPlugin
+  class PoseGTROSPlugin : public ROSBaseModelPlugin, public rclcpp::Node
   {
     /// \brief Class constructor
     public: PoseGTROSPlugin();

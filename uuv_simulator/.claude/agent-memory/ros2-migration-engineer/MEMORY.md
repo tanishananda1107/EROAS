@@ -1,0 +1,4 @@
+- [migration-patterns](migration-patterns.md) — ROS1 to ROS2 migration patterns and conventions
+- [uuv_simulator-structure](uuv_simulator-structure.md) — Package structure and dependencies
+- [gazebo-harmonic-plugins](gazebo-harmonic-plugins.md) — Gazebo Harmonic plugin mappings
+- [message-types](message-types.md) — Custom message and service types

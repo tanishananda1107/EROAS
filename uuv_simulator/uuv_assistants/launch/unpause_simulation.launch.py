@@ -1,20 +1,18 @@
+#!/usr/bin/env python3
+"""
+Launch file to unpause simulation.
+"""
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
+
 def generate_launch_description():
-
     return LaunchDescription([
-        DeclareLaunchArgument("timeout", default_value="0"),
-
         Node(
-            package="uuv_assistants",
-            executable="unpause_simulation.py",
-            name="unpause_simulation",
-            parameters=[{
-                "timeout": LaunchConfiguration("timeout")
-            }],
-            output="screen"
-        )
+            package='uuv_assistants',
+            executable='uuv_unpause_simulation',
+            name='uuv_unpause_simulation',
+            output='screen',
+        ),
     ])

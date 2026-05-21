@@ -28,7 +28,9 @@
 namespace gazebo
 {
 /////////////////////////////////////////////////
-PoseGTROSPlugin::PoseGTROSPlugin() : ROSBaseModelPlugin()
+PoseGTROSPlugin::PoseGTROSPlugin()
+  : ROSBaseModelPlugin(),
+    rclcpp::Node("pose_gt_ros_plugin")
 {
   this->offset.Pos() = ignition::math::Vector3d::Zero;
   this->offset.Rot() = ignition::math::Quaterniond(
@@ -44,7 +46,8 @@ PoseGTROSPlugin::PoseGTROSPlugin() : ROSBaseModelPlugin()
 
 /////////////////////////////////////////////////
 PoseGTROSPlugin::~PoseGTROSPlugin()
-{ }
+{
+}
 
 /////////////////////////////////////////////////
 void PoseGTROSPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
@@ -64,8 +67,8 @@ void PoseGTROSPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
   if (this->publishNEDOdom)
   {
     this->nedFrameID = this->link->GetName() + "_ned";
-    this->nedOdomPub = this->rosNode->advertise<nav_msgs::Odometry>(
-      this->sensorOutputTopic + "_ned", 1);
+    this->nedOdomPub = this->create_publisher<nav_msgs::msg::Odometry>(
+      this->sensorOutputTopic + "_ned", rclcpp::QoS(1));
     this->nedTransformIsInit = false;
   }
 
@@ -86,10 +89,10 @@ void PoseGTROSPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
 #endif
   }
 
-  this->tfListener.reset(new tf2_ros::TransformListener(this->tfBuffer));
+  this->tfListener = std::make_shared<tf2_ros::TransformListener>(this->tfBuffer);
 
-  this->rosSensorOutputPub = this->rosNode->advertise<nav_msgs::Odometry>(
-      this->sensorOutputTopic, 1);
+  this->rosSensorOutputPub = this->create_publisher<nav_msgs::msg::Odometry>(
+      this->sensorOutputTopic, rclcpp::QoS(1));
 }
 
 /////////////////////////////////////////////////
@@ -190,12 +193,12 @@ void PoseGTROSPlugin::PublishOdomMessage(common::Time _time,
 {
   // Generates the odometry message of the robot's base_link frame wrt
   // Gazebo's default ENU inertial reference frame
-  nav_msgs::Odometry odomMsg;
+  nav_msgs::msg::Odometry odomMsg;
 
   // Initialize header of the odometry message
   odomMsg.header.frame_id = "world";
   odomMsg.header.stamp.sec = _time.sec;
-  odomMsg.header.stamp.nsec = _time.nsec;
+  odomMsg.header.stamp.nanosec = _time.nsec;
   odomMsg.child_frame_id = this->link->GetName();
 
   // Apply pose offset
@@ -235,7 +238,7 @@ void PoseGTROSPlugin::PublishOdomMessage(common::Time _time,
   odomMsg.twist.covariance[28] = gn2;
   odomMsg.twist.covariance[35] = gn2;
 
-  this->rosSensorOutputPub.publish(odomMsg);
+  this->rosSensorOutputPub->publish(odomMsg);
 }
 
 void PoseGTROSPlugin::PublishNEDOdomMessage(common::Time _time,
@@ -250,12 +253,12 @@ void PoseGTROSPlugin::PublishNEDOdomMessage(common::Time _time,
   if (!this->nedTransformIsInit)
     return;
 
-  nav_msgs::Odometry odomMsg;
+  nav_msgs::msg::Odometry odomMsg;
 
   // Initialize header of the odometry message
   odomMsg.header.frame_id = this->referenceFrameID;
   odomMsg.header.stamp.sec = _time.sec;
-  odomMsg.header.stamp.nsec = _time.nsec;
+  odomMsg.header.stamp.nanosec = _time.nsec;
   odomMsg.child_frame_id = this->nedFrameID;
 
   _pose.Pos() = _pose.Pos() - this->referenceFrame.Pos();
@@ -305,7 +308,7 @@ void PoseGTROSPlugin::PublishNEDOdomMessage(common::Time _time,
   odomMsg.twist.covariance[28] = gn2;
   odomMsg.twist.covariance[35] = gn2;
 
-  this->nedOdomPub.publish(odomMsg);
+  this->nedOdomPub->publish(odomMsg);
 }
 
 /////////////////////////////////////////////////
@@ -316,15 +319,15 @@ void PoseGTROSPlugin::UpdateNEDTransform()
   if (this->nedTransformIsInit)
     return;
 
-  geometry_msgs::TransformStamped childTransform;
+  geometry_msgs::msg::TransformStamped childTransform;
   std::string targetFrame = this->nedFrameID;
   std::string sourceFrame = this->link->GetName();
   try
   {
     childTransform = this->tfBuffer.lookupTransform(
-      targetFrame, sourceFrame, ros::Time(0));
+      targetFrame, sourceFrame, rclcpp::Time(0));
   }
-  catch(tf2::TransformException &ex)
+  catch(const tf2::TransformException &ex)
   {
     gzmsg << "Transform between " << targetFrame << " and " << sourceFrame
       << std::endl;

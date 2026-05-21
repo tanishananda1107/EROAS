@@ -14,8 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Import the ROS Python library
-import rospy
+# Import the ROS2 Python library
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+import rclpy
 # Import the NumPy package for numerical computations
 import numpy as np
 # Import the dynamic positioning controller base class to inherit methods such as error computation update,
@@ -24,7 +26,7 @@ import numpy as np
 from uuv_control_interfaces import DPControllerBase
 
 
-class TutorialDPController(DPControllerBase):
+class TutorialDPController(Node, DPControllerBase):
     # A new controller that is based on the DPControllerBase must at least provide the implementation of
     # the method update_controller.
     # The _reset_controller method can also be overridden and it will be called every time there is a service call
@@ -45,25 +47,11 @@ class TutorialDPController(DPControllerBase):
     # where e is the pose error vector, in this case defined as e = (x, y, z, roll, pitch, yaw)^T
 
     def __init__(self):
-        # Calling the constructor of the super-class DPControllerBase, which has the implementation of the error
-        # computation update and to publish the resulting torque control vector.
-        super(TutorialDPController, self).__init__(self)
+        # Initialize the ROS2 Node
+        super().__init__('tutorial_dp_controller')
 
         # The controller should read its parameters from the ROS parameter server for initial setup
-        # One way to do this is to read the parameters from the node's private parameter namespace, which is done by
-        # reading the parameter tag with an "~" at the beginning. If this method is used, the parameters should be
-        # initialized accordingly in the controller startup launch file, such as
-        #
-        # <launch>
-        #   <node pkg="example_package" type="example_node.py" name="example_node" output="screen">
-        #       <rosparam>
-        #           param_1: 0.0
-        #           param_2: 0.0
-        #       </rosparam>
-        #   </node>
-        # </launch>
-        #
-        # For more information, see http://wiki.ros.org/roscpp_tutorials/Tutorials/AccessingPrivateNamesWithNodeHandle
+        # In ROS2, parameters are declared and then retrieved using self.declare_parameter() and self.get_parameter()
 
         # Let's initialize the controller gain matrices Kp, Kd and Ki
         self._Kp = np.zeros(shape=(6, 6))
@@ -77,32 +65,32 @@ class TutorialDPController(DPControllerBase):
         # Now the gain matrices need to be set according to the variables stored in the parameter server
         # For simplicity, the gain matrices are defined as diagonal matrices, so only 6 coefficients are
         # needed
-        if rospy.get_param('~Kp'):
-            Kp_diag = rospy.get_param('~Kp')
+        if self.has_parameter('Kp'):
+            Kp_diag = self.get_parameter('Kp').value
             if len(Kp_diag) == 6:
                 self._Kp = np.diag(Kp_diag)
             else:
                 # If the vector provided has the wrong dimension, raise an exception
-                raise rospy.ROSException('For the Kp diagonal matrix, 6 coefficients are needed')
+                raise Exception('For the Kp diagonal matrix, 6 coefficients are needed')
 
         # Do the same for the other two matrices
-        if rospy.get_param('~Kd'):
-            diag = rospy.get_param('~Kd')
+        if self.has_parameter('Kd'):
+            diag = self.get_parameter('Kd').value
             if len(diag) == 6:
                 self._Kd = np.diag(diag)
-                print 'Kd=\n', self._Kd
+                print('Kd=\n', self._Kd)
             else:
                 # If the vector provided has the wrong dimension, raise an exception
-                raise rospy.ROSException('For the Kd diagonal matrix, 6 coefficients are needed')
+                raise Exception('For the Kd diagonal matrix, 6 coefficients are needed')
 
-        if rospy.get_param('~Ki'):
-            diag = rospy.get_param('~Ki')
+        if self.has_parameter('Ki'):
+            diag = self.get_parameter('Ki').value
             if len(diag) == 6:
                 self._Ki = np.diag(diag)
-                print 'Ki=\n', self._Ki
+                print('Ki=\n', self._Ki)
             else:
                 # If the vector provided has the wrong dimension, raise an exception
-                raise rospy.ROSException('For the Ki diagonal matrix, 6 coefficients are needed')
+                raise Exception('For the Ki diagonal matrix, 6 coefficients are needed')
             self._is_init = True
 
     def _reset_controller(self):
@@ -110,7 +98,7 @@ class TutorialDPController(DPControllerBase):
         # and reference vectors to zero, but this class has additional attributes that should also
         # be taken care of.
         # This implementation will, therefore, first call the super class reset method
-        super(TutorialDPController, self)._reset_controller()
+        super()._reset_controller()
         # And then proceed to set the internal variables back to zero
         self._error_pose = np.zeros(shape=(6,))
         self._int = np.zeros(shape=(6,))
@@ -150,16 +138,14 @@ if __name__ == '__main__':
     # chmod 777 tutorial_dp_controller.py
     #
     # This file has also to be included in this package's CMakeLists.txt
-    # After the line catkin_package() in the CMakeLists.txt, include the following
+    # After the line ament_python_install_package() in the CMakeLists.txt, include the following
     #
-    # catkin_install_python(PROGRAMS scripts/tutorial_dp_controller.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+    # install(PROGRAMS scripts/tutorial_dp_controller.py DESTINATION share/<package_name>/scripts)
 
     print('Tutorial - DP Controller')
-    rospy.init_node('tutorial_dp_controller')
-
-    try:
-        node = TutorialDPController()
-        rospy.spin()
-    except rospy.ROSInterruptException:
-        print('caught exception')
+    rclpy.init()
+    node = TutorialDPController()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
     print('exiting')

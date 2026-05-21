@@ -1,7 +1,8 @@
 <?xml version="1.0"?>
-<package>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>uuv_simulation_wrapper</name>
-  <version>0.5.0</version>
+  <version>0.6.13</version>
   <description>A wrapper function to run a Gazebo simulation scenario from Python applications</description>
 
   <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
@@ -10,12 +11,14 @@
 
   <author email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</author>
 
-  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <run_depend>rospy</run_depend>
-  <run_depend>std_msgs</run_depend>
-  <run_depend>python-yaml</run_depend>
-  <run_depend>python-psutil</run_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-psutil</exec_depend>
 
-  <test_depend>rosunit</test_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>

@@ -16,15 +16,14 @@
 /// \file GaussMarkovProcess.hh
 /// \brief Implementation of a Gauss-Markov process model
 
-#ifndef __GAUSS_MARKOV_PROCESS_HH__
-#define __GAUSS_MARKOV_PROCESS_HH__
+#ifndef UUV_WORLD_PLUGINS__GAUSS_MARKOV_PROCESS_HH__
+#define UUV_WORLD_PLUGINS__GAUSS_MARKOV_PROCESS_HH__
 
-#include <gazebo/gazebo.hh>
 #include <cstdlib>
 #include <ctime>
 #include <random>
 
-namespace gazebo
+namespace uuv_world_plugins
 {
   /// \brief Implementation of a Gauss-Markov process to model the current
   /// velocity and direction according to [1]
@@ -83,4 +82,4 @@ namespace gazebo
   };
 }
 
-#endif  // __GAUSS_MARKOV_PROCESS_HH__
+#endif  // UUV_WORLD_PLUGINS__GAUSS_MARKOV_PROCESS_HH__

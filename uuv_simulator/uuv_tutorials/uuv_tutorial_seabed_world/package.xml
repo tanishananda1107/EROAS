@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>uuv_tutorial_seabed_world</name>
   <version>0.6.13</version>
   <description>A simple tutorial on how to create a new Gazebo model with a seabed and how to configure it as a simulation scenario</description>
@@ -14,12 +15,12 @@
 
   <license>Apache-2.0</license>
 
-  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
   <exec_depend>gazebo_ros</exec_depend>
 
   <export>
-    <gazebo_ros gazebo_media_path="${prefix}"
-                gazebo_model_path="${prefix}/models"/>
+    <gazebo_ros gazebo_media_path="${prefix}" gazebo_model_path="${prefix}/models" />
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

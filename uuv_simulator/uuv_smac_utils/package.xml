@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>uuv_smac_utils</name>
+  <version>0.6.13</version>
+  <description>
+    This package contains utilities for SMC (Simple Motion Controller) integration.
+  </description>
+
+  <maintainer email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</maintainer>
+  <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
+  <maintainer email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</maintainer>
+
+  <author email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</author>
+  <author email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</author>
+  <author email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</author>
+
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>python3-setuptools</build_depend>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>uuv_control_msgs</depend>
+  <depend>uuv_gazebo_ros_plugins_msgs</depend>
+  <depend>uuv_gazebo_ros_plugins</depend>
+  <depend>uuv_descriptions</depend>
+  <depend>uuv_thruster_manager</depend>
+  <depend>uuv_gazebo</depend>
+  <depend>uuv_trajectory_control</depend>
+  <depend>python3-numpy</depend>
+  <depend>python3-yaml</depend>
+  <depend>python3-matplotlib</depend>
+  <depend>python3-simplejson</depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

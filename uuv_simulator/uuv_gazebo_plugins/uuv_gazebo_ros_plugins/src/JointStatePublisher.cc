@@ -14,141 +14,193 @@
 // limitations under the License.
 
 #include <uuv_gazebo_ros_plugins/JointStatePublisher.hh>
+#include <gz/sim/components/Joint.hh>
+#include <gz/sim/Joint.hh>
 
 namespace uuv_simulator_ros
 {
-GZ_REGISTER_MODEL_PLUGIN(JointStatePublisher)
+GZ_ADD_PLUGIN(JointStatePublisher)
 
 JointStatePublisher::JointStatePublisher()
+    : updateRate(50.0),
+      updatePeriod(0.02),
+      modelEntity(gz::sim::kNullEntity)
 {
-    this->model = NULL;
-    this->world = NULL;
 }
 
 JointStatePublisher::~JointStatePublisher()
 {
-    this->node->shutdown();
 }
 
-void JointStatePublisher::Load(gazebo::physics::ModelPtr _parent,
-  sdf::ElementPtr _sdf)
+void JointStatePublisher::Configure(const gz::sim::Entity &_entity,
+                                    const std::shared_ptr<const sdf::Element> &_sdf,
+                                    gz::sim::EntityComponentManager &_ecm,
+                                    gz::sim::EventManager &_eventManager)
 {
-  this->model = _parent;
+  this->modelEntity = _entity;
 
-  GZ_ASSERT(this->model != NULL, "Invalid model pointer");
-
-  this->world = this->model->GetWorld();
-
-  if (!ros::isInitialized())
+  if (this->modelEntity == gz::sim::kNullEntity)
   {
-    gzerr << "ROS was not initialized. Closing plugin..." << std::endl;
+    gzerr << "Invalid model entity" << std::endl;
     return;
   }
 
-  this->node = boost::shared_ptr<ros::NodeHandle>(
-    new ros::NodeHandle(this->robotNamespace));
+  // Get the model name for the namespace
+  this->robotNamespace = _ecm.Component<gz::sim::components::ModelName>(this->modelEntity)->Data();
+
+  // Initialize ROS 2 node
+  this->node = std::make_shared<rclcpp::Node>("joint_state_publisher");
+
   // Retrieve the namespace used to publish the joint states
   if (_sdf->HasElement("robotNamespace"))
+  {
     this->robotNamespace = _sdf->Get<std::string>("robotNamespace");
+  }
   else
-    this->robotNamespace = this->model->GetName();
-
-  gzmsg << "JointStatePublisher::robotNamespace="
-    << this->robotNamespace << std::endl;
+  {
+    this->robotNamespace = "/" + this->robotNamespace;
+  }
 
   if (this->robotNamespace[0] != '/')
+  {
     this->robotNamespace = "/" + this->robotNamespace;
+  }
+
+  gzmsg << "JointStatePublisher::robotNamespace=" << this->robotNamespace << std::endl;
 
   if (_sdf->HasElement("updateRate"))
+  {
     this->updateRate = _sdf->Get<double>("updateRate");
+  }
   else
-    this->updateRate = 50;
+  {
+    this->updateRate = 50.0;
+  }
 
   gzmsg << "JointStatePublisher::Retrieving moving joints:" << std::endl;
   this->movingJoints.clear();
-  double upperLimit, lowerLimit;
-  for (auto &joint : this->model->GetJoints())
-  {
-#if GAZEBO_MAJOR_VERSION >= 8
-  lowerLimit = joint->LowerLimit(0);
-  upperLimit = joint->UpperLimit(0);
-#else
-  lowerLimit = joint->GetLowerLimit(0).Radian();
-  upperLimit = joint->GetUpperLimit(0).Radian();
-#endif
-    if (lowerLimit  == 0 && upperLimit == 0)
-      continue;
-    else if (joint->GetType() == gazebo::physics::Base::EntityType::FIXED_JOINT)
-      continue;
-    else
-    {
-      this->movingJoints.push_back(joint->GetName());
-      gzmsg << "\t- " << joint->GetName() << std::endl;
-    }
-  }
-
-  GZ_ASSERT(this->updateRate > 0, "Update rate must be positive");
-
-  // Setting the update period
   this->updatePeriod = 1.0 / this->updateRate;
 
+  // Get all joints from the model
+  auto jointEntities = _ecm.ChildrenByComponents(
+    this->modelEntity, gz::sim::components::Joint());
+
+  for (const auto &jointEntity : jointEntities)
+  {
+    auto jointNameComp = _ecm.Component<gz::sim::components::JointName>(jointEntity);
+    if (!jointNameComp)
+    {
+      continue;
+    }
+
+    std::string jointName = jointNameComp->Data();
+
+    auto jointLowerLimitComp = _ecm.Component<gz::sim::components::JointLowerLimit>(jointEntity);
+    auto jointUpperLimitComp = _ecm.Component<gz::sim::components::JointUpperLimit>(jointEntity);
+
+    double lowerLimit = 0.0;
+    double upperLimit = 0.0;
+
+    if (jointLowerLimitComp)
+    {
+      lowerLimit = jointLowerLimitComp->Data()[0];
+    }
+    if (jointUpperLimitComp)
+    {
+      upperLimit = jointUpperLimitComp->Data()[0];
+    }
+
+    if (lowerLimit == 0.0 && upperLimit == 0.0)
+    {
+      continue;
+    }
+
+    this->movingJoints.push_back(jointName);
+    gzmsg << "\t- " << jointName << std::endl;
+  }
+
+  GZ_ASSERT(this->updateRate > 0.0, "Update rate must be positive");
+
   // Advertise the joint states topic
-  this->jointStatePub =
-    this->node->advertise<sensor_msgs::JointState>(
-      this->robotNamespace + "/joint_states", 1);
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->lastUpdate = this->world->SimTime();
-#else
-  this->lastUpdate = this->world->GetSimTime();
-#endif
-  // Connect the update function to the Gazebo callback
-  this->updateConnection = gazebo::event::Events::ConnectWorldUpdateBegin(
-    boost::bind(&JointStatePublisher::OnUpdate, this, _1));
+  this->jointStatePub = this->node->create_publisher<sensor_msgs::msg::JointState>(
+    this->robotNamespace + "/joint_states", 1);
+
+  this->lastUpdate = this->node->get_clock()->now();
 }
 
-void JointStatePublisher::OnUpdate(const gazebo::common::UpdateInfo &_info)
+void JointStatePublisher::Update(const gz::sim::UpdateInfo &_info,
+                                 gz::sim::EntityComponentManager &_ecm)
 {
-#if GAZEBO_MAJOR_VERSION >= 8
-  gazebo::common::Time simTime = this->world->SimTime();
-#else
-  gazebo::common::Time simTime = this->world->GetSimTime();
-#endif
-  if (simTime - this->lastUpdate >= this->updatePeriod)
+  auto simTime = rclcpp::Time(
+    static_cast<uint64_t>(_info.simTime.Double() * 1e9),
+    RCL_ROS_TIME);
+
+  if ((simTime - this->lastUpdate).seconds() >= this->updatePeriod)
   {
-    this->PublishJointStates();
+    this->PublishJointStates(_ecm);
     this->lastUpdate = simTime;
   }
 }
 
-void JointStatePublisher::PublishJointStates()
+void JointStatePublisher::PublishJointStates(const gz::sim::EntityComponentManager &_ecm)
 {
-  ros::Time stamp = ros::Time::now();
-  sensor_msgs::JointState jointState;
+  auto modelEntity = _ecm.Component<gz::sim::components::ModelName>(this->modelEntity);
+  if (!modelEntity)
+  {
+    return;
+  }
 
-  jointState.header.stamp = stamp;
-  // Resize containers
-  jointState.name.resize(this->model->GetJointCount());
-  jointState.position.resize(this->model->GetJointCount());
-  jointState.velocity.resize(this->model->GetJointCount());
-  jointState.effort.resize(this->model->GetJointCount());
+  auto jointEntities = _ecm.ChildrenByComponents(
+    this->modelEntity, gz::sim::components::Joint());
+
+  sensor_msgs::msg::JointState jointState;
+
+  jointState.name.resize(jointEntities.size());
+  jointState.position.resize(jointEntities.size());
+  jointState.velocity.resize(jointEntities.size());
+  jointState.effort.resize(jointEntities.size());
 
   int i = 0;
-  for (auto &joint : this->model->GetJoints())
+  for (const auto &jointEntity : jointEntities)
   {
-    if (!this->IsIgnoredJoint(joint->GetName()))
+    auto jointNameComp = _ecm.Component<gz::sim::components::JointName>(jointEntity);
+    if (!jointNameComp)
     {
-      jointState.name[i] = joint->GetName();
-#if GAZEBO_MAJOR_VERSION >= 8
-      jointState.position[i] = joint->Position(0);
-#else
-      jointState.position[i] = joint->GetAngle(0).Radian();
-#endif
-      jointState.velocity[i] = joint->GetVelocity(0);
-      jointState.effort[i] = joint->GetForce(0);
+      continue;
     }
-      else
+
+    std::string jointName = jointNameComp->Data();
+
+    if (!this->IsIgnoredJoint(jointName))
     {
-      jointState.name[i] = joint->GetName();
+      jointState.name[i] = jointName;
+
+      auto jointPosComp = _ecm.Component<gz::sim::components::JointPosition>(jointEntity);
+      auto jointVelComp = _ecm.Component<gz::sim::components::JointVelocity>(jointEntity);
+
+      if (jointPosComp)
+      {
+        jointState.position[i] = jointPosComp->Data()[0];
+      }
+      else
+      {
+        jointState.position[i] = 0.0;
+      }
+
+      if (jointVelComp)
+      {
+        jointState.velocity[i] = jointVelComp->Data()[0];
+      }
+      else
+      {
+        jointState.velocity[i] = 0.0;
+      }
+
+      jointState.effort[i] = 0.0;
+    }
+    else
+    {
+      jointState.name[i] = jointName;
       jointState.position[i] = 0.0;
       jointState.velocity[i] = 0.0;
       jointState.effort[i] = 0.0;
@@ -157,15 +209,25 @@ void JointStatePublisher::PublishJointStates()
     ++i;
   }
 
-  this->jointStatePub.publish(jointState);
+  jointState.header.stamp = this->node->get_clock()->now();
+  this->jointStatePub->publish(jointState);
 }
 
-bool JointStatePublisher::IsIgnoredJoint(std::string _jointName)
+bool JointStatePublisher::IsIgnoredJoint(const std::string &_jointName)
 {
-  if (this->movingJoints.empty()) return true;
-  for (auto joint : this->movingJoints)
+  if (this->movingJoints.empty())
+  {
+    return true;
+  }
+
+  for (const auto &joint : this->movingJoints)
+  {
     if (_jointName.compare(joint) == 0)
+    {
       return false;
+    }
+  }
+
   return true;
 }
 }

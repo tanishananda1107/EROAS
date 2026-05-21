@@ -16,85 +16,147 @@
 /// \file UnderwaterCurrentPlugin.hh
 /// \brief Plugin that for the underwater world
 
-#ifndef __UNDERWATER_CURRENT_PLUGIN_HH__
-#define __UNDERWATER_CURRENT_PLUGIN_HH__
+#ifndef UUV_WORLD_PLUGINS__UNDERWATER_CURRENT_PLUGIN_HH__
+#define UUV_WORLD_PLUGINS__UNDERWATER_CURRENT_PLUGIN_HH__
 
 #include <map>
 #include <cmath>
 #include <string>
+#include <memory>
 
-#include <gazebo/gazebo.hh>
-#include <gazebo/transport/TransportTypes.hh>
-#include <uuv_world_plugins/GaussMarkovProcess.hh>
+#include <ignition/gazebo/System.hh>
+#include <ignition/gazebo/Component.hh>
+#include <ignition/gazebo/EntityComponentManager.hh>
+#include <ignition/gazebo/Events.hh>
 #include <sdf/sdf.hh>
 
-namespace gazebo
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
+#include <uuv_world_ros_plugins_msgs/srv/set_current_model.hpp>
+#include <uuv_world_ros_plugins_msgs/srv/get_current_model.hpp>
+#include <uuv_world_ros_plugins_msgs/srv/set_current_velocity.hpp>
+#include <uuv_world_ros_plugins_msgs/srv/set_current_direction.hpp>
+
+#include <uuv_world_plugins/GaussMarkovProcess.hh>
+
+namespace uuv_world_plugins
 {
-  /// \brief Class for the underwater current plugin
-  /// TODO: Add option to make the underwater current also a function of depth
-  ///       to comply with DNV
-  class UnderwaterCurrentPlugin : public WorldPlugin
-  {
-    /// \brief Class constructor
-    public: UnderwaterCurrentPlugin();
 
-    /// \brief Class destructor
-    public: virtual ~UnderwaterCurrentPlugin();
+/// \brief Class for the underwater current plugin
+/// TODO: Add option to make the underwater current also a function of depth
+///       to comply with DNV
+class UnderwaterCurrentPlugin :
+  public ignition::gazebo::SystemPlugin,
+  public ignition::gazebo::SystemConfigure,
+  public ignition::gazebo::SystemUpdate
+{
+  /// \brief Class constructor
+  public: UnderwaterCurrentPlugin();
 
-    // Documentation inherited.
-    public: virtual void Load(physics::WorldPtr _world,
-        sdf::ElementPtr _sdf);
+  /// \brief Class destructor
+  public: ~UnderwaterCurrentPlugin() override;
 
-    // Documentation inherited.
-    public: virtual void Init();
+  // Documentation inherited.
+  public: void OnConfigure(const ignition::gazebo::ConfigureInfo &info) override;
 
-    /// \brief Update the simulation state.
-    /// \param[in] _info Information used in the update event.
-    public: void Update(const common::UpdateInfo &_info);
+  // Documentation inherited.
+  public: void OnUpdate(const ignition::gazebo::UpdateInfo &info) override;
 
-    /// \brief Publish current velocity and the pose of its frame
-    protected: void PublishCurrentVelocity();
+  /// \brief Update the simulation state.
+  /// \param[in] _info Information used in the update event.
+  protected: void Update(const ignition::gazebo::UpdateInfo &_info);
 
-    /// \brief Update event
-    protected: event::ConnectionPtr updateConnection;
+  /// \brief Publish current velocity and the pose of its frame
+  protected: void PublishCurrentVelocity();
 
-    /// \brief Pointer to world
-    protected: physics::WorldPtr world;
+  /// \brief Update event
+  protected: ignition::gazebo::SystemUpdateEvent lastUpdate;
 
-    /// \brief Pointer to sdf
-    protected: sdf::ElementPtr sdf;
+  /// \brief Pointer to a node for communication
+  protected: rclcpp::Node::SharedPtr rosNode;
 
-    /// \brief True if the sea surface is present
-    protected: bool hasSurface;
+  /// \brief Current velocity topic
+  protected: std::string currentVelocityTopic;
 
-    /// \brief Pointer to a node for communication
-    protected: transport::NodePtr node;
+  /// \brief Namespace for topics and services
+  protected: std::string ns;
 
-    /// \brief Map of publishers
-    protected: std::map<std::string, transport::PublisherPtr>
-      publishers;
+  /// \brief Gauss-Markov process instance for the current velocity
+  protected: GaussMarkovProcess currentVelModel;
 
-    /// \brief Current velocity topic
-    protected: std::string currentVelocityTopic;
+  /// \brief Gauss-Markov process instance for horizontal angle model
+  protected: GaussMarkovProcess currentHorzAngleModel;
 
-    /// \brief Namespace for topics and services
-    protected: std::string ns;
+  /// \brief Gauss-Markov process instance for vertical angle model
+  protected: GaussMarkovProcess currentVertAngleModel;
 
-    /// \brief Gauss-Markov process instance for the current velocity
-    protected: GaussMarkovProcess currentVelModel;
+  /// \brief Last update time stamp
+  protected: ignition::gazebo::Time lastRosPublishTime;
 
-    /// \brief Gauss-Markov process instance for horizontal angle model
-    protected: GaussMarkovProcess currentHorzAngleModel;
+  /// \brief Current linear velocity vector
+  protected: ignition::math::Vector3d currentVelocity;
 
-    /// \brief Gauss-Markov process instance for vertical angle model
-    protected: GaussMarkovProcess currentVertAngleModel;
+  /// \brief Publisher for current velocity
+  protected: rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr flowVelocityPub;
 
-    /// \brief Last update time stamp
-    protected: common::Time lastUpdate;
+  /// \brief Service servers for current velocity model
+  protected: std::map<std::string, rclcpp::ServiceBase::SharedPtr> worldServices;
 
-    /// \brief Current linear velocity vector
-    protected: ignition::math::Vector3d currentVelocity;
-  };
-}
+  /// \brief ROS publish period
+  protected: double rosPublishPeriod;
 
-#endif  // __UNDERWATER_CURRENT_PLUGIN_HH__
+  /// \brief Connection for ROS publishing
+  protected: ignition::gazebo::EventConnectionPtr rosPublishConnection;
+
+  /// \brief Update current velocity model service callback
+  protected: bool UpdateCurrentVelocityModel(
+    const uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Request::SharedPtr _req,
+    uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Response::SharedPtr _res);
+
+  /// \brief Get current velocity model service callback
+  protected: bool GetCurrentVelocityModel(
+    const uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Request::SharedPtr _req,
+    uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Response::SharedPtr _res);
+
+  /// \brief Update horizontal angle model service callback
+  protected: bool UpdateCurrentHorzAngleModel(
+    const uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Request::SharedPtr _req,
+    uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Response::SharedPtr _res);
+
+  /// \brief Get horizontal angle model service callback
+  protected: bool GetCurrentHorzAngleModel(
+    const uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Request::SharedPtr _req,
+    uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Response::SharedPtr _res);
+
+  /// \brief Update vertical angle model service callback
+  protected: bool UpdateCurrentVertAngleModel(
+    const uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Request::SharedPtr _req,
+    uuv_world_ros_plugins_msgs::srv::SetCurrentModel::Response::SharedPtr _res);
+
+  /// \brief Get vertical angle model service callback
+  protected: bool GetCurrentVertAngleModel(
+    const uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Request::SharedPtr _req,
+    uuv_world_ros_plugins_msgs::srv::GetCurrentModel::Response::SharedPtr _res);
+
+  /// \brief Update current velocity service callback
+  protected: bool UpdateCurrentVelocity(
+    const uuv_world_ros_plugins_msgs::srv::SetCurrentVelocity::Request::SharedPtr _req,
+    uuv_world_ros_plugins_msgs::srv::SetCurrentVelocity::Response::SharedPtr _res);
+
+  /// \brief Update horizontal angle service callback
+  protected: bool UpdateHorzAngle(
+    const uuv_world_ros_plugins_msgs::srv::SetCurrentDirection::Request::SharedPtr _req,
+    uuv_world_ros_plugins_msgs::srv::SetCurrentDirection::Response::SharedPtr _res);
+
+  /// \brief Update vertical angle service callback
+  protected: bool UpdateVertAngle(
+    const uuv_world_ros_plugins_msgs::srv::SetCurrentDirection::Request::SharedPtr _req,
+    uuv_world_ros_plugins_msgs::srv::SetCurrentDirection::Response::SharedPtr _res);
+
+  /// \brief Publish current velocity to ROS
+  protected: void OnUpdateCurrentVel();
+};
+
+}  // namespace uuv_world_plugins
+
+#endif  // UUV_WORLD_PLUGINS__UNDERWATER_CURRENT_PLUGIN_HH__

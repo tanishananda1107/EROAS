@@ -1,26 +1,36 @@
-
 <?xml version="1.0"?>
-<package format="2">
-  <name>uuv_control_cascaded_pid</name>
-  <version>0.0.1</version>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>uuv_control_cascaded_pids</name>
+  <version>0.6.13</version>
+  <description>
+    Cascaded PID controller for UUVs.
+  </description>
 
-  <description>ROS2 cascaded PID controllers for UUV</description>
+  <maintainer email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</maintainer>
+  <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
+  <maintainer email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</maintainer>
 
-  <maintainer email="user@todo.com">user</maintainer>
+  <author email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</author>
+  <author email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</author>
+  <author email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</author>
+
   <license>Apache-2.0</license>
 
-  <build_depend>ament_cmake</build_depend>
-  <build_depend>ament_python</build_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>python3-setuptools</build_depend>
 
   <depend>rclpy</depend>
+  <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
-  <depend>nav_msgs</depend>
+  <depend>uuv_control_msgs</depend>
+  <depend>uuv_control_utils</depend>
+  <depend>uuv_thruster_manager</depend>
 
-  <exec_depend>python3-numpy</exec_depend>
-  <test_depend>pytest</test_depend>
-  <executable_test>uuv_control_cascaded_pid</executable_test>
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>
-
-No changes were needed for the package.xml file, just updated the format to[2D[K
-to `2` as per ROS2.
-

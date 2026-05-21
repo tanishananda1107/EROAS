@@ -30,7 +30,7 @@
 
   <!-- Joint state publisher plugin -->
   <gazebo>
-    <plugin name="uuv_joint_state_publisher" filename="libuuv_joint_state_publisher.so">
+    <plugin name="uuv_joint_state_publisher" filename="gz-sim-joint-state-publisher-system">
       <robotNamespace>$(arg namespace)</robotNamespace>
       <updateRate>50</updateRate>
     </plugin>

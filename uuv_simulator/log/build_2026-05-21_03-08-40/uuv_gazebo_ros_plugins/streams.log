@@ -1,0 +1,49 @@
+[0.006s] Invoking command in '/home/airl-user/eroas_ws/src/EROAS/uuv_simulator/build/uuv_gazebo_ros_plugins': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake /home/airl-user/eroas_ws/src/EROAS/uuv_simulator -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/home/airl-user/eroas_ws/src/EROAS/uuv_simulator/install/uuv_gazebo_ros_plugins
+[0.090s] -- The C compiler identification is GNU 13.3.0
+[0.460s] -- The CXX compiler identification is GNU 13.3.0
+[0.806s] -- Detecting C compiler ABI info
+[0.971s] -- Detecting C compiler ABI info - done
+[0.977s] -- Check for working C compiler: /usr/bin/cc - skipped
+[0.977s] -- Detecting C compile features
+[0.977s] -- Detecting C compile features - done
+[1.033s] -- Detecting CXX compiler ABI info
+[1.246s] -- Detecting CXX compiler ABI info - done
+[1.252s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[1.253s] -- Detecting CXX compile features
+[1.253s] -- Detecting CXX compile features - done
+[1.260s] -- Found ament_cmake: 2.5.6 (/opt/ros/jazzy/share/ament_cmake/cmake)
+[1.378s] -- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter 
+[1.490s] -- Found rclcpp: 28.1.18 (/opt/ros/jazzy/share/rclcpp/cmake)
+[1.625s] -- Found rosidl_generator_c: 4.6.7 (/opt/ros/jazzy/share/rosidl_generator_c/cmake)
+[1.640s] -- Found rosidl_generator_cpp: 4.6.7 (/opt/ros/jazzy/share/rosidl_generator_cpp/cmake)
+[1.664s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[1.686s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[1.778s] -- Found rmw_implementation_cmake: 7.3.3 (/opt/ros/jazzy/share/rmw_implementation_cmake/cmake)
+[1.782s] -- Found rmw_fastrtps_cpp: 8.4.3 (/opt/ros/jazzy/share/rmw_fastrtps_cpp/cmake)
+[1.863s] -- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found version "3.0.13")  
+[1.980s] -- Found FastRTPS: /opt/ros/jazzy/include (Required is at least version "2.13") 
+[2.046s] -- Using RMW implementation 'rmw_fastrtps_cpp' as default
+[2.213s] -- Found sensor_msgs: 5.3.7 (/opt/ros/jazzy/share/sensor_msgs/cmake)
+[2.277s] -- Found visualization_msgs: 5.3.7 (/opt/ros/jazzy/share/visualization_msgs/cmake)
+[2.305s] -- Found tf2_ros: 0.36.20 (/opt/ros/jazzy/share/tf2_ros/cmake)
+[3.056s] CMake Error at CMakeLists.txt:16 (find_package):
+[3.056s]   By not providing "Finduuv_gazebo_ros_plugins_msgs.cmake" in
+[3.056s]   CMAKE_MODULE_PATH this project has asked CMake to find a package
+[3.056s]   configuration file provided by "uuv_gazebo_ros_plugins_msgs", but CMake did
+[3.056s]   not find one.
+[3.056s] 
+[3.056s]   Could not find a package configuration file provided by
+[3.056s]   "uuv_gazebo_ros_plugins_msgs" with any of the following names:
+[3.056s] 
+[3.056s]     uuv_gazebo_ros_plugins_msgsConfig.cmake
+[3.056s]     uuv_gazebo_ros_plugins_msgs-config.cmake
+[3.056s] 
+[3.056s]   Add the installation prefix of "uuv_gazebo_ros_plugins_msgs" to
+[3.056s]   CMAKE_PREFIX_PATH or set "uuv_gazebo_ros_plugins_msgs_DIR" to a directory
+[3.056s]   containing one of the above files.  If "uuv_gazebo_ros_plugins_msgs"
+[3.056s]   provides a separate development package or SDK, be sure it has been
+[3.056s]   installed.
+[3.056s] 
+[3.056s] 
+[3.056s] -- Configuring incomplete, errors occurred!
+[3.066s] Invoked command in '/home/airl-user/eroas_ws/src/EROAS/uuv_simulator/build/uuv_gazebo_ros_plugins' returned '1': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake /home/airl-user/eroas_ws/src/EROAS/uuv_simulator -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/home/airl-user/eroas_ws/src/EROAS/uuv_simulator/install/uuv_gazebo_ros_plugins

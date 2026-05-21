@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright (c) 2016 The UUV Simulator Authors.
 # All rights reserved.
 #
@@ -13,16 +13,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from __future__ import print_function
 import os
-import rospy
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy
 import numpy as np
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist, Accel, Vector3
 from sensor_msgs.msg import Joy
 
 
-class VehicleTeleop:
+class VehicleTeleop(Node):
     def __init__(self):
         # Load the mapping for each input
         self._axes = dict(x=4, y=3, z=1,
@@ -36,69 +37,61 @@ class VehicleTeleop:
                                xfast=6, yfast=6, zfast=1,
                                rollfast=2, pitchfast=2, yawfast=2)
 
-        if rospy.has_param('~mapping'):
-            mapping = rospy.get_param('~mapping')
+        # Load parameters
+        self._mapping = self.declare_parameter('mapping', {}).value
+        if self._mapping:
             for tag in self._axes:
-                if tag not in mapping:
-                    rospy.loginfo('Tag not found in axes mapping, '
-                                  'tag=%s' % tag)
+                if tag not in self._mapping:
+                    self.get_logger().info(f'Tag not found in axes mapping, tag={tag}')
                 else:
-                    if 'axis' in mapping[tag]:
-                        self._axes[tag] = mapping[tag]['axis']
-                    if 'gain' in mapping[tag]:
-                        self._axes_gain[tag] = mapping[tag]['gain']
+                    if 'axis' in self._mapping[tag]:
+                        self._axes[tag] = self._mapping[tag]['axis']
+                    if 'gain' in self._mapping[tag]:
+                        self._axes_gain[tag] = self._mapping[tag]['gain']
 
         # Dead zone: Force values close to 0 to 0
         # (Recommended for imprecise controllers)
-        self._deadzone = 0.5
-        if rospy.has_param('~deadzone'):
-            self._deadzone = float(rospy.get_param('~deadzone'))
+        self._deadzone = float(self.declare_parameter('deadzone', 0.5).value)
 
         # Default for the RB button of the XBox 360 controller
-        self._deadman_button = -1
-        if rospy.has_param('~deadman_button'):
-            self._deadman_button = int(rospy.get_param('~deadman_button'))
+        self._deadman_button = int(self.declare_parameter('deadman_button', -1).value)
 
         # If these buttons are pressed, the arm will not move
-        if rospy.has_param('~exclusion_buttons'):
-            self._exclusion_buttons = rospy.get_param('~exclusion_buttons')
-            if type(self._exclusion_buttons) in [float, int]:
-                self._exclusion_buttons = [int(self._exclusion_buttons)]
-            elif type(self._exclusion_buttons) == list:
-                for n in self._exclusion_buttons:
-                    if type(n) not in [float, int]:
-                        raise rospy.ROSException(
-                            'Exclusion buttons must be an integer index to '
-                            'the joystick button')
-        else:
-            self._exclusion_buttons = list()
+        self._exclusion_buttons = self.declare_parameter('exclusion_buttons', []).value
+        if isinstance(self._exclusion_buttons, (float, int)):
+            self._exclusion_buttons = [int(self._exclusion_buttons)]
+        elif isinstance(self._exclusion_buttons, list):
+            for n in self._exclusion_buttons:
+                if not isinstance(n, (float, int)):
+                    raise Exception(
+                        'Exclusion buttons must be an integer index to '
+                        'the joystick button')
 
         # Default for the start button of the XBox 360 controller
-        self._home_button = 7
-        if rospy.has_param('~home_button'):
-            self._home_button = int(rospy.get_param('~home_button'))
+        self._home_button = int(self.declare_parameter('home_button', 7).value)
 
-        self._msg_type = 'twist'
-        if rospy.has_param('~type'):
-            self._msg_type = rospy.get_param('~type')
-            if self._msg_type not in ['twist', 'accel']:
-                raise rospy.ROSException('Teleoperation output must be either '
-                                         'twist or accel')
+        self._msg_type = self.declare_parameter('type', 'twist').value
+        if self._msg_type not in ['twist', 'accel']:
+            raise Exception('Teleoperation output must be either twist or accel')
+
+        # QoS profile for reliable communication
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            depth=1
+        )
 
         if self._msg_type == 'twist':
-            self._output_pub = rospy.Publisher('output', Twist, queue_size=1)
+            self._output_pub = self.create_publisher(Twist, 'output', qos_profile)
         else:
-            self._output_pub = rospy.Publisher('output', Accel, queue_size=1)
+            self._output_pub = self.create_publisher(Accel, 'output', qos_profile)
 
-        self._home_pressed_pub = rospy.Publisher(
-            'home_pressed', Bool, queue_size=1)
+        self._home_pressed_pub = self.create_publisher(
+            Bool, 'home_pressed', qos_profile)
 
         # Joystick topic subscriber
-        self._joy_sub = rospy.Subscriber('joy', Joy, self._joy_callback)
-
-        rate = rospy.Rate(50)
-        while not rospy.is_shutdown():
-            rate.sleep()
+        self._joy_sub = self.create_subscription(
+            Joy, 'joy', self._joy_callback, qos_profile)
 
     def _parse_joy(self, joy=None):
         if self._msg_type == 'twist':
@@ -179,13 +172,20 @@ class VehicleTeleop:
                   ' check if the joy_id corresponds to the joystick ' 
                   'being used. message={}'.format(e))
 
+def main(args=None):
+    rclpy.init(args=args)
+
+    node_name = 'vehicle_teleop'
+    print(f'Starting [{node_name}] node')
+
+    node = VehicleTeleop()
+
+    rclpy.spin(node)
+
+    node.destroy_node()
+    print(f'Shutting down [{node_name}] node')
+    rclpy.shutdown()
+
+
 if __name__ == '__main__':
-    # Start the node
-    node_name = os.path.splitext(os.path.basename(__file__))[0]
-    rospy.init_node(node_name)
-    rospy.loginfo('Starting [%s] node' % node_name)
-
-    teleop = VehicleTeleop()
-
-    rospy.spin()
-    rospy.loginfo('Shutting down [%s] node' % node_name)
+    main()

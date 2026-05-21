@@ -1,0 +1,34 @@
+[0.005s] Invoking command in '/home/airl-user/eroas_ws/src/EROAS/uuv_simulator/build/uuv_gazebo_ros_plugins': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake /home/airl-user/eroas_ws/src/EROAS/uuv_simulator -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/home/airl-user/eroas_ws/src/EROAS/uuv_simulator/install/uuv_gazebo_ros_plugins
+[0.013s] -- Found ament_cmake: 2.5.6 (/opt/ros/jazzy/share/ament_cmake/cmake)
+[0.203s] -- Found rclcpp: 28.1.18 (/opt/ros/jazzy/share/rclcpp/cmake)
+[0.294s] -- Found rosidl_generator_c: 4.6.7 (/opt/ros/jazzy/share/rosidl_generator_c/cmake)
+[0.305s] -- Found rosidl_generator_cpp: 4.6.7 (/opt/ros/jazzy/share/rosidl_generator_cpp/cmake)
+[0.310s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[0.317s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[0.347s] -- Found rmw_implementation_cmake: 7.3.3 (/opt/ros/jazzy/share/rmw_implementation_cmake/cmake)
+[0.348s] -- Found rmw_fastrtps_cpp: 8.4.3 (/opt/ros/jazzy/share/rmw_fastrtps_cpp/cmake)
+[0.484s] -- Using RMW implementation 'rmw_fastrtps_cpp' as default
+[0.612s] -- Found sensor_msgs: 5.3.7 (/opt/ros/jazzy/share/sensor_msgs/cmake)
+[0.677s] -- Found visualization_msgs: 5.3.7 (/opt/ros/jazzy/share/visualization_msgs/cmake)
+[0.694s] -- Found tf2_ros: 0.36.20 (/opt/ros/jazzy/share/tf2_ros/cmake)
+[1.225s] CMake Error at CMakeLists.txt:16 (find_package):
+[1.225s]   By not providing "Finduuv_gazebo_ros_plugins_msgs.cmake" in
+[1.225s]   CMAKE_MODULE_PATH this project has asked CMake to find a package
+[1.225s]   configuration file provided by "uuv_gazebo_ros_plugins_msgs", but CMake did
+[1.225s]   not find one.
+[1.225s] 
+[1.225s]   Could not find a package configuration file provided by
+[1.225s]   "uuv_gazebo_ros_plugins_msgs" with any of the following names:
+[1.225s] 
+[1.225s]     uuv_gazebo_ros_plugins_msgsConfig.cmake
+[1.225s]     uuv_gazebo_ros_plugins_msgs-config.cmake
+[1.225s] 
+[1.225s]   Add the installation prefix of "uuv_gazebo_ros_plugins_msgs" to
+[1.225s]   CMAKE_PREFIX_PATH or set "uuv_gazebo_ros_plugins_msgs_DIR" to a directory
+[1.225s]   containing one of the above files.  If "uuv_gazebo_ros_plugins_msgs"
+[1.225s]   provides a separate development package or SDK, be sure it has been
+[1.225s]   installed.
+[1.225s] 
+[1.225s] 
+[1.225s] -- Configuring incomplete, errors occurred!
+[1.231s] Invoked command in '/home/airl-user/eroas_ws/src/EROAS/uuv_simulator/build/uuv_gazebo_ros_plugins' returned '1': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake /home/airl-user/eroas_ws/src/EROAS/uuv_simulator -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/home/airl-user/eroas_ws/src/EROAS/uuv_simulator/install/uuv_gazebo_ros_plugins

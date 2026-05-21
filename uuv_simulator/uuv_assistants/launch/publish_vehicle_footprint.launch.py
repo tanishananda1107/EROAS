@@ -1,30 +1,32 @@
+#!/usr/bin/env python3
+"""
+Launch file to publish vehicle footprint.
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-def generate_launch_description():
 
+def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument("uuv_name"),
-        DeclareLaunchArgument("scale_footprint", default_value="10"),
-        DeclareLaunchArgument("scale_label", default_value="10"),
-        DeclareLaunchArgument("label_x_offset", default_value="60"),
-        DeclareLaunchArgument("odom_topic", default_value="pose_gt"),
+        DeclareLaunchArgument('namespace', default_value='rexrov',
+                             description='Namespace for the robot'),
+        DeclareLaunchArgument('footprint_topic', default_value='footprint',
+                             description='Footprint topic'),
+        DeclareLaunchArgument('child_frame_id', default_value='$(var namespace)/base_footprint',
+                             description='Child frame ID'),
 
         Node(
-            package="uuv_assistants",
-            executable="publish_vehicle_footprint.py",
-            namespace=LaunchConfiguration("uuv_name"),
-            name="publish_footprints",
-            remappings=[
-                ("odom", LaunchConfiguration("odom_topic"))
-            ],
+            package='uuv_assistants',
+            executable='uuv_publish_vehicle_footprint',
+            name='publish_vehicle_footprint',
+            output='screen',
+            namespace='$(var namespace)',
             parameters=[{
-                "scale_footprint": LaunchConfiguration("scale_footprint"),
-                "scale_label": LaunchConfiguration("scale_label"),
-                "label_x_offset": LaunchConfiguration("label_x_offset"),
-            }],
-            output="screen"
-        )
+                'footprint_topic': LaunchConfiguration('footprint_topic'),
+                'child_frame_id': LaunchConfiguration('child_frame_id'),
+            }]
+        ),
     ])
