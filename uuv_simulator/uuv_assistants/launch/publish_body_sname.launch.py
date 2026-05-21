@@ -1,29 +1,57 @@
 #!/usr/bin/env python3
+
 """
-Launch file to publish body state name.
+Publish static transform:
+base_link -> base_link_ned
 """
 
 from launch import LaunchDescription
+
 from launch.actions import DeclareLaunchArgument
+
 from launch.substitutions import LaunchConfiguration
+
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+
+    uuv_name = LaunchConfiguration('uuv_name')
+
     return LaunchDescription([
-        DeclareLaunchArgument('namespace', default_value='rexrov',
-                             description='Namespace for the robot'),
-        DeclareLaunchArgument('body_state_name', default_value='body_state',
-                             description='Body state name'),
+
+        DeclareLaunchArgument(
+            'uuv_name'
+        ),
 
         Node(
-            package='uuv_assistants',
-            executable='uuv_publish_body_sname',
-            name='publish_body_sname',
-            output='screen',
-            namespace='$(var namespace)',
-            parameters=[{
-                'body_state_name': LaunchConfiguration('body_state_name'),
-            }]
-        ),
+
+            package='tf2_ros',
+
+            executable='static_transform_publisher',
+
+            name='sname_frame_publisher',
+
+            namespace=uuv_name,
+
+            arguments=[
+
+                '0',
+                '0',
+                '0',
+
+                '0',
+                '0',
+                '3.141592653589793',
+
+                ['/', uuv_name, '/base_link'],
+
+                ['/', uuv_name, '/base_link_ned']
+
+            ],
+
+            output='screen'
+
+        )
+
     ])

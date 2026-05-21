@@ -1,21 +1,36 @@
 from setuptools import setup
 
-package_name = 'uuv_assistants'
+package_name='uuv_assistants'
 
 setup(
+
     name=package_name,
-    version='0.0.0',
+
+    version='0.6.13',
+
     packages=['tf_quaternion'],
-    package_dir={'': 'src'},
-    data_files=[
-        ('share/ament_index/resource_index/packages',
-            ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+
+    package_dir={'':'src'},
+
+    install_requires=[
+        'setuptools'
     ],
-    install_requires=['setuptools', 'rclpy'],
+
     zip_safe=True,
-    maintainer='AIRLab IISc',
-    maintainer_email='airlab@iisc.ac.in',
-    description='UUV Assistants - quaternion utilities, TF helpers, simulation timer',
-    license='Apache-2.0',
+
+    entry_points={
+
+        'console_scripts':[
+
+            'publish_footprints=scripts.publish_footprints:main',
+
+            'publish_vehicle_footprint=scripts.publish_vehicle_footprint:main',
+
+            'publish_world_models=scripts.publish_world_models:main',
+
+            'set_simulation_timer=scripts.set_simulation_timer:main',
+
+            'unpause_simulation=scripts.unpause_simulation:main'
+        ]
+    }
 )

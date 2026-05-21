@@ -1,71 +1,248 @@
-
 #!/usr/bin/env python3
+
+import math
 import numpy as np
-from typing import Any, Dict
-from dataclasses import dataclass
-import time
-from ament_index_python.packages import get_package_share_directory
 
 import rclpy
 from rclpy.node import Node
-from tf2_ros import Buffer, TransformListener
+from rcl_interfaces.msg import SetParametersResult
+
+from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Vector3
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import PoseStamped, Twist
 
-@dataclass
-class PositionUnderactuated(Node):
-    def __post_init__(self):
+import tf_transformations as trans
+
+from PID import PIDRegulator
+
+
+class PositionControllerNode(Node):
+
+    def __init__(self):
+
+        super().__init__(
+            'position_control_underactuated'
+        )
+
         self.pos_des = np.zeros(3)
-        self.quat_des = np.array([0, 0, 0, 1])
 
-        self.sub_cmd = self.create_subscription(
-            PoseStamped, 'cmd_pose', self.cb_cmd, 10)
+        self.quat_des = np.array(
+            [0,0,0,1]
+        )
 
-        self.sub_odom = self.create_subscription(
-            Odometry, 'odom', self.cb_odom, 10)
+        self.initialized=False
 
-        self.pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        self.declare_parameters(
+            namespace='',
+            parameters=[
 
-    def cb_cmd(self, msg: Any) -> None:
-        p = msg.pose.position
-        q = msg.pose.orientation
+                ('forward_p',1.0),
+                ('forward_i',0.0),
+                ('forward_d',0.0),
+                ('forward_sat',1.0),
 
-        self.pos_des = np.array([p.x, p.y, p.z])
-        self.quat_des = np.array([q.x, q.y, q.z, q.w])
+                ('depth_p',1.0),
+                ('depth_i',0.0),
+                ('depth_d',0.0),
+                ('depth_sat',1.0),
 
-    def cb_odom(self, msg: Odometry) -> None:
-        p = msg.pose.pose.position
-        p = np.array([p.x, p.y, p.z])
+                ('heading_p',1.0),
+                ('heading_i',0.0),
+                ('heading_d',0.0),
+                ('heading_sat',1.0)
+            ]
+        )
 
-        err = self.pos_des - p
+        self.create_pid()
 
-        vx = 0.5 * np.linalg.norm(err[:2])
-        vz = 0.5 * err[2]
-        wz = 0.2 * np.arctan2(err[1], err[0])
+        self.add_on_set_parameters_callback(
+            self.parameter_callback
+        )
 
-        cmd = Twist()
-        cmd.linear.x = vx
-        cmd.linear.y = 0.0
-        cmd.linear.z = vz
+        self.sub_pose = (
+            self.create_subscription(
+                PoseStamped,
+                'cmd_pose',
+                self.cmd_pose_callback,
+                10
+            )
+        )
 
-        cmd.angular.z = wz
+        self.sub_odom = (
+            self.create_subscription(
+                Odometry,
+                'odom',
+                self.odometry_callback,
+                10
+            )
+        )
 
-        self.pub.publish(cmd)
+        self.pub_cmd_vel = (
+            self.create_publisher(
+                Twist,
+                'cmd_vel',
+                10
+            )
+        )
+
+    def create_pid(self):
+
+        self.pid_forward=PIDRegulator(
+            self.get_parameter(
+                'forward_p').value,
+
+            self.get_parameter(
+                'forward_i').value,
+
+            self.get_parameter(
+                'forward_d').value,
+
+            self.get_parameter(
+                'forward_sat').value
+        )
+
+        self.pid_depth=PIDRegulator(
+            self.get_parameter(
+                'depth_p').value,
+
+            self.get_parameter(
+                'depth_i').value,
+
+            self.get_parameter(
+                'depth_d').value,
+
+            self.get_parameter(
+                'depth_sat').value
+        )
+
+        self.pid_heading=PIDRegulator(
+            self.get_parameter(
+                'heading_p').value,
+
+            self.get_parameter(
+                'heading_i').value,
+
+            self.get_parameter(
+                'heading_d').value,
+
+            self.get_parameter(
+                'heading_sat').value
+        )
+
+    def parameter_callback(self,params):
+
+        self.create_pid()
+
+        return SetParametersResult(
+            successful=True
+        )
+
+    def cmd_pose_callback(self,msg):
+
+        p=msg.pose.position
+
+        q=msg.pose.orientation
+
+        self.pos_des=np.array(
+            [p.x,p.y,p.z]
+        )
+
+        self.quat_des=np.array(
+            [q.x,q.y,q.z,q.w]
+        )
+
+    def odometry_callback(self,msg):
+
+        p=msg.pose.pose.position
+
+        q=msg.pose.pose.orientation
+
+        pos=np.array(
+            [p.x,p.y,p.z]
+        )
+
+        quat=np.array(
+            [q.x,q.y,q.z,q.w]
+        )
+
+        if not self.initialized:
+
+            self.pos_des=pos
+
+            self.quat_des=quat
+
+            self.initialized=True
+
+            return
+
+        t=(
+            msg.header.stamp.sec+
+            msg.header.stamp.nanosec*1e-9
+        )
+
+        R=trans.quaternion_matrix(
+            quat
+        )[0:3,0:3]
+
+        e_pos=(
+            R.T @
+            (self.pos_des-pos)
+        )
+
+        vz=self.pid_depth.regulate(
+            e_pos[2],
+            t
+        )
+
+        vx=self.pid_forward.regulate(
+            np.linalg.norm(
+                e_pos[0:2]
+            ),
+            t
+        )
+
+        heading=np.arctan2(
+            e_pos[1],
+            e_pos[0]
+        )
+
+        wz=self.pid_heading.regulate(
+            heading,
+            t
+        )
+
+        cmd=Twist()
+
+        cmd.linear=Vector3(
+            x=float(vx),
+            y=0.0,
+            z=float(vz)
+        )
+
+        cmd.angular=Vector3(
+            x=0.0,
+            y=0.0,
+            z=float(wz)
+        )
+
+        self.pub_cmd_vel.publish(
+            cmd
+        )
 
 
-def main():
-    rclpy.init()
+def main(args=None):
 
-    package_share_directory = get_package_share_directory('position_underac[45D[K
-get_package_share_directory('position_underactuated')
+    rclpy.init(args=args)
 
-    node = PositionUnderactuated()
+    node=PositionControllerNode()
+
     rclpy.spin(node)
 
     node.destroy_node()
+
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__=="__main__":
     main()
-

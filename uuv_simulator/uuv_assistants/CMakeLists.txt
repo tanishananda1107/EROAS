@@ -1,54 +1,40 @@
 cmake_minimum_required(VERSION 3.8)
+
 project(uuv_assistants)
 
-# Find dependencies
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
 find_package(ament_cmake REQUIRED)
+
 find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
-find_package(ament_cmake_python REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
-# Build C++ node
-add_executable(uuv_message_to_tf src/message_to_tf.cc)
-target_link_libraries(uuv_message_to_tf
-  rclcpp::rclcpp
-  tf2_ros::tf2_ros
-)
-target_include_directories(uuv_message_to_tf PRIVATE
-  ${rclcpp_INCLUDE_DIRS}
-  ${tf2_ros_INCLUDE_DIRS}
+install(
+  DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
 )
 
-# Install C++ executable
-install(TARGETS
-  uuv_message_to_tf
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
-
-# Install Python scripts
-install(PROGRAMS
-  scripts/create_new_robot_model
-  scripts/create_thruster_manager_configuration
+install(
+  PROGRAMS
+    scripts/publish_footprints.py
+    scripts/publish_vehicle_footprint.py
+    scripts/publish_world_models.py
+    scripts/set_simulation_timer.py
+    scripts/unpause_simulation.py
+    scripts/create_new_robot_model
+    scripts/create_thruster_manager_configuration
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# Install Python package
-ament_python_install_package(${PROJECT_NAME})
-
-# Install launch files
-install(DIRECTORY
-  launch
-  DESTINATION share/${PROJECT_NAME}/launch
-  PATTERN "*.launch" EXCLUDE
-)
-
-install(DIRECTORY
-  launch
-  DESTINATION share/${PROJECT_NAME}/launch
-  PATTERN "*.launch.py"
+install(
+  DIRECTORY src/tf_quaternion
+  DESTINATION lib/python3/dist-packages
 )
 
 ament_package()
