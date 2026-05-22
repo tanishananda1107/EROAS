@@ -1,12 +1,17 @@
 builtin_interfaces/Time start_time
 bool start_now
+
 float64 radius
 geometry_msgs/Point center
+
 bool is_clockwise
 float64 angle_offset
+
 int32 n_points
+
 float64 heading_offset
 float64 max_forward_speed
 float64 duration
+
 ---
 bool success

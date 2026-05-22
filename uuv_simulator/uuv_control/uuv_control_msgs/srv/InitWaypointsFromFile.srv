@@ -1,11 +1,14 @@
-string LIPB=lipb
-string CUBIC=cubic
-string DUBINS=dubins
-string LINEAR=linear
+string LIPB='lipb'
+string CUBIC='cubic'
+string DUBINS='dubins'
+string LINEAR='linear'
 
 builtin_interfaces/Time start_time
+
 bool start_now
+
 string filename
 string interpolator
+
 ---
 bool success

@@ -1,10 +1,16 @@
 builtin_interfaces/Time start_time
+
 bool start_now
+
 geometry_msgs/Point origin
+
 float64 height
 float64 width
+
 float64 angle_offset
+
 float64 heading_offset
 float64 max_forward_speed
+
 ---
 bool success

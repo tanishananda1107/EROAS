@@ -1,8 +1,13 @@
 builtin_interfaces/Time start_time
+
 bool start_now
-Waypoint[] waypoints
+
+uuv_control_msgs/Waypoint[] waypoints
+
 float64 max_forward_speed
 float64 heading_offset
+
 string interpolator
+
 ---
 bool success
