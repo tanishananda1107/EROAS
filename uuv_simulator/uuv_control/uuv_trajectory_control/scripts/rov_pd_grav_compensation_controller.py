@@ -1,51 +1,117 @@
+#!/usr/bin/env python3
 
 import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import Wrench
 import numpy as np
-from tf2_ros import Buffer, TransformException
-from std_msgs.msg import Float64
 
-class ROVPDGravityComp(Node):
+from rclpy.node import Node
+from uuv_control_interfaces import DPControllerBase
+
+
+class ROVPDGCompController(
+        Node,
+        DPControllerBase):
+
+    _LABEL = (
+        'PD controller with '
+        'compensation of restoring forces'
+    )
 
     def __init__(self):
-        super().__init__('rov_pd_gravity_comp')
 
-        self.pub = self.create_publisher(Wrench, 'cmd_wrench', 10)
-        self.timer = self.create_timer(0.1, self.update)
+        Node.__init__(
+            self,
+            'rov_pd_grav_compensation_controller'
+        )
 
-        self.Kp = np.diag(np.ones(6))
-        self.Kd = np.diag(np.ones(6))
+        DPControllerBase.__init__(
+            self,
+            is_model_based=True
+        )
 
-    def get_error(self):
-        return np.zeros(6)
+        self.get_logger().info(
+            self._LABEL
+        )
 
-    def gravity(self):
-        return np.zeros(6)
+        self._Kp = np.zeros(
+            (6, 6)
+        )
 
-    def update(self):
-        e = self.get_error()
-        de = np.zeros(6)
+        self._Kd = np.zeros(
+            (6, 6)
+        )
 
-        tau = self.Kp @ e + self.Kd @ de + self.gravity()
+        self._tau = np.zeros(6)
 
-        msg = Wrench()
-        msg.force.x, msg.force.y, msg.force.z = tau[:3]
-        msg.torque.x, msg.torque.y, msg.torque.z = tau[3:]
+        self.declare_parameter(
+            'Kp',
+            [0.0] * 6
+        )
 
-        self.pub.publish(msg)
+        self.declare_parameter(
+            'Kd',
+            [0.0] * 6
+        )
+
+        kp_diag = self.get_parameter(
+            'Kp'
+        ).value
+
+        kd_diag = self.get_parameter(
+            'Kd'
+        ).value
+
+        self._Kp = np.diag(
+            kp_diag
+        )
+
+        self._Kd = np.diag(
+            kd_diag
+        )
+
+        self._is_init = True
+
+    def update_controller(self):
+
+        if not self._is_init:
+            return False
+
+        self._vehicle_model._update_restoring(
+            use_sname=True
+        )
+
+        self._tau = (
+            np.dot(
+                self._Kp,
+                self.error_pose_euler
+            )
+            +
+            np.dot(
+                self._Kd,
+                self._errors['vel']
+            )
+            +
+            self._vehicle_model.restoring_forces
+        )
+
+        self.publish_control_wrench(
+            self._tau
+        )
+
+        return True
 
 
-def main():
-    rclpy.init(args=None)
-    node = ROVPDGravityComp()
-    try:
-        node.get_clock().now()
-    except Exception as e:
-        print(f'Failed to get clock: {e}')
+def main(args=None):
+
+    rclpy.init(args=args)
+
+    node = ROVPDGCompController()
+
+    rclpy.spin(node)
+
     node.destroy_node()
+
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
-

@@ -1,73 +1,192 @@
-
 #!/usr/bin/env python3
 
 import numpy as np
 import matplotlib.pyplot as plt
-from tf2_ros import Buffer, TransformListener
-from rclpy.node import Node
-from rclpy.qos import QoSProfile
 
-class WaypointGenerator(Node):
-
-    def __init__(self):
-        super().__init__('waypoint_generator')
-
-        self.waypoint_set = WaypointSet()
-        self.waypoint_set.add_waypoint(Waypoint(-10, -12, -36, 0.5))
-        self.waypoint_set.add_waypoint(Waypoint(-20, 20, -5, 0.5))
-        self.waypoint_set.add_waypoint(Waypoint(-40, 80, -30, 0.5))
-
-    def run_generator(self):
-        dt = 0.05
-
-        pnts = []
-
-        for ti in np.arange(-2, self.get_max_time(), dt):
-
-            tic = time.perf_counter()
-
-            pnts.append(self.interpolate(ti))
-
-            toc = time.perf_counter()
-
-            print(f'Interpolation time = {toc - tic}')
-
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.plot([p.x for p in pnts], [p.y for p in pnts], [p.z for p in pnt[3D[K
-pnts])
-        ax.grid(True)
-        plt.show()
-
-    def get_max_time(self):
-        return self.waypoint_set.get_max_time()
-
-    def interpolate(self, ti):
-        gen = WPTrajectoryGenerator(full_dof=True)
-        gen.set_interp_method('cubic_interpolator')
-        gen.init_waypoints(self.waypoint_set)
-
-        return gen.interpolate(ti)
+import uuv_trajectory_generator
 
 
-def main(args=None):
+def run_generator(
+        waypoint_set,
+        interp_method):
 
-    rclpy.init(args=args)
-    node = Node('waypoint_generator')
-    qos = QoSProfile(depth=10)
-    buf = Buffer()
-    listener = TransformListener(buf, node)
+    gen = (
+        uuv_trajectory_generator
+        .WPTrajectoryGenerator(
+            full_dof=True
+        )
+    )
 
-    wp_gen = WaypointGenerator()
-    wp_gen.run_generator()
+    gen.set_interp_method(
+        interp_method
+    )
 
-    rclpy.shutdown()
+    gen.init_waypoints(
+        waypoint_set
+    )
+
+    dt = 0.05
+
+    pnts = []
+
+    gen.set_start_time(0)
+
+    for ti in np.arange(
+            -2,
+            gen.get_max_time(),
+            dt):
+
+        pnts.append(
+            gen.interpolate(
+                ti
+            )
+        )
+
+    fig = plt.figure()
+
+    ax = fig.add_subplot(
+        111,
+        projection='3d'
+    )
+
+    ax.plot(
+
+        [p.x for p in pnts],
+
+        [p.y for p in pnts],
+
+        [p.z for p in pnts],
+
+        'b'
+
+    )
+
+    ax.plot(
+
+        waypoint_set.x,
+
+        waypoint_set.y,
+
+        waypoint_set.z,
+
+        'r.'
+
+    )
+
+    ax.grid(True)
+
+    ax.set_title(
+        interp_method
+    )
+
+    fig = plt.figure()
+
+    ax = fig.add_subplot(
+        211
+    )
+
+    for i in range(3):
+
+        ax.plot(
+
+            [p.t for p in pnts],
+
+            [p.pos[i]
+             for p in pnts]
+
+        )
+
+    ax.grid(True)
+
+    ax.set_title(
+        "Position"
+    )
+
+    ax = fig.add_subplot(
+        212
+    )
+
+    for i in range(3):
+
+        ax.plot(
+
+            [p.t for p in pnts],
+
+            [
+                p.rot[i]
+                *
+                180
+                /
+                np.pi
+
+                for p in pnts
+            ]
+
+        )
+
+    ax.grid(True)
+
+    ax.set_title(
+        "Orientation"
+    )
 
 
-if __name__ == '__main__':
+def main():
+
+    wp = (
+        uuv_trajectory_generator
+        .WaypointSet()
+    )
+
+    wp.add_waypoint(
+
+        uuv_trajectory_generator
+        .Waypoint(
+            -10,
+            -12,
+            -36,
+            0.5
+        )
+
+    )
+
+    wp.add_waypoint(
+
+        uuv_trajectory_generator
+        .Waypoint(
+            -20,
+            20,
+            -5,
+            0.5
+        )
+
+    )
+
+    wp.add_waypoint(
+
+        uuv_trajectory_generator
+        .Waypoint(
+            -30,
+            60,
+            -50,
+            0.5
+        )
+
+    )
+
+    run_generator(
+        wp,
+        "cubic_interpolator"
+    )
+
+    run_generator(
+        wp,
+        "lipb_interpolator"
+    )
+
+    plt.show()
+
+
+if __name__ == "__main__":
+
     main()
-
-Note that I removed the `catkin_python_setup()` and replaced it with ament_[6D[K
-ament_cmake build system. Also, replaced rospy dependencies with rclpy and [K
-equivalent and updated service migration accordingly.
-

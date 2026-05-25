@@ -1,66 +1,182 @@
-
 #!/usr/bin/env python3
+
+import os
+
 import rclpy
+
 from rclpy.node import Node
-from tf2_ros import TransformBroadcaster, Buffer
-from geometry_msgs.msg import PoseStamped
-from visualization_msgs.msg import MarkerArray, Marker
+
+from std_msgs.msg import Bool
+
 from nav_msgs.msg import Path
-from uuv_control_msgs.msg import Trajectory, TrajectoryPoint, WaypointSet
-import ament_index
+
+from visualization_msgs.msg import (
+    Marker,
+    MarkerArray
+)
+
+from geometry_msgs.msg import (
+    PoseStamped
+)
+
+from uuv_control_msgs.msg import (
+    Trajectory,
+    TrajectoryPoint,
+    WaypointSet
+)
+
 
 class TrajectoryMarkerPublisher(Node):
 
     def __init__(self):
-        super().__init__('trajectory_marker_publisher')
+
+        super().__init__(
+            'trajectory_marker_publisher'
+        )
 
         self.trajectory = None
+
+        self.waypoints = None
 
         self.create_subscription(
             Trajectory,
             'trajectory',
-            self.trajectory_callback,
+            self.update_trajectory,
             10
         )
 
-        self.path_pub = self.create_publisher(Path, 'trajectory_marker', 10[2D[K
-10)
-        self.marker_pub = self.create_publisher(Marker, 'reference_marker',[19D[K
-'reference_marker', 10)
+        self.create_subscription(
+            WaypointSet,
+            'waypoints',
+            self.update_waypoints,
+            10
+        )
 
-        self.timer = self.create_timer(0.5, self.publish_markers)
+        self.create_subscription(
+            Bool,
+            'automatic_on',
+            lambda x: None,
+            10
+        )
 
-    def trajectory_callback(self, msg):
+        self.create_subscription(
+            Bool,
+            'trajectory_tracking_on',
+            lambda x: None,
+            10
+        )
+
+        self.create_subscription(
+            Bool,
+            'station_keeping_on',
+            lambda x: None,
+            10
+        )
+
+        self.create_subscription(
+            TrajectoryPoint,
+            'reference',
+            self.reference_callback,
+            10
+        )
+
+        self.traj_pub = self.create_publisher(
+            Path,
+            'trajectory_marker',
+            10
+        )
+
+        self.wp_pub = self.create_publisher(
+            MarkerArray,
+            'waypoint_markers',
+            10
+        )
+
+        self.ref_pub = self.create_publisher(
+            Marker,
+            'reference_marker',
+            10
+        )
+
+        self.timer = self.create_timer(
+            0.5,
+            self.publish_markers
+        )
+
+    def update_trajectory(self, msg):
+
         self.trajectory = msg
+
+    def update_waypoints(self, msg):
+
+        self.waypoints = msg
 
     def publish_markers(self):
 
         path = Path()
-        path.header.frame_id = 'world'
-        path.header.stamp = self.get_clock().now().to_msg()
 
-        if self.trajectory is not None:
-            for pnt in self.trajectory.points:
+        if self.trajectory:
+
+            path.header.frame_id = \
+                self.trajectory.header.frame_id
+
+            for p in self.trajectory.points:
 
                 pose = PoseStamped()
-                pose.header = pnt.header
-                pose.pose = pnt.pose
 
-                path.poses.append(pose)
+                pose.header = p.header
 
-        self.path_pub.publish(path)
+                pose.pose = p.pose
+
+                path.poses.append(
+                    pose
+                )
+
+        self.traj_pub.publish(
+            path
+        )
+
+    def reference_callback(self, msg):
+
+        marker = Marker()
+
+        marker.header.frame_id = \
+            msg.header.frame_id
+
+        marker.type = Marker.SPHERE
+
+        marker.action = Marker.MODIFY
+
+        marker.pose.position = \
+            msg.pose.position
+
+        marker.scale.x = 0.3
+
+        marker.scale.y = 0.3
+
+        marker.scale.z = 0.3
+
+        marker.color.a = 1.0
+
+        marker.color.g = 1.0
+
+        self.ref_pub.publish(
+            marker
+        )
 
 
 def main(args=None):
+
     rclpy.init(args=args)
+
     node = TrajectoryMarkerPublisher()
-    try:
-        rclpy.spin(node)
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+
+    rclpy.spin(node)
+
+    node.destroy_node()
+
+    rclpy.shutdown()
 
 
 if __name__ == '__main__':
     main()
-

@@ -1,55 +1,116 @@
+#!/usr/bin/env python3
 
 import rclpy
-from rclpy.node import Node
 import numpy as np
-from tf2_ros import Buffer, TransformListener
-from geometry_msgs.msg import Wrench
 
-class ROVNLPIDController(Node):
+from rclpy.node import Node
+
+from uuv_control_interfaces import (
+    DPPIDControllerBase
+)
+
+
+class ROVNLPIDController(
+        Node,
+        DPPIDControllerBase):
+
+    _LABEL = (
+        'MIMO Nonlinear PID'
+    )
 
     def __init__(self):
-        super().__init__('rov_nl_pid_controller')
 
-        self.pub = self.create_publisher(Wrench, 'cmd_wrench', 10)
-        self.timer = self.create_timer(rclpy.duration.seconds_to_nanosecond[54D[K
-self.create_timer(rclpy.duration.seconds_to_nanoseconds(0.1), lambda: self.[5D[K
-self.update())
+        Node.__init__(
+            self,
+            'rov_nl_pid_controller'
+        )
 
-        self.Hm = np.eye(6)
-        self.tau_prev = np.zeros(6)
+        DPPIDControllerBase.__init__(
+            self,
+            True
+        )
 
-    def get_acc(self):
-        return np.zeros(6)
+        self._Hm = np.eye(6)
 
-    def update(self):
-        acc = self.get_acc()
+        self.declare_parameter(
+            'Hm',
+            [0.0] * 6
+        )
 
-        ff = self.Hm @ acc
+        hm = self.get_parameter(
+            'Hm'
+        ).value
 
-        pid = np.zeros(6)
+        self._Hm = (
+            self._vehicle_model.Mtotal
+            +
+            np.diag(hm)
+        )
 
-        tau = pid - ff
+        self._tau = np.zeros(6)
 
-        self.tau_prev = tau
+        self._accel_ff = np.zeros(
+            6
+        )
 
-        msg = Wrench()
-        msg.force.x, msg.force.y, msg.force.z = tau[:3]
-        msg.torque.x, msg.torque.y, msg.torque.z = tau[3:]
+        self._pid_control = np.zeros(
+            6
+        )
 
-        self.pub.publish(msg)
+        self._is_init = True
+
+    def update_controller(self):
+
+        if not self._is_init:
+            return False
+
+        acc = (
+            self._vehicle_model.compute_acc(
+                self._vehicle_model.to_SNAME(
+                    self._tau
+                ),
+                use_sname=False
+            )
+        )
+
+        self._accel_ff = np.dot(
+            self._Hm,
+            acc
+        )
+
+        self._pid_control = (
+            self.update_pid()
+        )
+
+        self._tau = (
+            self._pid_control
+            -
+            self._accel_ff
+            +
+            self._vehicle_model.restoring_forces
+        )
+
+        self.publish_control_wrench(
+            self._tau
+        )
+
+        return True
 
 
-def main():
-    rclpy.init(args=None)
-    node = ROVNLPIDController()
+def main(args=None):
+
+    rclpy.init(args=args)
+
+    node = (
+        ROVNLPIDController()
+    )
+
     rclpy.spin(node)
+
     node.destroy_node()
+
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
-
-Note: The `tf` package is not used in this code, so I left it as is. If you[3D[K
-you're actually using TF2 ROS functionality, you may need to modify the imp[3D[K
-imports and usage accordingly.
-

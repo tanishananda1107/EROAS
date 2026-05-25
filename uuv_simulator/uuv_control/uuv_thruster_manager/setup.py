@@ -1,47 +1,42 @@
-
 from setuptools import setup
-import os
 
-package_name = 'uuv_thruster_manager'
+package_name = "uuv_thrusters"
 
 setup(
     name=package_name,
-    version='0.6.13',
+
+    version="0.6.13",
 
     packages=[
-        'uuv_thrusters',
-        'uuv_thrusters.models'
+        "uuv_thrusters",
+        "uuv_thrusters.models"
     ],
 
     package_dir={
-        '': 'src'
+        "": "src"
     },
 
     install_requires=[
-        'setuptools',
-        'ament_cmake'
+        "setuptools",
+        "numpy",
+        "PyYAML"
     ],
 
     zip_safe=True,
 
-    maintainer='Musa Morena Marcusso Manhaes',
+    maintainer="UUV Simulator Authors",
 
-    maintainer_email='musa.marcusso@de.bosch.com',
+    maintainer_email="musa.marcusso@de.bosch.com",
 
-    description='ROS2 thruster manager package',
+    description="ROS2 UUV thrusters package",
 
-    license='Apache-2.0',
+    license="Apache-2.0",
 
-    tests_require=['pytest'],
+    tests_require=["pytest"],
 
     entry_points={
-        'console_scripts': [
-            'thruster_allocator = scripts.thruster_allocator:main',
-        ],
-    },
+        "console_scripts": [
+            "thruster_allocator = scripts.thruster_allocator:main"
+        ]
+    }
 )
-
-Note that I removed the `catkin_python_setup()` and replaced it with an emp[3D[K
-empty dictionary (`package_dir={}`). Additionally, I added `ament_cmake` to[2D[K
-to the `install_requires` list.
-

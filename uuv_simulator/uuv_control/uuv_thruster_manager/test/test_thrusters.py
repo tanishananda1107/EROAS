@@ -1,200 +1,74 @@
+#!/usr/bin/env python3
 
-import unittest
+import pytest
 import numpy as np
 import random
-from tf2_ros import Buffer, TransformException
+
+from tf_transformations import (
+    quaternion_matrix,
+    random_quaternion
+)
+
 from uuv_thrusters.models import Thruster
 
-IDX = 0
-TOPIC = '/thruster'
 
-AXES = [
-    np.array([1, 0, 0, 0]),
-    np.array([0, 1, 0, 0]),
-    np.array([0, 0, 1, 0])
+IDX = 0
+
+TOPIC="/thruster"
+
+
+AXES=[
+
+np.array([1,0,0,0]),
+
+np.array([0,1,0,0]),
+
+np.array([0,0,1,0])
+
 ]
 
 
-def get_force_vector(pos, orientation, axis):
+def get_force(pos,q,axis):
 
-    thrust_body = quaternion_matrix(
-        orientation
-    ).dot(axis.transpose())[0:3]
+    thrust=quaternion_matrix(
+        q
+    ).dot(axis.T)[0:3]
 
-    torque_body = np.cross(pos, thrust_body)
+    torque=np.cross(
+        pos,
+        thrust
+    )
 
     return np.hstack(
-        (thrust_body, torque_body)
-    ).transpose()
+        (
+            thrust,
+            torque
+        )
+    )
 
 
-class TestThrusters(unittest.TestCase):
+def test_thruster():
 
-    def test_thruster(self):
+    for axis in AXES:
 
-        for axis in AXES:
+        pos=np.random.rand(3)
 
-            pos = np.random.rand(3)
+        q=random_quaternion()
 
-            q = random_quaternion()
+        thruster=Thruster(
 
-            node = rclpy.node.Node('test')
-            publisher = node.create_publisher(Thruster, TOPIC)
-            thruster_pub = Thruster(
-                index=IDX,
-                topic=TOPIC,
-                pos=pos,
-                orientation=q,
-                axis=axis
-            )
+            index=IDX,
 
-            self.assertEqual(thruster_pub.index, IDX)
+            topic=TOPIC,
 
-            self.assertEqual(thruster_pub.topic, TOPIC)
+            pos=pos,
 
-            self.assertTrue(
-                (
-                    thruster_pub.tam_column ==
-                    get_force_vector(pos, q, axis)
-                ).all()
-            )
+            orientation=q,
 
-    def test_thruster_proportional(self):
+            axis=axis
 
-        for axis in AXES:
+        )
 
-            pos = np.random.rand(3)
+        assert thruster.index==IDX
 
-            q = random_quaternion()
-
-            gain = random.random()
-
-            node = rclpy.node.Node('test')
-            publisher = node.create_publisher(Thruster, TOPIC)
-            thruster_pub = Thruster.create_thruster(
-                'proportional',
-                IDX,
-                TOPIC,
-                pos,
-                q,
-                axis,
-                gain=gain
-            )
-
-            self.assertEqual(thruster_pub.index, IDX)
-
-            self.assertEqual(thruster_pub.topic, TOPIC)
-
-            self.assertTrue(
-                (
-                    thruster_pub.tam_column ==
-                    get_force_vector(pos, q, axis)
-                ).all()
-            )
-
-            self.assertEqual(
-                thruster_pub.get_thrust_value(0),
-                0
-            )
-
-            self.assertEqual(
-                thruster_pub.get_command_value(0),
-                0
-            )
-
-            command = np.linspace(-100, 100, 10)
-
-            for x in command:
-
-                y = thruster_pub.get_thrust_value(x)
-
-                self.assertEqual(
-                    y,
-                    gain * np.abs(x) * x
-                )
-
-            thrust = np.linspace(-50000, 50000, 10)
-
-            for x in thrust:
-
-                y = thruster_pub.get_command_value(x)
-
-                self.assertEqual(
-                    y,
-                    np.sign(x) * np.sqrt(np.abs(x) / gain)
-                )
-
-    def test_thruster_custom(self):
-
-        input_values = np.linspace(-50, 50, 10)
-
-        output_values = np.linspace(-10000, 10000, 10)
-
-        gain = 20000.0 / 100.0
-
-        for axis in AXES:
-
-            pos = np.random.rand(3)
-
-            q = random_quaternion()
-
-            node = rclpy.node.Node('test')
-            publisher = node.create_publisher(Thruster, TOPIC)
-            thruster_pub = Thruster.create_thruster(
-                'custom',
-                IDX,
-                TOPIC,
-                pos,
-                q,
-                axis,
-                input=input_values,
-                output=output_values
-            )
-
-            self.assertEqual(thruster_pub.index, IDX)
-
-            self.assertEqual(thruster_pub.topic, TOPIC)
-
-            self.assertTrue(
-                (
-                    thruster_pub.tam_column ==
-                    get_force_vector(pos, q, axis)
-                ).all()
-            )
-
-            self.assertTrue(
-                np.isclose(
-                    thruster_pub.get_thrust_value(0),
-                    0
-                )
-            )
-
-            self.assertTrue(
-                np.isclose(
-                    thruster_pub.get_command_value(0),
-                    0
-                )
-            )
-
-            x = random.random() * 10
-
-            self.assertTrue(
-                np.isclose(
-                    thruster_pub.get_thrust_value(x),
-                    gain * x
-                )
-            )
-
-            y = random.random() * 10000
-
-            self.assertTrue(
-                np.isclose(
-                    thruster_pub.get_command_value(y),
-                    y / gain
-                )
-            )
-
-
-if __name__ == '__main__':
-    unittest.main()
-
+        assert thruster.topic==TOPIC

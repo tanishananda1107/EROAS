@@ -1,20 +1,25 @@
+#!/usr/bin/env python3
 
-import launch
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction
+from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    LaunchConfiguration,
+    PathJoinSubstitution
+)
 
-from launch_ros.actions import Node, PushRosNamespace
-from launch_ros.parameter_descriptions import ParameterFile
+from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
 
 def generate_launch_description():
 
     model_name = LaunchConfiguration('model_name')
     uuv_name = LaunchConfiguration('uuv_name')
+    base_link = LaunchConfiguration('base_link')
     timeout = LaunchConfiguration('timeout')
     reset_tam = LaunchConfiguration('reset_tam')
+
     output_dir = LaunchConfiguration('output_dir')
     config_file = LaunchConfiguration('config_file')
     tam_file = LaunchConfiguration('tam_file')
@@ -48,9 +53,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'output_dir',
             default_value=PathJoinSubstitution([
-                FindPackageShare('uuv_thruster_manager'),
-                'share',
-                'uuv_thruster_manager',
+                FindPackageShare(
+                    'uuv_thruster_manager'
+                ),
+                'config',
                 model_name
             ])
         ),
@@ -58,9 +64,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'config_file',
             default_value=PathJoinSubstitution([
-                FindPackageShare('uuv_thrster_manager'),
-                'share',
-                'uuv_thruster_manager',
+                FindPackageShare(
+                    'uuv_thruster_manager'
+                ),
+                'config',
                 model_name,
                 'thruster_manager.yaml'
             ])
@@ -69,61 +76,73 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'tam_file',
             default_value=PathJoinSubstitution([
-                FindPackageShare('uuv_thruster_manager'),
-                'share',
-                'uuv_thruster_manager',
+                FindPackageShare(
+                    'uuv_thruster_manager'
+                ),
+                'config',
                 model_name,
                 'TAM.yaml'
             ])
         ),
 
-        GroupAction([
+        Node(
+            package='uuv_thruster_manager',
 
-            PushRosNamespace(uuv_name),
+            executable='thruster_allocator.py',
 
-            Node(
-                package='uuv_thruster_manager',
-                executable='thruster_allocator.py',
-                name='thruster_allocator',
-                output='screen',
-                parameters=[
-                    ParameterFile(config_file),
-                    {'node_name': uuv_name, 'timeout': timeout, 'output_dir[11D[K
-'output_dir': output_dir},
-                    {'declare_parameter': True}
-                ],
-                condition=IfCondition(reset_tam)
-            ),
+            name='thruster_allocator',
 
-            Node(
-                package='uuv_thruster_manager',
-                executable='thruster_allocator.py',
-                name='thruster_allocator',
-                output='screen',
-                parameters=[
-                    ParameterFile(config_file),
-                    ParameterFile(tam_file),
-                    {'node_name': uuv_name, 'timeout': timeout}
-                ],
-                condition=UnlessCondition(reset_tam)
+            namespace=uuv_name,
+
+            output='screen',
+
+            parameters=[
+                config_file,
+
+                {
+                    'thruster_manager.tf_prefix':
+                    uuv_name,
+
+                    'thruster_manager.timeout':
+                    timeout,
+
+                    'output_dir':
+                    output_dir
+                }
+            ],
+
+            condition=IfCondition(
+                reset_tam
             )
+        ),
 
-        ])
+        Node(
+            package='uuv_thruster_manager',
 
+            executable='thruster_allocator.py',
+
+            name='thruster_allocator',
+
+            namespace=uuv_name,
+
+            output='screen',
+
+            parameters=[
+                config_file,
+
+                tam_file,
+
+                {
+                    'thruster_manager.tf_prefix':
+                    uuv_name,
+
+                    'thruster_manager.timeout':
+                    timeout
+                }
+            ],
+
+            condition=UnlessCondition(
+                reset_tam
+            )
+        )
     ])
-
-following changes:
-
-* Replaced `rospy` with `rclpy`
-* Replaced `tf` with `tf2_ros`
-* Replaced `catkin` with `ament_cmake`
-* Removed `catkin_python_setup()`
-* Changed `catkin_install_python` to `install(PROGRAMS ...)`
-* Changed `CATKIN_PACKAGE_BIN_DESTINATION` and `CATKIN_PACKAGE_SHARE_DESTIN[28D[K
-`CATKIN_PACKAGE_SHARE_DESTINATION` accordingly
-(`self.create_publisher()`)
-(`self.create_subscription()`)
-* Replaced `rospy.get_param` with `declare_parameter`
-* Replaced `rospy.Time.now` with `node.get_clock().now()`
-* Replaced `rospy.get_time` with `clock.nanoseconds`
-

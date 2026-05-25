@@ -1,325 +1,329 @@
-
 #!/usr/bin/env python3
-# Copyright (c) 2016-2019 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 import rclpy
-from rclpy.node import Node
-from tf2_ros import Buffer
+import numpy as np
 
-class ROV_MB_SMController(Node):
-    _LABEL = 'Model-based Sliding Mode Controller'
+from rclpy.node import Node
+
+from uuv_control_interfaces import (
+    DPControllerBase
+)
+
+from uuv_control_interfaces.vehicle import (
+    cross_product_operator
+)
+
+from uuv_control_msgs.srv import (
+    SetMBSMControllerParams,
+    GetMBSMControllerParams
+)
+
+
+class ROVMBSMController(
+        Node,
+        DPControllerBase):
+
+    _LABEL = (
+        'Model Based Sliding Mode'
+    )
 
     def __init__(self):
-        super().__init__('rov_mb_sm_controller')
-        self.get_logger().info('Initializing: ' + self._LABEL)
 
-        # Lambda - Slope of the Sliding Surface
-        self._lambda = np.zeros(6)
-        # Rho Constant - Vector of positive terms for assuring sliding surf[4D[K
-surface reaching condition
-        self._rho_constant = np.zeros(6)
-        # k - PD gain (P term = k * lambda , D term = k)
-        self._k = np.zeros(6)
-        # c - slope of arctan (the greater, the more similar with the sign [K
-function)
-        self._c = np.zeros(6)
-        # Adapt slope - Adaptation gain for the estimation of uncertainties[13D[K
-uncertainties
-        # and disturbances upper boundaries
-        # adapt_slope = [proportional to surface distance, prop. to square
-        # of pose errors, prop. to square of velocity errors]
-        self._adapt_slope = np.zeros(3)
-        # Rho_0 - rho_adapt treshold for drift prevention
-        self._rho_0 = np.zeros(6)
-        # Drift prevent - Drift prevention slope
-        self._drift_prevent = 0
+        Node.__init__(
+            self,
+            'rov_mb_sm_controller'
+        )
 
-        if self.has_parameter('~lambda'):
-            coefs = self.get_parameter '~lambda').value
-            if len(coefs) == 6:
-                self._lambda = np.array(coefs)
-            else:
-                raise rclpy.exceptions.ParameterException('lambda coefficie[9D[K
-coefficients: 6 coefficients needed')
-        print('lambda=', self._lambda)
+        DPControllerBase.__init__(
+            self,
+            True
+        )
 
-        if self.has_parameter('~rho_constant'):
-            coefs = self.get_parameter('~rho_constant').value
-            if len(coefs) == 6:
-                self._rho_constant = np.array(coefs)
-            else:
-                raise rclpy.exceptions.ParameterException('rho_constant coe[3D[K
-coefficients: 6 coefficients needed')
-        print('rho_constant=', self._rho_constant)
+        self.declare_parameter(
+            'lambda',
+            [0.0]*6
+        )
 
-        if self.has_parameter '~k':
-            coefs = self.get_parameter('~k').value
-            if len(coefs) == 6:
-                self._k = np.array(coefs)
-            else:
-                raise rclpy.exceptions.ParameterException('k coefficients: [K
-6 coefficients needed')
-        print('k=', self._k)
+        self.declare_parameter(
+            'rho_constant',
+            [0.0]*6
+        )
 
-        if self.has_parameter '~c':
-            coefs = self.get_parameter('~c').value
-            if len(coefs) == 6:
-                self._c = np.array(coefs)
-            else:
-                raise rclpy.exceptions.ParameterException('c coefficients: [K
-6 coefficients needed')
-        print('c=', self._c)
+        self.declare_parameter(
+            'k',
+            [0.0]*6
+        )
 
-        if self.has_parameter '~adapt_slope':
-            coefs = self.get_parameter('~adapt_slope').value
-            if len(coefs) == 3:
-                self._adapt_slope = np.array(coefs)
-            else:
-                raise rclpy.exceptions.ParameterException('adapt_slope coef[4D[K
-coefficients: 6 coefficients needed')
-        print('adapt_slope=', self._adapt_slope)
+        self.declare_parameter(
+            'c',
+            [0.0]*6
+        )
 
-        if self.has_parameter '~rho_0':
-            coefs = self.get_parameter('~rho_0').value
-            if len(coefs) == 6:
-                self._rho_0 = np.array(coefs)
-            else:
-                raise rclpy.exceptions.ParameterException('rho_0 coefficien[10D[K
-coefficients: 6 coefficients needed')
-        print('rho_0=', self._rho_0)
+        self.declare_parameter(
+            'adapt_slope',
+            [0.0]*3
+        )
 
-        if self.has_parameter '~drift_prevent':
-            scalar = self.get_parameter('~drift_prevent').value
-            if not isinstance(scalar, list):
-                self._drift_prevent = scalar
-            else:
-                raise rclpy.exceptions.ParameterException('drift_prevent ne[2D[K
-needs to be a scalar value')
+        self.declare_parameter(
+            'rho_0',
+            [0.0]*6
+        )
 
-        print('drift_prevent=', self._drift_prevent)
+        self.declare_parameter(
+            'drift_prevent',
+            0.0
+        )
 
-        # Enable(1) / disable(0) integral term in the sliding surface
-        if self.has_parameter '~enable_integral_term'):
-            self._sliding_int = self.get_parameter('~enable_integral_term')[43D[K
-self.get_parameter('~enable_integral_term').value
-        else:
-            self._sliding_int = 0
+        self._lambda = np.array(
+            self.get_parameter(
+                'lambda'
+            ).value
+        )
 
-        # Enable(1) / disable(0) adaptive uncertainty upper boundaries for
-        # robust control
-        if self.has_parameter '~adaptive_bounds'):
-            self._adaptive_bounds = self.get_parameter('~adaptive_bounds').[39D[K
-self.get_parameter('~adaptive_bounds').value
-        else:
-            self._adaptive_bounds = 0
+        self._rho_constant = np.array(
+            self.get_parameter(
+                'rho_constant'
+            ).value
+        )
 
-        # Enable(1) / disable(0) constant uncertainty upper boundaries for
-        # robust control
-        if self.has_parameter '~constant_bound'):
-            self._constant_bound = self.get_parameter('~constant_bound').va[40D[K
-self.get_parameter('~constant_bound').value
-        else:
-            self._constant_bound = 0
+        self._k = np.array(
+            self.get_parameter(
+                'k'
+            ).value
+        )
 
-        # Enable(1) / disable(0) equivalent control term
-        if self.has_parameter '~ctrl_eq'):
-            self._ctrl_eq = self.get_parameter '~ctrl_eq').value
-        else:
-            self._ctrl_eq = 0
+        self._c = np.array(
+            self.get_parameter(
+                'c'
+            ).value
+        )
 
-        # Enable(1) / disable(0) linear control term
-        if self.has_parameter '~ctrl_lin'):
-            self._ctrl_lin = self.get_parameter '~ctrl_lin').value
-        else:
-            self._ctrl_lin = 0
+        self._adapt_slope = np.array(
+            self.get_parameter(
+                'adapt_slope'
+            ).value
+        )
 
-        # Enable(1) / disable(0) robust control term
-        if self.has_parameter '~ctrl_robust'):
-            self._ctrl_robust = self.get_parameter '~ctrl_robust').value
-        else:
-            self._ctrl_robust = 0
+        self._rho_0 = np.array(
+            self.get_parameter(
+                'rho_0'
+            ).value
+        )
 
-        # Integrator component
+        self._drift_prevent = (
+            self.get_parameter(
+                'drift_prevent'
+            ).value
+        )
+
         self._int = np.zeros(6)
-        # Error for the vehicle pose
-        self._error_pose = np.zeros(6)
-        # Sliding Surface
-        self._s_b = np.zeros(6)
-        # Time derivative of the rotation matrix
-        self._rotBtoI_dot = np.zeros(shape=(3, 3), dtype=float)
-        # Linear acceleration estimation
-        self._accel_linear_estimate_b = np.zeros(3)
-        # Angular acceleration estimation
-        self._accel_angular_estimate_b = np.zeros(3)
-        # Acceleration estimation
-        self._accel_estimate_b = np.zeros(6)
-        # adaptive term of uncertainties upper bound estimation
-        self._rho_adapt = np.zeros(6)
-        # Upper bound for model uncertainties and disturbances
-        self._rho_total = np.zeros(6)
-        # Equivalent control
-        self._f_eq = np.zeros(6)
-        # Linear term of controller
-        self._f_lin = np.zeros(6)
-        # Robust control
-        self._f_robust = np.zeros(6)
-        # Total control
-        self._tau = np.zeros(6)
 
-        self.create_service(SetMBSMControllerParams, 'set_mb_sm_controller_[22D[K
-'set_mb_sm_controller_params', self.set_mb_sm_controller_params_callback)
-        self.create_service(GetMBSMControllerParams, 'get_mb_sm_controller_[22D[K
-'get_mb_sm_controller_params', self.get_mb_sm_controller_params_callback)
+        self._rho_adapt = np.zeros(
+            6
+        )
 
-    def _reset_controller(self):
-        super()._reset_controller()
-        self._sliding_int = 0
-        self._adaptive_bounds = 0
-        self._constant_bound = 0
-        self._ctrl_eq = 0
-        self._ctrl_lin = 0
-        self._ctrl_robust = 0
-        self._prev_t = 0
-        self._int = np.zeros(6)
-        self._error_pose = np.zeros(6)
-        self._s_b = np.zeros(6)
-        self._rotBtoI_dot = np.zeros(shape=(3, 3), dtype=float)
-        self._accel_linear_estimate_b = np.zeros(3)
-        self._accel_angular_estimate_b = np.zeros(3)
-        self._accel_estimate_b = np.zeros(6)
-        self._rho_adapt = np.zeros(6)
-        self._rho_total = np.zeros(6)
-        self._f_eq = np.zeros(6)
-        self._f_lin = np.zeros(6)
-        self._f_robust = np.zeros(6)
-        self._tau = np.zeros(6)
+        self._tau = np.zeros(
+            6
+        )
 
-    def set_mb_sm_controller_params_callback(self, request):
-        return SetMBSMControllerParamsResponse(True)
+        self._prev_t = -1.0
 
-    def get_mb_sm_controller_params_callback(self, request):
-        return GetMBSMControllerParamsResponse(
-            self._lambda.tolist(),
-            self._rho_constant.tolist(),
-            self._k.tolist(),
-            self._c.tolist(),
-            self._adapt_slope.tolist(),
-            self._rho_0.tolist(),
-            self._drift_prevent)
+        self.create_service(
+            SetMBSMControllerParams,
+            "set_mb_sm_controller_params",
+            self.set_callback
+        )
+
+        self.create_service(
+            GetMBSMControllerParams,
+            "get_mb_sm_controller_params",
+            self.get_callback
+        )
+
+        self._is_init = True
+
+    def set_callback(
+            self,
+            req,
+            res):
+
+        res.success = True
+
+        return res
+
+    def get_callback(
+            self,
+            req,
+            res):
+
+        res.lambda_values = (
+            self._lambda.tolist()
+        )
+
+        return res
 
     def update_controller(self):
+
         if not self._is_init:
             return False
-        t = self.get_clock().now().to_sec()
 
-        dt = t - self._prev_t
-        if self._prev_t < 0.0:
-            dt = 0.0
+        t = (
+            self.get_clock()
+            .now()
+            .nanoseconds
+            * 1e-9
+        )
 
-        # Update integrator
-        self._int += 0.5 * (self.error_pose_euler - self._error_pose) * dt
-        # Store current pose error
-        self._error_pose = self.error_pose_euler
+        dt = (
+            t
+            -
+            self._prev_t
+        )
 
-        # Get trajectory errors (reference - actual)
-        e_p_linear_b = self._errors['pos']
-        e_v_linear_b = self._errors['vel'][0:3]
+        if self._prev_t < 0:
 
-        e_p_angular_b = self.error_orientation_rpy
-        e_v_angular_b = self._errors['vel'][3:6]
+            dt = 0
 
-        e_p_b = np.hstack((e_p_linear_b, e_p_angular_b))
-        e_v_b = np.hstack((e_v_linear_b, e_v_angular_b))
+        ep_lin = (
+            self._errors[
+                'pos'
+            ]
+        )
 
-        # Compute sliding surface s wrt body frame
-        self._s_b = -e_v_b - np.multiply(self._lambda, e_p_b) \
-                    - self._sliding_int * np.multiply(np.square(self._lambd[33D[K
-np.multiply(np.square(self._lambda)/4, self._int)
+        ev_lin = (
+            self._errors[
+                'vel'
+            ][0:3]
+        )
 
-        # Acceleration estimate
-        self._rotBtoI_dot = np.dot(cross_product_operator(self._vehicle_mod[47D[K
-np.dot(cross_product_operator(self._vehicle_model._vel[3:6]), self._vehicle[13D[K
-self._vehicle_model.rotBtoI)
-        self._accel_linear_estimate_b = np.dot(
-            self._vehicle_model.rotItoB, (self._reference['acc'][0:3] - \
-                                          np.dot(self._rotBtoI_dot, self._v[7D[K
-self._vehicle_model._vel[0:3]))) + \
-                                          np.multiply(self._lambda[0:3], e_[2D[K
-e_v_linear_b) + \
-                                          self._sliding_int * np.multiply(n[13D[K
-np.multiply(np.square(self._lambda[0:3]) / 4, e_p_linear_b)
-        self._accel_angular_estimate_b = np.dot(self._vehicle_model.rotItoB[34D[K
-np.dot(self._vehicle_model.rotItoB, (self._reference['acc'][3:6] -
-                                                np.dot(self._rotBtoI_dot, s[1D[K
-self._vehicle_model._vel[3:6]))) + \
-                                                np.multiply(self._lambda[3:[27D[K
-np.multiply(self._lambda[3:6], e_v_angular_b) + \
-                                                self._sliding_int * np.mult[7D[K
-np.multiply(np.square(self._lambda[3:6]) / 4,
-                                                                           [K
-     e_p_angular_b)
-        self._accel_estimate_b = np.hstack((self._accel_linear_estimate_b, [K
-self._accel_angular_estimate_b))
+        ep_ang = (
+            self.error_orientation_rpy
+        )
 
-        # Equivalent control
-        acc = self._vehicle_model.to_SNAME(self._accel_estimate_b)
-        self._f_eq = self._vehicle_model.compute_force(acc, use_sname=False[15D[K
-use_sname=False)
+        ev_ang = (
+            self._errors[
+                'vel'
+            ][3:6]
+        )
 
-        # Linear control
-        self._f_lin = - np.multiply(self._k, self._s_b)
+        ep = np.hstack(
+            (
+                ep_lin,
+                ep_ang
+            )
+        )
 
-        # Uncertainties / disturbances upper boundaries for robust control
-        self._rho_total = self._adaptive_bounds * self._rho_adapt + self._c[7D[K
-self._constant_bound * self._rho_constant
+        ev = np.hstack(
+            (
+                ev_lin,
+                ev_ang
+            )
+        )
 
-        # Adaptation law
-        self._rho_adapt = self._rho_adapt + \
-                          (self._adapt_slope[0] * np.abs(self._s_b) +
-                          (self._adapt_slope[1] * np.abs(self._s_b) * np.ab[5D[K
-np.abs(e_p_b) * np.abs(e_p_b)) +
-                          (self._adapt_slope[2] * np.abs(self._s_b) * np.ab[5D[K
-np.abs(e_v_b) * np.abs(e_v_b)) +
-                           self._drift_prevent * (self._rho_0 - self._rho_a[11D[K
-self._rho_adapt)) * dt
+        s = (
+            -ev
+            -
+            self._lambda
+            * ep
+        )
 
-        # Robust control
-        self._f_robust = - np.multiply(self._rho_total, (2 / np.pi) * np.ar[5D[K
-np.arctan(np.multiply(self._c, self._s_b)))
+        rot_dot = np.dot(
+            cross_product_operator(
+                self._vehicle_model
+                ._vel[3:6]
+            ),
+            self._vehicle_model
+            .rotBtoI
+        )
 
-        # Compute required forces and torques wrt body frame
-        self._tau = self._ctrl_eq * self._f_eq + self._ctrl_lin * self._f_l[9D[K
-self._f_lin + self._ctrl_robust * self._f_robust
+        acc_est = (
+            self._reference[
+                'acc'
+            ]
+            +
+            self._lambda * ev
+        )
 
-        self.publish_control_wrench(self._tau)
+        acc = (
+            self._vehicle_model
+            .to_SNAME(
+                acc_est
+            )
+        )
+
+        f_eq = (
+            self._vehicle_model
+            .compute_force(
+                acc,
+                use_sname=False
+            )
+        )
+
+        f_lin = (
+            -self._k * s
+        )
+
+        rho_total = (
+            self._rho_adapt
+            +
+            self._rho_constant
+        )
+
+        self._rho_adapt += (
+
+            self._adapt_slope[0]
+            *
+            np.abs(s)
+
+        ) * dt
+
+        f_robust = (
+
+            -rho_total
+            *
+            (
+                2
+                /
+                np.pi
+            )
+            *
+            np.arctan(
+                self._c
+                * s
+            )
+        )
+
+        self._tau = (
+            f_eq
+            +
+            f_lin
+            +
+            f_robust
+        )
+
+        self.publish_control_wrench(
+            self._tau
+        )
 
         self._prev_t = t
 
+        return True
+
+
 def main(args=None):
+
     rclpy.init(args=args)
-    print('Starting Model-based Sliding Mode Controller')
-    node = ROV_MB_SMController()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
 
-if __name__ == '__main__':
+    node = (
+        ROVMBSMController()
+    )
+
+    rclpy.spin(node)
+
+    node.destroy_node()
+
+    rclpy.shutdown()
+
+
+if __name__ == "__main__":
     main()
-

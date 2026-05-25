@@ -1,65 +1,217 @@
+#!/usr/bin/env python3
 
 import rclpy
-from rclpy.node import Node
-from tf2_ros import TransformBroadcaster
 import numpy as np
-from geometry_msgs.msg import Wrench
 
-class ROVNMBSMController(Node):
+from rclpy.node import Node
+
+from uuv_control_interfaces import (
+    DPControllerBase
+)
+
+
+class ROVNMBSMController(
+        Node,
+        DPControllerBase):
+
+    _LABEL = (
+        "Non Model Sliding"
+    )
 
     def __init__(self):
-        super().__init__('rov_nmb_sm_controller')
 
-        self.publisher = self.create_publisher(Wrench, 'cmd_wrench', 10)
-        self.timer = self.create_timer(rclpy.duration Seconds(0.1), lambda:[7D[K
-lambda: self.update())
+        Node.__init__(
+            self,
+            "rov_nmb_sm_controller"
+        )
 
-        self.K = np.ones(6)
-        self.Kd = np.ones(6)
+        DPControllerBase.__init__(
+            self,
+            is_model_based=False
+        )
 
-    def update(self):
-        e = np.zeros(6)
-        de = np.zeros(6)
+        self.declare_parameter(
+            "K",
+            [0.0]*6
+        )
 
-        s = de + self.K * e
-        tau = -self.Kd * s
+        self.declare_parameter(
+            "Kd",
+            [0.0]*6
+        )
 
-        msg = Wrench()
-        msg.force.x, msg.force.y, msg.force.z = tau[:3]
-        msg.torque.x, msg.torque.y, msg.torque.z = tau[3:]
+        self.declare_parameter(
+            "Ki",
+            [0.0]*6
+        )
 
-        self.publisher.publish(msg)
+        self.declare_parameter(
+            "slope",
+            [0.0]*6
+        )
+
+        self._K = np.array(
+            self.get_parameter(
+                "K"
+            ).value
+        )
+
+        self._Kd = np.array(
+            self.get_parameter(
+                "Kd"
+            ).value
+        )
+
+        self._Ki = np.array(
+            self.get_parameter(
+                "Ki"
+            ).value
+        )
+
+        self._slope = np.array(
+            self.get_parameter(
+                "slope"
+            ).value
+        )
+
+        self._tau = np.zeros(6)
+
+        self._prev_t = -1.0
+
+        self._int_lin = np.zeros(3)
+
+        self._int_ang = np.zeros(3)
+
+        self._is_init = True
+
+    def update_controller(self):
+
+        if not self._is_init:
+            return False
+
+        t = (
+            self.get_clock()
+            .now()
+            .nanoseconds
+            * 1e-9
+        )
+
+        dt = (
+            t
+            -
+            self._prev_t
+        )
+
+        if self._prev_t < 0:
+
+            dt = 0
+
+        ep_lin = (
+            self._errors[
+                "pos"
+            ]
+        )
+
+        ev_lin = (
+            self._errors[
+                "vel"
+            ][0:3]
+        )
+
+        ep_ang = (
+            self.error_orientation_rpy
+        )
+
+        ev_ang = (
+            self._errors[
+                "vel"
+            ][3:6]
+        )
+
+        s_lin = (
+            -ev_lin
+            -
+            self._slope[0:3]
+            * ep_lin
+        )
+
+        s_ang = (
+            -ev_ang
+            -
+            self._slope[3:6]
+            * ep_ang
+        )
+
+        self._int_lin += (
+            np.sign(
+                s_lin
+            )
+            * dt
+        )
+
+        self._int_ang += (
+            np.sign(
+                s_ang
+            )
+            * dt
+        )
+
+        sr_lin = (
+            s_lin
+            +
+            self._Ki[0:3]
+            *
+            self._int_lin
+        )
+
+        sr_ang = (
+            s_ang
+            +
+            self._Ki[3:6]
+            *
+            self._int_ang
+        )
+
+        force = (
+            -self._Kd[0:3]
+            * sr_lin
+        )
+
+        torque = (
+            -self._Kd[3:6]
+            * sr_ang
+        )
+
+        self._tau = np.hstack(
+            (
+                force,
+                torque
+            )
+        )
+
+        self.publish_control_wrench(
+            self._tau
+        )
+
+        self._prev_t = t
+
+        return True
 
 
-def main():
-    rclpy.init()
-    node = ROVNMBSMController()
-    try:
-        rclpy.spin(node)
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+def main(args=None):
 
-if __name__ == '__main__':
+    rclpy.init(args=args)
+
+    node = (
+        ROVNMBSMController()
+    )
+
+    rclpy.spin(node)
+
+    node.destroy_node()
+
+    rclpy.shutdown()
+
+
+if __name__ == "__main__":
     main()
-
-Changes:
-
-- Replaced `rospy` with `rclpy`
-- Imported `tf2_ros` and replaced `tf` with `tf2_ros`
-- Imported `ament_cmake` instead of `catkin`
-- Removed `catkin_python_setup()`
-- Replaced `CATKIN_PACKAGE_BIN_DESTINATION` with `lib/${PROJECT_NAME}` in t[1D[K
-the package file
-- Replaced `CATKIN_PACKAGE_SHARE_DESTINATION` with `share/${PROJECT_NAME}` [K
-in the package file
-- Replaced `rospy.Publisher` and `self.create_publisher(rospy.Wrench, 'cmd_[5D[K
-'cmd_wrench', 10)` with `self.create_publisher(geometry_msgs.msg.Wrench, 'c[2D[K
-'cmd_wrench', 10)`
-- Replaced `rospy.Subscriber` with `self.create_subscription()`
-- Replaced `rosbuild` with `ament_cmake` in the package file
-- Replaced `rospy.get_param` with `declare_parameter`
-- Replaced `rospy.Time.now` with `node.get_clock().now()`
-- Replaced `rospy.get_time` with `clock.nanoseconds`
-- Replaced `rospy.Service` with `create_service()`
-

@@ -1,53 +1,143 @@
+#!/usr/bin/env python3
 
 import rclpy
-from rclpy.node import Node
 import numpy as np
-from geometry_msgs.msg import Wrench
-from tf2_ros import Buffer, TransformListener
 
-class ROVSFController(Node):
+from rclpy.node import Node
+
+from uuv_control_interfaces import (
+    DPControllerBase
+)
+
+
+class ROVSFController(
+        Node,
+        DPControllerBase):
 
     def __init__(self):
-        super().__init__('rov_sf_controller')
 
-        self.pub = self.create_publisher(Wrench, 'cmd_wrench', 10)
-        self.timer = self.create_timer(rclpy.duration_seconds(0.1), self.up[7D[K
-self.update)
+        Node.__init__(
+            self,
+            "rov_sf_controller"
+        )
 
-        self.Kd = np.eye(6)
+        DPControllerBase.__init__(
+            self,
+            True
+        )
 
-    def update(self):
-        e = np.zeros(6)
-        de = np.zeros(6)
+        self._tau = np.zeros(6)
 
-        s = de + e
+        self._Kd = np.eye(6)
 
-        tau = self.Kd @ s
+        self._delta = np.eye(6)
 
-        msg = Wrench()
-        msg.force.x, msg.force.y, msg.force.z = tau[:3]
-        msg.torque.x, msg.torque.y, msg.torque.z = tau[3:]
+        self._prev_t = None
 
-        self.pub.publish(msg)
+        self._prev_vel_r = np.zeros(
+            6
+        )
+
+        self._is_init = True
+
+    def update_controller(self):
+
+        if not self._is_init:
+            return False
+
+        t = (
+            self.get_clock()
+            .now()
+            .nanoseconds
+            * 1e-9
+        )
+
+        error = np.hstack(
+            (
+                self._errors[
+                    'pos'
+                ],
+                self.error_orientation_quat
+            )
+        )
+
+        vel_r = (
+            self._reference[
+                'vel'
+            ]
+            +
+            np.dot(
+                self._delta,
+                error
+            )
+        )
+
+        if self._prev_t is None:
+
+            self._prev_t = t
+
+            self._prev_vel_r = vel_r
+
+            return False
+
+        dt = t - self._prev_t
+
+        if dt <= 0:
+
+            return False
+
+        s = (
+            self._errors[
+                'vel'
+            ]
+            +
+            np.dot(
+                self._delta,
+                error
+            )
+        )
+
+        d_vel = (
+            vel_r
+            -
+            self._prev_vel_r
+        ) / dt
+
+        self._tau = (
+            np.dot(
+                self._vehicle_model.Mtotal,
+                d_vel
+            )
+        )
+
+        self.publish_control_wrench(
+            self._tau
+            +
+            np.dot(
+                self._Kd,
+                s
+            )
+        )
+
+        self._prev_t = t
+
+        self._prev_vel_r = vel_r
+
+        return True
 
 
 def main(args=None):
+
     rclpy.init(args=args)
+
     node = ROVSFController()
-    try:
-        rclpy.spin(node)
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
 
-if __name__ == '__main__':
+    rclpy.spin(node)
+
+    node.destroy_node()
+
+    rclpy.shutdown()
+
+
+if __name__ == "__main__":
     main()
-
-Changes made:
-
-1. Replaced `rospy` with `rclpy`.
-2. Imported `tf2_ros` for TF-related operations.
-3. Removed `catkin_python_setup()` and replaced it with the equivalent `ame[4D[K
-`ament_cmake` setup.
-4. Updated package.xml to use `ament_cmake` instead of `catkin`.
-
