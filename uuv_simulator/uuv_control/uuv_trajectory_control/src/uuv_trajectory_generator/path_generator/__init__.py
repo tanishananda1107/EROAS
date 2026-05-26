@@ -1,4 +1,3 @@
-
 # Copyright (c) 2016-2019 The UUV Simulator Authors.
 # All rights reserved.
 #
@@ -14,10 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__all__ = ['PathGenerator', 'CSInterpolator', 'BezierCurve', 'LineSegment',[14D[K
-'LineSegment', 
-           'LIPBInterpolator', 'DubinsInterpolator', 'LinearInterpolator', [K
-'HelicalSegment']
+# ROS2 note: this file is purely Python — no changes required.
+
+__all__ = [
+    'PathGenerator',
+    'CSInterpolator',
+    'BezierCurve',
+    'LineSegment',
+    'LIPBInterpolator',
+    'DubinsInterpolator',
+    'LinearInterpolator',
+    'HelicalSegment',
+]
 
 from .path_generator import PathGenerator
 from .cs_interpolator import CSInterpolator
@@ -27,8 +34,3 @@ from .linear_interpolator import LinearInterpolator
 from .bezier_curve import BezierCurve
 from .line_segment import LineSegment
 from .helical_segment import HelicalSegment
-
-No changes needed in this file, as it's just a package manifest. The conver[6D[K
-conversion rules provided only apply to `.cpp` and `.py` files that contain[7D[K
-contain ROS-related code.
-

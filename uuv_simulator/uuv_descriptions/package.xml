@@ -1,40 +1,81 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+
 <package format="3">
+
   <name>uuv_descriptions</name>
+
   <version>0.6.13</version>
+
   <description>
-    This package contains UUV descriptions and models.
+    The uuv_descriptions package
   </description>
 
-  <maintainer email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</maintainer>
-  <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
-  <maintainer email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</maintainer>
+  <maintainer email="musa.marcusso@de.bosch.com">
+    Musa Morena Marcusso Manhaes
+  </maintainer>
 
-  <author email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</author>
-  <author email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</author>
-  <author email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</author>
+  <maintainer email="sebastian.scherer2@de.bosch.com">
+    Sebastian Scherer
+  </maintainer>
+
+  <maintainer email="luizricardo.douat@de.bosch.com">
+    Luiz Ricardo Douat
+  </maintainer>
 
   <license>Apache-2.0</license>
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>
+    ament_cmake
+  </buildtool_depend>
 
-  <build_depend>python3-setuptools</build_depend>
+  <exec_depend>
+    gazebo_ros
+  </exec_depend>
 
-  <depend>rclpy</depend>
-  <depend>std_msgs</depend>
-  <depend>geometry_msgs</depend>
-  <depend>nav_msgs</depend>
-  <depend>sensor_msgs</depend>
-  <depend>tf2_ros</depend>
-  <depend>uuv_control_msgs</depend>
-  <depend>uuv_gazebo_ros_plugins_msgs</depend>
-  <depend>python3-numpy</depend>
-  <depend>python3-yaml</depend>
+  <exec_depend>
+    gazebo_ros2_control
+  </exec_depend>
 
-  <test_depend>ament_cmake_pytest</test_depend>
+  <exec_depend>
+    uuv_sensor_ros_plugins
+  </exec_depend>
+
+  <exec_depend>
+    uuv_gazebo_ros_plugins
+  </exec_depend>
+
+  <exec_depend>
+    robot_state_publisher
+  </exec_depend>
+
+  <exec_depend>
+    uuv_assistants
+  </exec_depend>
+
+  <exec_depend>
+    xacro
+  </exec_depend>
+
+  <test_depend>
+    ament_cmake_pytest
+  </test_depend>
+
+  <test_depend>
+    launch_testing
+  </test_depend>
+
+  <test_depend>
+    python3-pytest
+  </test_depend>
+
+  <test_depend>
+    xacro
+  </test_depend>
 
   <export>
-    <build_type>ament_cmake</build_type>
+    <build_type>
+      ament_cmake
+    </build_type>
   </export>
+
 </package>

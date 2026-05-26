@@ -1,66 +1,40 @@
-#!/usr/bin/env python3
-"""
-Launch file for spawning rov_bop_panel model.
-"""
-
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
-from launch.substitutions import LaunchConfiguration
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
-
-
-def launch_setup(context, *args, **kwargs):
-    """Set up the launch configuration for rov_bop_panel."""
-    x = LaunchConfiguration('x').perform(context)
-    y = LaunchConfiguration('y').perform(context)
-    z = LaunchConfiguration('z').perform(context)
-    angle = LaunchConfiguration('angle').perform(context)
-
-    actions = []
-
-    # Spawn the rov_bop_panel model
-    actions.append(Node(
-        package='gazebo_ros',
-        executable='spawn_model',
-        name='sdf_spawner',
-        output='screen',
-        arguments=[
-            '-sdf',
-            '-x', x,
-            '-y', y,
-            '-z', z,
-            '-P', '1.57',
-            '-Y', angle,
-            '-model', 'rov_bop_panel',
-            '-database', 'rov_bop_panel'
-        ],
-    ))
-
-    return actions
+from launch_ros.substitutions import FindPackageShare
+import os
 
 
 def generate_launch_description():
-    """Generate the launch description."""
+
+    gz_pkg = FindPackageShare("ros_gz_sim").find("ros_gz_sim")
+    world_pkg = FindPackageShare("uuv_gazebo_worlds").find("uuv_gazebo_worlds")
+
+    world_file = os.path.join(world_pkg, "worlds", "empty_underwater.sdf")
+
     return LaunchDescription([
-        DeclareLaunchArgument(
-            'x',
-            default_value='-1',
-            description='X coordinate'
+
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(gz_pkg, "launch", "gz_sim.launch.py")
+            ),
+            launch_arguments={"gz_args": f"-r {world_file}"}.items()
         ),
-        DeclareLaunchArgument(
-            'y',
-            default_value='-1',
-            description='Y coordinate'
-        ),
-        DeclareLaunchArgument(
-            'z',
-            default_value='-4',
-            description='Z coordinate'
-        ),
-        DeclareLaunchArgument(
-            'angle',
-            default_value='0',
-            description='Rotation angle'
-        ),
-        OpaqueFunction(function=launch_setup),
+
+        Node(
+            package="ros_gz_sim",
+            executable="create",
+            arguments=[
+                "-file", "rov_bop_panel.sdf",
+                "-name", "rov_bop_panel",
+                "-x", "-1",
+                "-y", "-1",
+                "-z", "-4",
+                "-R", "0",
+                "-P", "1.57",
+                "-Y", "0"
+            ],
+            output="screen"
+        )
     ])

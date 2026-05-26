@@ -1,119 +1,88 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0.
 
 #include <uuv_gazebo_ros_plugins/FinROSPlugin.hh>
+#include <gz/plugin/Register.hh>
 
-#include <string>
-
-#include <gazebo/physics/Base.hh>
-#include <gazebo/physics/Link.hh>
-#include <gazebo/physics/Model.hh>
-#include <gazebo/physics/World.hh>
+#include <rclcpp/rclcpp.hpp>
 
 namespace uuv_simulator_ros
 {
+
 /////////////////////////////////////////////////
 FinROSPlugin::FinROSPlugin()
 {
-  this->rosPublishPeriod = gazebo::common::Time(0.05);
-  this->lastRosPublishTime = gazebo::common::Time(0.0);
+  rosPublishPeriod = std::chrono::milliseconds(50);
+  lastRosPublishTime = std::chrono::steady_clock::now();
 }
 
 /////////////////////////////////////////////////
-FinROSPlugin::~FinROSPlugin()
-{
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->rosPublishConnection.reset();
-#else
-  gazebo::event::Events::DisconnectWorldUpdateBegin(
-        this->rosPublishConnection);
-#endif
-  this->rosNode->shutdown();
-}
+FinROSPlugin::~FinROSPlugin() = default;
 
 /////////////////////////////////////////////////
 void FinROSPlugin::SetReference(
-    const uuv_gazebo_ros_plugins_msgs::FloatStamped::ConstPtr &_msg)
+  const uuv_gazebo_ros_plugins_msgs::msg::FloatStamped::SharedPtr &_msg)
 {
   if (std::isnan(_msg->data))
   {
-    ROS_WARN("FinROSPlugin: Ignoring nan command");
+    RCLCPP_WARN(rosNode->get_logger(), "FinROSPlugin: Ignoring nan command");
     return;
   }
-
   this->inputCommand = _msg->data;
 }
 
 /////////////////////////////////////////////////
-gazebo::common::Time FinROSPlugin::GetRosPublishPeriod()
+std::chrono::nanoseconds FinROSPlugin::GetRosPublishPeriod()
 {
-  return this->rosPublishPeriod;
+  return rosPublishPeriod;
 }
 
 /////////////////////////////////////////////////
 void FinROSPlugin::SetRosPublishRate(double _hz)
 {
   if (_hz > 0.0)
-    this->rosPublishPeriod = 1.0 / _hz;
+    rosPublishPeriod = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::duration<double>(1.0 / _hz));
   else
-    this->rosPublishPeriod = 0.;
+    rosPublishPeriod = std::chrono::nanoseconds(0);
 }
 
 /////////////////////////////////////////////////
-void FinROSPlugin::Init()
-{
-  FinPlugin::Init();
-}
+void FinROSPlugin::Init() { FinPlugin::Init(); }
 
 /////////////////////////////////////////////////
 void FinROSPlugin::Reset()
 {
-  this->lastRosPublishTime.Set(0, 0);
+  lastRosPublishTime = std::chrono::steady_clock::now();
 }
 
 /////////////////////////////////////////////////
-void FinROSPlugin::Load(gazebo::physics::ModelPtr _parent, sdf::ElementPtr _sdf)
+void FinROSPlugin::Load(gz::sim::EntityComponentManager &_ecm,
+                        const std::shared_ptr<const sdf::Element> &_sdf)
 {
   try {
-    FinPlugin::Load(_parent, _sdf);
-  } catch(gazebo::common::Exception &_e)
-  {
-    gzerr << "Error loading plugin."
-          << "Please ensure that your model is correct."
-          << '\n';
+    FinPlugin::Load(_ecm, _sdf);
+  } catch (const std::exception &e) {
+    gzerr << "Error loading FinPlugin: " << e.what() << "\n";
     return;
   }
 
-  if (!ros::isInitialized())
-  {
-    gzerr << "Not loading plugin since ROS has not been "
-          << "properly initialized.  Try starting gazebo with ros plugin:\n"
-          << "  gazebo -s libgazebo_ros_api_plugin.so\n";
-    return;
-  }
+  if (!rclcpp::ok())
+    rclcpp::init(0, nullptr);
 
-  this->rosNode.reset(new ros::NodeHandle(""));
+  rosNode = std::make_shared<rclcpp::Node>("fin_ros_plugin_" +
+    std::to_string(this->finID));
 
-  this->subReference = this->rosNode->subscribe<
-    uuv_gazebo_ros_plugins_msgs::FloatStamped
-    >(this->commandSubscriber->GetTopic(), 10,
-      boost::bind(&FinROSPlugin::SetReference, this, _1));
+  subReference =
+    rosNode->create_subscription<uuv_gazebo_ros_plugins_msgs::msg::FloatStamped>(
+      this->commandTopic, 10,
+      [this](const uuv_gazebo_ros_plugins_msgs::msg::FloatStamped::SharedPtr msg) {
+        SetReference(msg);
+      });
 
-  this->pubState = this->rosNode->advertise<
-    uuv_gazebo_ros_plugins_msgs::FloatStamped
-    >(this->anglePublisher->GetTopic(), 10);
+  pubState =
+    rosNode->create_publisher<uuv_gazebo_ros_plugins_msgs::msg::FloatStamped>(
+      this->angleTopic, 10);
 
   std::string wrenchTopic;
   if (_sdf->HasElement("wrench_topic"))
@@ -121,69 +90,66 @@ void FinROSPlugin::Load(gazebo::physics::ModelPtr _parent, sdf::ElementPtr _sdf)
   else
     wrenchTopic = this->topicPrefix + "wrench_topic";
 
-  this->pubFinForce =
-    this->rosNode->advertise<geometry_msgs::WrenchStamped>(wrenchTopic, 10);
+  pubFinForce =
+    rosNode->create_publisher<geometry_msgs::msg::WrenchStamped>(wrenchTopic, 10);
 
-  std::stringstream stream;
-  stream << _parent->GetName() << "/fins/" << this->finID <<
-    "/get_lift_drag_params";
-  this->services["get_lift_drag_params"] = this->rosNode->advertiseService(
-    stream.str(), &FinROSPlugin::GetLiftDragParams, this);
+  std::string liftDragSrv = this->topicPrefix + "get_lift_drag_params";
+  services["get_lift_drag_params"] =
+    rosNode->create_service<uuv_gazebo_ros_plugins_msgs::srv::GetListParam>(
+      liftDragSrv,
+      [this](
+        uuv_gazebo_ros_plugins_msgs::srv::GetListParam::Request::SharedPtr req,
+        uuv_gazebo_ros_plugins_msgs::srv::GetListParam::Response::SharedPtr res) {
+        GetLiftDragParams(req, res);
+      });
 
-  gzmsg << "Fin #" << this->finID << " initialized" << std::endl
-    << "\t- Link: " << this->link->GetName() << std::endl
-    << "\t- Robot model: " << _parent->GetName() << std::endl
-    << "\t- Input command topic: " <<
-      this->commandSubscriber->GetTopic() << std::endl
-    << "\t- Output topic: " <<
-      this->anglePublisher->GetTopic() << std::endl;
-
-  this->rosPublishConnection = gazebo::event::Events::ConnectWorldUpdateBegin(
-        boost::bind(&FinROSPlugin::RosPublishStates, this));
+  gzmsg << "Fin #" << this->finID << " initialized\n"
+        << "\t- Input command topic: " << this->commandTopic << "\n"
+        << "\t- Output topic: " << this->angleTopic << std::endl;
 }
 
 /////////////////////////////////////////////////
 void FinROSPlugin::RosPublishStates()
 {
-  // Limit publish rate according to publish period
-  if (this->angleStamp - this->lastRosPublishTime >=
-      this->rosPublishPeriod)
-  {
-    this->lastRosPublishTime = this->angleStamp;
+  auto now = std::chrono::steady_clock::now();
+  if (now - lastRosPublishTime < rosPublishPeriod)
+    return;
 
-    // Publish the current angle of attack
-    uuv_gazebo_ros_plugins_msgs::FloatStamped state_msg;
-    state_msg.header.stamp = ros::Time().now();
-    state_msg.header.frame_id = this->link->GetName();
-    state_msg.data = this->angle;
-    this->pubState.publish(state_msg);
+  lastRosPublishTime = now;
+  rclcpp::Time stamp = rosNode->now();
 
-    // Publish the lift and drag forces
-    geometry_msgs::WrenchStamped msg;
-    msg.header.stamp = ros::Time().now();
-    msg.header.frame_id = this->link->GetName();
-    msg.wrench.force.x = this->finForce.X();
-    msg.wrench.force.y = this->finForce.Y();
-    msg.wrench.force.z = this->finForce.Z();
+  uuv_gazebo_ros_plugins_msgs::msg::FloatStamped stateMsg;
+  stateMsg.header.stamp = stamp;
+  stateMsg.header.frame_id = this->linkName;
+  stateMsg.data = this->angle;
+  pubState->publish(stateMsg);
 
-    this->pubFinForce.publish(msg);
-  }
+  geometry_msgs::msg::WrenchStamped wrenchMsg;
+  wrenchMsg.header.stamp = stamp;
+  wrenchMsg.header.frame_id = this->linkName;
+  wrenchMsg.wrench.force.x = this->finForce.X();
+  wrenchMsg.wrench.force.y = this->finForce.Y();
+  wrenchMsg.wrench.force.z = this->finForce.Z();
+  pubFinForce->publish(wrenchMsg);
 }
 
 /////////////////////////////////////////////////
 bool FinROSPlugin::GetLiftDragParams(
-  uuv_gazebo_ros_plugins_msgs::GetListParam::Request& _req,
-  uuv_gazebo_ros_plugins_msgs::GetListParam::Response& _res)
+  uuv_gazebo_ros_plugins_msgs::srv::GetListParam::Request::SharedPtr,
+  uuv_gazebo_ros_plugins_msgs::srv::GetListParam::Response::SharedPtr _res)
 {
-  _res.description = this->liftdrag->GetType();
-  for (auto& item : this->liftdrag->GetListParams())
+  _res->description = this->liftdrag->GetType();
+  for (auto &item : this->liftdrag->GetListParams())
   {
-    _res.tags.push_back(item.first);
-    _res.data.push_back(item.second);
+    _res->tags.push_back(item.first);
+    _res->data.push_back(item.second);
   }
-
   return true;
 }
 
-GZ_REGISTER_MODEL_PLUGIN(FinROSPlugin)
-}
+} // namespace uuv_simulator_ros
+
+GZ_ADD_PLUGIN(uuv_simulator_ros::FinROSPlugin,
+              gz::sim::System,
+              uuv_simulator_ros::FinROSPlugin::ISystemConfigure,
+              uuv_simulator_ros::FinROSPlugin::ISystemUpdate)

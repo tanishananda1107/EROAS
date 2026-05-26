@@ -1,220 +1,161 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-#include <gazebo/gazebo.hh>
-#include <gazebo/physics/Collision.hh>
-#include <gazebo/physics/Link.hh>
-#include <gazebo/physics/Model.hh>
-#include <gazebo/physics/PhysicsEngine.hh>
-#include <gazebo/physics/Shape.hh>
-#include <gazebo/physics/World.hh>
-#include <gazebo/transport/TransportTypes.hh>
-#include <gazebo/transport/transport.hh>
-
-#include <ros/ros.h>
-#include <geometry_msgs/Accel.h>
+// Licensed under the Apache License, Version 2.0.
 
 #include <uuv_gazebo_ros_plugins/AccelerationsTestPlugin.hh>
 #include <uuv_gazebo_plugins/Def.hh>
 
-namespace gazebo {
+#include <gz/sim/components/LinearVelocity.hh>
+#include <gz/sim/components/AngularVelocity.hh>
+#include <gz/sim/components/LinearAcceleration.hh>
+#include <gz/sim/components/AngularAcceleration.hh>
+#include <gz/sim/components/Pose.hh>
+#include <gz/sim/components/Name.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/Model.hh>
+#include <gz/plugin/Register.hh>
 
-GZ_REGISTER_MODEL_PLUGIN(AccelerationsTestPlugin)
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/vector3_stamped.hpp>
+
+namespace gz::sim::systems
+{
 
 /////////////////////////////////////////////////
 AccelerationsTestPlugin::AccelerationsTestPlugin()
 {
+  last_w_v_w_b.setZero();
 }
 
 /////////////////////////////////////////////////
-AccelerationsTestPlugin::~AccelerationsTestPlugin()
-{
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->updateConnection.reset();
-#else
-  event::Events::DisconnectWorldUpdateBegin(this->updateConnection);
-#endif
-}
+AccelerationsTestPlugin::~AccelerationsTestPlugin() = default;
 
 /////////////////////////////////////////////////
-void AccelerationsTestPlugin::Load(physics::ModelPtr _model,
-                                  sdf::ElementPtr _sdf)
+void AccelerationsTestPlugin::Configure(
+  const gz::sim::Entity &_entity,
+  const std::shared_ptr<const sdf::Element> &_sdf,
+  gz::sim::EntityComponentManager &_ecm,
+  gz::sim::EventManager &)
 {
-  GZ_ASSERT(_model != NULL, "Invalid model pointer");
-  GZ_ASSERT(_sdf != NULL, "Invalid SDF element pointer");
+  modelEntity = _entity;
 
-  this->model = _model;
-  this->world = _model->GetWorld();
+  if (!rclcpp::ok())
+    rclcpp::init(0, nullptr);
 
-  // Initialize the transport node
-  this->node = transport::NodePtr(new transport::Node());
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->node->Init(this->world->Name());
-#else
-  this->node->Init(this->world->GetName());
-#endif
+  rosNode = std::make_shared<rclcpp::Node>("accelerations_test_plugin");
 
-  std::string link_name;
+  std::string linkName;
   if (_sdf->HasElement("link_name"))
-    link_name = _sdf->GetElement("link_name")->Get<std::string>();
+    linkName = _sdf->Get<std::string>("link_name");
   else
-  gzerr << "[TestPlugin] Please specify a link_name .\n";
-  this->link = this->model->GetLink(link_name);
-  if (this->link == NULL)
-    gzthrow("[TestPlugin] Could not find specified link \""
-      << link_name << "\".");
-
-  // Connect the update event callback
-  this->Connect();
-
-  // ROS:
-  if (!ros::isInitialized())
   {
-    gzerr << "Not loading plugin since ROS has not been "
-          << "properly initialized.  Try starting gazebo with ros plugin:\n"
-          << "  gazebo -s libgazebo_ros_api_plugin.so\n";
+    gzerr << "[AccelerationsTestPlugin] Please specify a link_name.\n";
     return;
   }
 
-  this->rosNode.reset(new ros::NodeHandle(""));
+  gz::sim::Model model(_entity);
+  linkEntity = model.LinkByName(_ecm, linkName);
+  if (linkEntity == gz::sim::kNullEntity)
+  {
+    gzerr << "[AccelerationsTestPlugin] Could not find link \"" << linkName << "\".\n";
+    return;
+  }
 
-  this->pub_accel_w_gazebo =
-    this->rosNode->advertise<geometry_msgs::Accel>("accel_w_gazebo", 10);
-  this->pub_accel_w_numeric =
-    this->rosNode->advertise<geometry_msgs::Accel>("accel_w_numeric", 10);
+  // Enable velocity/acceleration components
+  gz::sim::Link link(linkEntity);
+  link.EnableVelocityChecks(_ecm, true);
+  link.EnableAccelerationChecks(_ecm, true);
 
-  this->pub_accel_b_gazebo =
-    this->rosNode->advertise<geometry_msgs::Accel>("accel_b_gazebo", 10);
-  this->pub_accel_b_numeric =
-    this->rosNode->advertise<geometry_msgs::Accel>("accel_b_numeric", 10);
+  pub_accel_w_gazebo = rosNode->create_publisher<geometry_msgs::msg::Vector3Stamped>(
+    "accel_w_gazebo", 10);
+  pub_accel_w_numeric = rosNode->create_publisher<geometry_msgs::msg::Vector3Stamped>(
+    "accel_w_numeric", 10);
+  pub_accel_b_gazebo = rosNode->create_publisher<geometry_msgs::msg::Vector3Stamped>(
+    "accel_b_gazebo", 10);
+  pub_accel_b_numeric = rosNode->create_publisher<geometry_msgs::msg::Vector3Stamped>(
+    "accel_b_numeric", 10);
 }
 
 /////////////////////////////////////////////////
-void AccelerationsTestPlugin::Init()
-{
-  // Doing nothing for now
-}
+void AccelerationsTestPlugin::PreUpdate(
+  const gz::sim::UpdateInfo &,
+  gz::sim::EntityComponentManager &) {}
 
-geometry_msgs::Accel accelFromEigen(const Eigen::Vector6d& acc)
+/////////////////////////////////////////////////
+static geometry_msgs::msg::Vector3Stamped vec3Msg(
+  const gz::math::Vector3d &v, const rclcpp::Time &stamp, const std::string &frame)
 {
-  geometry_msgs::Accel amsg;
-  amsg.linear.x = acc[0];
-  amsg.linear.y = acc[1];
-  amsg.linear.z = acc[2];
-  amsg.angular.x = acc[3];
-  amsg.angular.y = acc[4];
-  amsg.angular.z = acc[5];
-  return amsg;
-}
-
-Eigen::Matrix3d Matrix3ToEigen(const ignition::math::Matrix3d& m)
-{
-  Eigen::Matrix3d r;
-  r << m(0, 0), m(0, 1), m(0, 2),
-    m(1, 0), m(1, 1), m(1, 2),
-    m(2, 0), m(2, 1), m(2, 1);
-  return r;
+  geometry_msgs::msg::Vector3Stamped msg;
+  msg.header.stamp = stamp;
+  msg.header.frame_id = frame;
+  msg.vector.x = v.X();
+  msg.vector.y = v.Y();
+  msg.vector.z = v.Z();
+  return msg;
 }
 
 /////////////////////////////////////////////////
-void AccelerationsTestPlugin::Update(const common::UpdateInfo &_info)
+void AccelerationsTestPlugin::Update(
+  const gz::sim::UpdateInfo &_info,
+  gz::sim::EntityComponentManager &_ecm)
 {
-  double dt = (_info.simTime - lastTime).Double();
+  if (linkEntity == gz::sim::kNullEntity)
+    return;
 
-  // Link's pose
-  ignition::math::Pose3d pose_w_b;
-#if GAZEBO_MAJOR_VERSION >= 8
-  pose_w_b = this->link->WorldPose();
-#else
-  pose_w_b = this->link->GetWorldPose().Ign();
-#endif
+  double dt = std::chrono::duration<double>(_info.simTime - lastTime).count();
+  if (dt <= 0.0) return;
 
+  gz::sim::Link link(linkEntity);
 
-#if GAZEBO_MAJOR_VERSION >= 8
-// Velocities of this link in link frame.
-Eigen::Vector6d gazebo_b_v_w_b = EigenStack(
-  this->link->RelativeLinearVel(),
-  this->link->RelativeAngularVel());
+  auto w_lin_vel = link.WorldLinearVelocity(_ecm).value_or(gz::math::Vector3d::Zero);
+  auto w_ang_vel = link.WorldAngularVelocity(_ecm).value_or(gz::math::Vector3d::Zero);
+  auto b_lin_vel = link.RelativeLinearVelocity(_ecm).value_or(gz::math::Vector3d::Zero);
+  auto b_ang_vel = link.RelativeAngularVelocity(_ecm).value_or(gz::math::Vector3d::Zero);
 
-// Velocities of this link in world frame
-Eigen::Vector6d gazebo_w_v_w_b = EigenStack(
-  this->link->WorldLinearVel(),
-  this->link->WorldAngularVel());
+  auto w_lin_acc = link.WorldLinearAcceleration(_ecm).value_or(gz::math::Vector3d::Zero);
+  auto w_ang_acc = link.WorldAngularAcceleration(_ecm).value_or(gz::math::Vector3d::Zero);
+  auto b_lin_acc = link.RelativeLinearAcceleration(_ecm).value_or(gz::math::Vector3d::Zero);
+  auto b_ang_acc = link.RelativeAngularAcceleration(_ecm).value_or(gz::math::Vector3d::Zero);
 
+  // World-frame velocity as 6-vector
+  Eigen::Matrix<double,6,1> w_v;
+  w_v << w_lin_vel.X(), w_lin_vel.Y(), w_lin_vel.Z(),
+         w_ang_vel.X(), w_ang_vel.Y(), w_ang_vel.Z();
 
-// Accelerations of this link in world frame
-Eigen::Vector6d gazebo_w_a_w_b = EigenStack(
-  this->link->WorldLinearAccel(),
-  this->link->WorldAngularAccel());
+  // Numeric differentiation in world frame
+  Eigen::Matrix<double,6,1> num_w_a = (w_v - last_w_v_w_b) / dt;
 
-// Accelerations of this link in link frame
-Eigen::Vector6d gazebo_b_a_w_b = EigenStack(
-  this->link->RelativeLinearAccel(),
-  this->link->RelativeAngularAccel());
-#else
-  // Velocities of this link in link frame.
-  Eigen::Vector6d gazebo_b_v_w_b = EigenStack(
-    this->link->GetRelativeLinearVel().Ign(),
-    this->link->GetRelativeAngularVel().Ign());
+  // Rotation to body frame
+  auto pose = link.WorldPose(_ecm).value_or(gz::math::Pose3d::Zero);
+  gz::math::Matrix3d R_b_w_gz(pose.Rot().Inverse());
+  Eigen::Matrix3d R;
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j)
+      R(i, j) = R_b_w_gz(i, j);
 
-  // Velocities of this link in world frame
-  Eigen::Vector6d gazebo_w_v_w_b = EigenStack(
-    this->link->GetWorldLinearVel().Ign(),
-    this->link->GetWorldAngularVel().Ign());
+  Eigen::Matrix<double,6,1> num_b_a;
+  num_b_a.head<3>() = R * num_w_a.head<3>();
+  num_b_a.tail<3>() = R * num_w_a.tail<3>();
 
+  rclcpp::Time stamp(_info.simTime.count());
+  std::string world_frame = "world";
+  std::string body_frame = _ecm.ComponentData<gz::sim::components::Name>(linkEntity)
+    .value_or("link");
 
-  // Accelerations of this link in world frame
-  Eigen::Vector6d gazebo_w_a_w_b = EigenStack(
-    this->link->GetWorldLinearAccel().Ign(),
-    this->link->GetWorldAngularAccel().Ign());
+  pub_accel_w_gazebo->publish(vec3Msg(w_lin_acc, stamp, world_frame));
+  pub_accel_b_gazebo->publish(vec3Msg(b_lin_acc, stamp, body_frame));
+  pub_accel_w_numeric->publish(vec3Msg(
+    gz::math::Vector3d(num_w_a[0], num_w_a[1], num_w_a[2]), stamp, world_frame));
+  pub_accel_b_numeric->publish(vec3Msg(
+    gz::math::Vector3d(num_b_a[0], num_b_a[1], num_b_a[2]), stamp, body_frame));
 
-  // Accelerations of this link in link frame
-  Eigen::Vector6d gazebo_b_a_w_b = EigenStack(
-    this->link->GetRelativeLinearAccel().Ign(),
-    this->link->GetRelativeAngularAccel().Ign());
-#endif
-
-  // Numerically computed accelerations
-  ignition::math::Matrix3d R_b_w = ignition::math::Matrix3d(pose_w_b.Rot().Inverse());
-
-  Eigen::Matrix3d R_b_w_eigen = Matrix3ToEigen(R_b_w);
-  Eigen::Matrix6d R6_b_w_eigen;
-  R6_b_w_eigen << R_b_w_eigen, Eigen::Matrix3d::Zero(),
-                  Eigen::Matrix3d::Zero(), R_b_w_eigen;
-
-  // Actual numeric differentiation
-  Eigen::Vector6d num_w_a_w_b = (gazebo_w_v_w_b - last_w_v_w_b) / dt;
-  Eigen::Vector6d num_b_a_w_b = R6_b_w_eigen * num_w_a_w_b;
-
-  // Publish all four variants via ROS for easy comparison
-  this->pub_accel_w_gazebo.publish(accelFromEigen(gazebo_w_a_w_b));
-  this->pub_accel_b_gazebo.publish(accelFromEigen(gazebo_b_a_w_b));
-
-  this->pub_accel_w_numeric.publish(accelFromEigen(num_w_a_w_b));
-  this->pub_accel_b_numeric.publish(accelFromEigen(num_b_a_w_b));
-
-  last_w_v_w_b = gazebo_w_v_w_b;
+  last_w_v_w_b = w_v;
   lastTime = _info.simTime;
 }
 
-/////////////////////////////////////////////////
-void AccelerationsTestPlugin::Connect()
-{
-  // Connect the update event
-  this->updateConnection = event::Events::ConnectWorldUpdateBegin(
-    boost::bind(&AccelerationsTestPlugin::Update,
-                    this, _1));
-}
-}
+} // namespace gz::sim::systems
+
+GZ_ADD_PLUGIN(gz::sim::systems::AccelerationsTestPlugin,
+              gz::sim::System,
+              gz::sim::systems::AccelerationsTestPlugin::ISystemConfigure,
+              gz::sim::systems::AccelerationsTestPlugin::ISystemPreUpdate,
+              gz::sim::systems::AccelerationsTestPlugin::ISystemUpdate)

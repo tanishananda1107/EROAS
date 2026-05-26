@@ -1,13 +1,7 @@
 cmake_minimum_required(VERSION 3.8)
-project(uuv_gazebo_ros_plugins_msgs)
+project(uuv_gz_ros2_plugins_msgs)
 
-if(CMAKE_VERSION VERSION_LESS 3.10)
-  set(CMAKE_CXX_STANDARD 11)
-else()
-  set(CMAKE_CXX_STANDARD 14)
-endif()
-
-if(CMAKE_COMPILER_IS_GNUCXX || CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
@@ -20,16 +14,21 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/FloatStamped.msg"
   "msg/UnderwaterObjectModel.msg"
   "msg/ThrusterConversionFcn.msg"
-  "srv/SetUseGlobalCurrentVel.srv"
-  "srv/GetThrusterState.srv"
-  "srv/GetFloat.srv"
-  "srv/GetThrusterConversionFcn.srv"
-  "srv/SetThrusterState.srv"
-  "srv/GetListParam.srv"
-  "srv/SetFloat.srv"
-  "srv/GetModelProperties.srv"
-  "srv/GetThrusterEfficiency.srv"
   "srv/SetThrusterEfficiency.srv"
+  "srv/SetThrusterState.srv"
+  "srv/GetThrusterEfficiency.srv"
+  "srv/GetThrusterState.srv"
+  "srv/SetUseGlobalCurrentVel.srv"
+  "srv/GetModelProperties.srv"
+  "srv/SetFloat.srv"
+  "srv/GetFloat.srv"
+  "srv/GetListParam.srv"
+  "srv/GetThrusterConversionFcn.srv"
+  DEPENDENCIES
+    std_msgs
+    geometry_msgs
 )
+
+ament_export_dependencies(rosidl_default_runtime)
 
 ament_package()

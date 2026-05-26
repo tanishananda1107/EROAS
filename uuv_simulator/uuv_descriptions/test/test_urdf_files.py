@@ -1,60 +1,96 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
 # Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from __future__ import print_function
-import rospy
+# ROS2 Jazzy conversion
+
 import unittest
 import subprocess
 import os
+from pathlib import Path
 
-PKG = 'uuv_descriptions'
-NAME = 'test_urdf_files'
 
-import roslib
-roslib.load_manifest(PKG)
+PKG = "uuv_descriptions"
+NAME = "test_urdf_files"
 
 
 def call_xacro(xml_file):
-    assert os.path.isfile(xml_file), 'Invalid XML xacro file'
-    return subprocess.check_output(['xacro', '--inorder', xml_file])
+    xml_file = Path(xml_file)
+
+    assert xml_file.exists(), \
+        f"Invalid XML xacro file: {xml_file}"
+
+    result = subprocess.run(
+        [
+            "xacro",
+            str(xml_file)
+        ],
+        capture_output=True,
+        text=True
+    )
+
+    return result
 
 
 class TestRexROVURDFFiles(unittest.TestCase):
+
     def test_xacro(self):
-        # Retrieve the root folder for the tests
-        test_dir = os.path.abspath(os.path.dirname(__file__))
-        robots_dir = os.path.join(test_dir, '..', 'robots')
 
-        for item in os.listdir(robots_dir):
-            if 'oberon' in item:
+        test_dir = Path(
+            os.path.dirname(
+                os.path.abspath(__file__)
+            )
+        )
+
+        robots_dir = (
+            test_dir.parent /
+            "robots"
+        )
+
+        self.assertTrue(
+            robots_dir.exists(),
+            f"Robots directory missing: {robots_dir}"
+        )
+
+        for item in robots_dir.iterdir():
+
+            if "oberon" in item.name:
                 continue
-            if not os.path.isfile(os.path.join(robots_dir, item)):
+
+            if not item.is_file():
                 continue
-            output = call_xacro(os.path.join(robots_dir, item))
+
+            result = call_xacro(item)
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"""
+Failed parsing:
+
+File:
+{item.name}
+
+STDERR:
+{result.stderr}
+
+STDOUT:
+{result.stdout}
+"""
+            )
+
             self.assertNotIn(
-                output, 
-                'XML parsing error',
-                'Parsing error found for file {}'.format(item))
+                "XML parsing error",
+                result.stderr,
+                f"XML parsing error in {item.name}"
+            )
+
             self.assertNotIn(
-                output, 
-                'No such file or directory', 
-                'Some file not found in {}'.format(item))
-
-if __name__ == '__main__':
-    import rosunit
-    rosunit.unitrun(PKG, NAME, TestRexROVURDFFiles)
+                "No such file or directory",
+                result.stderr,
+                f"Missing dependency in {item.name}"
+            )
 
 
+if __name__ == "__main__":
+    unittest.main()
 

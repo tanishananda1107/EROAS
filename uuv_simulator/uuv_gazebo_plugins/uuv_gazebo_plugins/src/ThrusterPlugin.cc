@@ -1,151 +1,131 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
 // All rights reserved.
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0 (the "License")
 
-#include <boost/algorithm/string.hpp>
-#include <boost/bind.hpp>
-#include <boost/shared_ptr.hpp>
+// ============================================================
+// ROS2 / Gazebo Harmonic (gz-sim 8) conversion notes:
+//
+//  - GZ_REGISTER_MODEL_PLUGIN   → GZ_ADD_PLUGIN
+//  - transport::NodePtr         → gz::transport::Node (stack-allocated)
+//  - node->Subscribe/Advertise  → node.Subscribe/Advertise
+//  - ConstDoublePtr callback    → gz::msgs::Double callback
+//  - msgs::Vector3d / msgs::Set → gz::msgs::Vector3d directly
+//  - physics::ModelPtr / LinkPtr/ JointPtr → gz::sim::Entity + wrappers
+//  - link->AddRelativeForce     → gz::sim::Link::AddWorldForce (rotated)
+//  - joint->SetVelocity         → gz::sim::components::JointVelocityCmd
+//  - joint->WorldPose / GlobalAxis → gz::sim::Joint wrappers
+//  - event callback             → ISystemPreUpdate
+//  - boost headers removed; std equivalents used
+// ============================================================
 
 #include <limits>
+#include <cmath>
+#include <string>
 
-#include <gazebo/gazebo.hh>
-#include <gazebo/msgs/msgs.hh>
-#include <gazebo/physics/Link.hh>
-#include <gazebo/physics/Model.hh>
-#include <gazebo/physics/PhysicsEngine.hh>
-#include <gazebo/physics/World.hh>
-#include <gazebo/transport/TransportTypes.hh>
-#include <sdf/sdf.hh>
-
-#include <math.h>
+#include <gz/plugin/Register.hh>
+#include <gz/sim/System.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/Joint.hh>
+#include <gz/sim/EntityComponentManager.hh>
+#include <gz/sim/components/JointVelocityCmd.hh>
+#include <gz/sim/components/JointAxis.hh>
+#include <gz/transport/Node.hh>
+#include <gz/msgs/double.pb.h>
+#include <gz/msgs/vector3d.pb.h>
+#include <gz/common/Console.hh>
+#include <gz/math/Pose3.hh>
+#include <gz/math/Vector3.hh>
 
 #include <uuv_gazebo_plugins/ThrusterPlugin.hh>
 #include <uuv_gazebo_plugins/Def.hh>
 
-
-GZ_REGISTER_MODEL_PLUGIN(gazebo::ThrusterPlugin)
-
-namespace gazebo {
+namespace gz {
+namespace sim {
 
 /////////////////////////////////////////////////
-ThrusterPlugin::ThrusterPlugin() : thrustForce(0),
-  inputCommand(0),
-  clampMin(std::numeric_limits<double>::lowest()),
-  clampMax(std::numeric_limits<double>::max()),
-  thrustMin(std::numeric_limits<double>::lowest()),
-  thrustMax(std::numeric_limits<double>::max()),
-  gain(1.0),
-  isOn(true),
-  thrustEfficiency(1.0),
-  propellerEfficiency(1.0),
-  thrusterID(-1)
-{
-}
+ThrusterPlugin::ThrusterPlugin()
+  : thrustForce(0),
+    inputCommand(0),
+    clampMin(std::numeric_limits<double>::lowest()),
+    clampMax(std::numeric_limits<double>::max()),
+    thrustMin(std::numeric_limits<double>::lowest()),
+    thrustMax(std::numeric_limits<double>::max()),
+    gain(1.0),
+    isOn(true),
+    thrustEfficiency(1.0),
+    propellerEfficiency(1.0),
+    thrusterID(-1)
+{}
+
+ThrusterPlugin::~ThrusterPlugin() {}
 
 /////////////////////////////////////////////////
-ThrusterPlugin::~ThrusterPlugin()
+void ThrusterPlugin::Configure(
+    const gz::sim::Entity              &_entity,
+    const std::shared_ptr<const sdf::Element> &_sdf,
+    gz::sim::EntityComponentManager    &_ecm,
+    gz::sim::EventManager              & /*_eventMgr*/)
 {
-  if (this->updateConnection)
-  {
-#if GAZEBO_MAJOR_VERSION >= 8
-    this->updateConnection.reset();
-#else
-    event::Events::DisconnectWorldUpdateBegin(this->updateConnection);
-#endif
-  }
-}
+  this->model = gz::sim::Model(_entity);
 
-/////////////////////////////////////////////////
-void ThrusterPlugin::Load(physics::ModelPtr _model,
-                          sdf::ElementPtr _sdf)
-{
-  GZ_ASSERT(_model != NULL, "Invalid model pointer");
-
-  // Initializing the transport node
-  this->node = transport::NodePtr(new transport::Node());
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->node->Init(_model->GetWorld()->Name());
-#else
-  this->node->Init(_model->GetWorld()->GetName());
-#endif
-
-  // Retrieve the link name on which the thrust will be applied
+  // Link name
   GZ_ASSERT(_sdf->HasElement("linkName"), "Could not find linkName.");
-  std::string linkName = _sdf->Get<std::string>("linkName");
-  this->thrusterLink = _model->GetLink(linkName);
-  GZ_ASSERT(this->thrusterLink, "thruster link is invalid");
+  this->thrusterLinkEntity = this->model.LinkByName(
+      _ecm, _sdf->Get<std::string>("linkName"));
+  GZ_ASSERT(this->thrusterLinkEntity != kNullEntity, "thruster link is invalid");
 
-  // Reading thruster ID
-  GZ_ASSERT(_sdf->HasElement("thrusterID"), "Thruster ID was not provided");
+  // Thruster ID
+  GZ_ASSERT(_sdf->HasElement("thrusterID"), "Thruster ID not provided");
   this->thrusterID = _sdf->Get<int>("thrusterID");
 
-  // Thruster dynamics configuration:
+  // Dynamics
   GZ_ASSERT(_sdf->HasElement("dynamics"), "Could not find dynamics.");
   this->thrusterDynamics.reset(
-        DynamicsFactory::GetInstance().CreateDynamics(
-          _sdf->GetElement("dynamics")));
+      DynamicsFactory::GetInstance().CreateDynamics(
+          const_cast<sdf::ElementPtr>(_sdf->GetElement("dynamics"))));
 
-  // Thrust conversion function
-  GZ_ASSERT(_sdf->HasElement("conversion"), "Could not find dynamics");
+  // Conversion function
+  GZ_ASSERT(_sdf->HasElement("conversion"), "Could not find conversion.");
   this->conversionFunction.reset(
-        ConversionFunctionFactory::GetInstance().CreateConversionFunction(
-          _sdf->GetElement("conversion")));
+      ConversionFunctionFactory::GetInstance().CreateConversionFunction(
+          const_cast<sdf::ElementPtr>(_sdf->GetElement("conversion"))));
 
-  // Optional paramters:
-  // Rotor joint, used for visualization if available.
+  // Optional joint (visualisation)
   if (_sdf->HasElement("jointName"))
-    this->joint = _model->GetJoint(_sdf->Get<std::string>("jointName"));
+  {
+    this->jointEntity = this->model.JointByName(
+        _ecm, _sdf->Get<std::string>("jointName"));
+  }
 
-  // Clamping interval
-  if (_sdf->HasElement("clampMin"))
-    this->clampMin = _sdf->Get<double>("clampMin");
-
-  if (_sdf->HasElement("clampMax"))
-    this->clampMax = _sdf->Get<double>("clampMax");
-
+  // Clamping intervals
+  if (_sdf->HasElement("clampMin")) this->clampMin = _sdf->Get<double>("clampMin");
+  if (_sdf->HasElement("clampMax")) this->clampMax = _sdf->Get<double>("clampMax");
   if (this->clampMin >= this->clampMax)
   {
-    gzmsg << "clampMax must be greater than clampMin, returning to default values..." << std::endl;
+    gzmsg << "clampMax must be > clampMin; reverting to defaults\n";
     this->clampMin = std::numeric_limits<double>::lowest();
     this->clampMax = std::numeric_limits<double>::max();
   }
 
-  // Thrust force interval
-  if (_sdf->HasElement("thrustMin"))
-    this->thrustMin = _sdf->Get<double>("thrustMin");
-
-  if (_sdf->HasElement("thrustMax"))
-    this->thrustMax = _sdf->Get<double>("thrustMax");
-
+  if (_sdf->HasElement("thrustMin")) this->thrustMin = _sdf->Get<double>("thrustMin");
+  if (_sdf->HasElement("thrustMax")) this->thrustMax = _sdf->Get<double>("thrustMax");
   if (this->thrustMin >= this->thrustMax)
   {
-    gzmsg << "thrustMax must be greater than thrustMin, returning to default values..." << std::endl;
+    gzmsg << "thrustMax must be > thrustMin; reverting to defaults\n";
     this->thrustMin = std::numeric_limits<double>::lowest();
     this->thrustMax = std::numeric_limits<double>::max();
   }
 
-  // Gain (1.0 by default)
-  if (_sdf->HasElement("gain"))
-    this->gain = _sdf->Get<double>("gain");
+  if (_sdf->HasElement("gain")) this->gain = _sdf->Get<double>("gain");
 
   if (_sdf->HasElement("thrust_efficiency"))
   {
     this->thrustEfficiency = _sdf->Get<double>("thrust_efficiency");
     if (this->thrustEfficiency < 0.0 || this->thrustEfficiency > 1.0)
     {
-      gzmsg << "Invalid thrust efficiency factor, setting it to 100%"
-        << std::endl;
+      gzmsg << "Invalid thrust_efficiency; setting to 100%\n";
       this->thrustEfficiency = 1.0;
     }
   }
@@ -155,106 +135,115 @@ void ThrusterPlugin::Load(physics::ModelPtr _model,
     this->propellerEfficiency = _sdf->Get<double>("propeller_efficiency");
     if (this->propellerEfficiency < 0.0 || this->propellerEfficiency > 1.0)
     {
-      gzmsg <<
-        "Invalid propeller dynamics efficiency factor, setting it to 100%"
-        << std::endl;
+      gzmsg << "Invalid propeller_efficiency; setting to 100%\n";
       this->propellerEfficiency = 1.0;
     }
   }
-  // Root string for topics
-  std::stringstream strs;
-  strs << "/" << _model->GetName() << "/thrusters/" << this->thrusterID << "/";
-  this->topicPrefix = strs.str();
 
-  // Advertise the thrust topic
-  this->thrustTopicPublisher =
-      this->node->Advertise<msgs::Vector3d>(this->topicPrefix + "thrust");
+  // Topic prefix
+  std::string modelName = this->model.Name(_ecm);
+  this->topicPrefix = "/" + modelName + "/thrusters/" +
+                      std::to_string(this->thrusterID) + "/";
 
-  // Subscribe to the input signal topic
+  // Publish thrust
+  this->thrustPub = this->node.Advertise<gz::msgs::Vector3d>(
+      this->topicPrefix + "thrust");
 
-  this->commandSubscriber =
-    this->node->Subscribe(this->topicPrefix + "input",
-        &ThrusterPlugin::UpdateInput,
-        this);
+  // Subscribe to input
+  this->node.Subscribe(this->topicPrefix + "input",
+      &ThrusterPlugin::OnInput, this);
 
-  // Connect the update event
-  this->updateConnection = event::Events::ConnectWorldUpdateBegin(
-        boost::bind(&ThrusterPlugin::Update,
-                    this, _1));
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->thrusterAxis = this->joint->WorldPose().Rot().RotateVectorReverse(this->joint->GlobalAxis(0));
-#else
-  this->thrusterAxis = this->joint->GetWorldPose().rot.Ign().RotateVectorReverse(this->joint->GetGlobalAxis(0).Ign());
-#endif
-}
-
-/////////////////////////////////////////////////
-void ThrusterPlugin::Init()
-{
-}
-
-/////////////////////////////////////////////////
-void ThrusterPlugin::Reset()
-{
-    this->thrusterDynamics->Reset();
-}
-
-/////////////////////////////////////////////////
-void ThrusterPlugin::Update(const common::UpdateInfo &_info)
-{
-  GZ_ASSERT(!std::isnan(this->inputCommand),
-            "nan in this->inputCommand");
-
-  double dynamicsInput;
-  double dynamicState;
-  // Test if the thruster has been turned off
-  if (this->isOn)
+  // Compute thruster axis from joint global axis in body frame
+  if (this->jointEntity != kNullEntity)
   {
-    double clamped = this->inputCommand;
-    clamped = std::min(clamped, this->clampMax);
-    clamped = std::max(clamped, this->clampMin);
-
-    dynamicsInput = this->gain*clamped;
+    gz::sim::Joint joint(this->jointEntity);
+    // axis in world frame at configure time (orientation may not be set yet;
+    // recomputed in first PreUpdate)
+    this->thrusterAxis = gz::math::Vector3d::UnitX;  // default; updated below
+    auto axisComp = _ecm.Component<gz::sim::components::JointAxis>(
+        this->jointEntity);
+    if (axisComp)
+      this->thrusterAxis = axisComp->Data().Xyz();
   }
   else
   {
-    // In case the thruster is turned off in runtime, the dynamic state
-    // will converge to zero
-    dynamicsInput = 0.0;
+    this->thrusterAxis = gz::math::Vector3d::UnitX;
   }
-  dynamicState = this->propellerEfficiency *
-    this->thrusterDynamics->update(dynamicsInput, _info.simTime.Double());
-
-  GZ_ASSERT(!std::isnan(dynamicState), "Invalid dynamic state");
-  // Multiply the output force magnitude with the efficiency
-  this->thrustForce = this->thrustEfficiency *
-    this->conversionFunction->convert(dynamicState);
-  GZ_ASSERT(!std::isnan(this->thrustForce), "Invalid thrust force");
-
-  // Use the thrust force limits
-  this->thrustForce = std::max(this->thrustForce, this->thrustMin);
-  this->thrustForce = std::min(this->thrustForce, this->thrustMax);
-
-  this->thrustForceStamp = _info.simTime;
-  ignition::math::Vector3d force(this->thrustForce*this->thrusterAxis);
-
-  this->thrusterLink->AddRelativeForce(force);
-
-  if (this->joint)
-  {
-    // Let joint rotate with correct angular velocity.
-    this->joint->SetVelocity(0, dynamicState);
-  }
-
-  // Publish thrust:
-  msgs::Vector3d thrustMsg;
-  msgs::Set(&thrustMsg, ignition::math::Vector3d(this->thrustForce, 0., 0.));
-  this->thrustTopicPublisher->Publish(thrustMsg);
 }
 
 /////////////////////////////////////////////////
-void ThrusterPlugin::UpdateInput(ConstDoublePtr &_msg)
+void ThrusterPlugin::PreUpdate(
+    const gz::sim::UpdateInfo          &_info,
+    gz::sim::EntityComponentManager    &_ecm)
 {
-  this->inputCommand = _msg->value();
+  if (_info.paused) return;
+
+  GZ_ASSERT(!std::isnan(this->inputCommand), "NaN in inputCommand");
+
+  double dynamicsInput = this->isOn ?
+      std::min(std::max(this->gain * this->inputCommand,
+                        this->clampMin), this->clampMax) : 0.0;
+
+  double simTime = std::chrono::duration<double>(_info.simTime).count();
+
+  double dynamicState = this->propellerEfficiency *
+      this->thrusterDynamics->update(dynamicsInput, simTime);
+
+  GZ_ASSERT(!std::isnan(dynamicState), "Invalid dynamic state");
+
+  this->thrustForce = this->thrustEfficiency *
+      this->conversionFunction->convert(dynamicState);
+
+  GZ_ASSERT(!std::isnan(this->thrustForce), "Invalid thrust force");
+
+  this->thrustForce = std::max(this->thrustForce, this->thrustMin);
+  this->thrustForce = std::min(this->thrustForce, this->thrustMax);
+
+  // Compute world-frame force: rotate body-frame axis to world
+  gz::sim::Link link(this->thrusterLinkEntity);
+  gz::math::Pose3d pose =
+      link.WorldPose(_ecm).value_or(gz::math::Pose3d());
+  gz::math::Vector3d forceWorld =
+      pose.Rot().RotateVector(this->thrusterAxis * this->thrustForce);
+
+  link.AddWorldForce(_ecm, forceWorld);
+
+  // Spin joint
+  if (this->jointEntity != kNullEntity)
+  {
+    auto *velCmd = _ecm.Component<gz::sim::components::JointVelocityCmd>(
+        this->jointEntity);
+    if (velCmd)
+      velCmd->Data()[0] = dynamicState;
+    else
+      _ecm.CreateComponent(this->jointEntity,
+          gz::sim::components::JointVelocityCmd({dynamicState}));
+  }
+
+  // Publish thrust vector
+  gz::msgs::Vector3d thrustMsg;
+  thrustMsg.set_x(this->thrustForce);
+  thrustMsg.set_y(0.0);
+  thrustMsg.set_z(0.0);
+  this->thrustPub.Publish(thrustMsg);
 }
+
+/////////////////////////////////////////////////
+void ThrusterPlugin::OnInput(const gz::msgs::Double &_msg)
+{
+  this->inputCommand = _msg.data();
 }
+
+void ThrusterPlugin::Reset()
+{
+  this->thrusterDynamics->Reset();
+}
+
+}  // namespace sim
+}  // namespace gz
+
+GZ_ADD_PLUGIN(gz::sim::ThrusterPlugin,
+              gz::sim::System,
+              gz::sim::ThrusterPlugin::ISystemConfigure,
+              gz::sim::ThrusterPlugin::ISystemPreUpdate)
+GZ_ADD_PLUGIN_ALIAS(gz::sim::ThrusterPlugin, "gz::sim::ThrusterPlugin")

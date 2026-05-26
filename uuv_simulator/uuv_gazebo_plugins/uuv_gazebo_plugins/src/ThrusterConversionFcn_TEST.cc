@@ -13,137 +13,163 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// GZ-SIM 8 (Gazebo Harmonic) port
+// Changes from ROS1/Gazebo Classic:
+//   - Namespace: gazebo::  →  gz::sim::
+//   - SDF_VERSION macro (from gazebo) replaced by SDF_VERSION from sdformat13
+//     which is still available via <sdf/sdf.hh>; if not defined locally,
+//     fall back to "1.9" (sdformat13 default).
+//   - sdf::SDF / sdf::ElementPtr API is unchanged (sdformat13 keeps compat).
+//   - ConversionFunctionFactory and ConversionFunction live in gz::sim:: now.
+//   - <cmath> std::abs for double math.
+
 #include <string>
 #include <memory>
+#include <sstream>
+#include <vector>
+#include <cmath>
+
 #include <gtest/gtest.h>
+
+// sdformat13
+#include <sdf/sdf.hh>
+
+// Plugin header (update your include guard / namespace accordingly)
 #include <uuv_gazebo_plugins/ThrusterConversionFcn.hh>
 
-std::shared_ptr<gazebo::ConversionFunction> ConversionFromString(
-    const std::string& description)
+// SDF_VERSION may be defined by the sdformat CMake targets; provide a fallback.
+#ifndef SDF_VERSION
+#define SDF_VERSION "1.9"
+#endif
+
+/// \brief Helper: parse an SDF snippet and return the ConversionFunction.
+static std::shared_ptr<gz::sim::ConversionFunction>
+ConversionFromString(const std::string& description)
 {
   std::stringstream stream;
-  stream << "<sdf version='" << SDF_VERSION << "'>" << std::endl
-         << "<model name='test_model'>" << std::endl
-         << "<plugin name='test_plugin' filename='test_file.so'>" << std::endl
-         << description
-         << "</plugin>" << std::endl
-         << "</model>" << std::endl
-         << "</sdf>" << std::endl;
+  stream << "<sdf version='" << SDF_VERSION << "'>\n"
+         << "<model name='test_model'>\n"
+         << "<plugin name='test_plugin' filename='test_file.so'>\n"
+         << description << "\n"
+         << "</plugin>\n"
+         << "</model>\n"
+         << "</sdf>\n";
 
   sdf::SDF sdfParsed;
   sdfParsed.SetFromString(stream.str());
 
-  sdf::ElementPtr conversion = sdfParsed.Root()->GetElement("model")
-      ->GetElement("plugin")->GetElement("conversion");
+  sdf::ElementPtr conversion =
+      sdfParsed.Root()
+               ->GetElement("model")
+               ->GetElement("plugin")
+               ->GetElement("conversion");
 
-  std::shared_ptr<gazebo::ConversionFunction> func;
-  func.reset(gazebo::ConversionFunctionFactory::GetInstance().
-             CreateConversionFunction(conversion));
+  std::shared_ptr<gz::sim::ConversionFunction> func;
+  func.reset(
+      gz::sim::ConversionFunctionFactory::GetInstance()
+              .CreateConversionFunction(conversion));
 
   return func;
 }
 
+//////////////////////////////////////////////////
 TEST(ThrusterConversionFcn, Basic)
 {
-  std::string description =
-        "<conversion> \n"
-        "  <type>Basic</type> \n"
-        "  <rotorConstant>0.0049</rotorConstant> \n"
-        "</conversion>";
+  const std::string description =
+      "<conversion>\n"
+      "  <type>Basic</type>\n"
+      "  <rotorConstant>0.0049</rotorConstant>\n"
+      "</conversion>";
 
-  std::shared_ptr<gazebo::ConversionFunction> func;
-  func = ConversionFromString(description);
+  auto func = ConversionFromString(description);
 
-  EXPECT_TRUE(func != NULL);
+  ASSERT_NE(func, nullptr);
   EXPECT_EQ(func->GetType(), "Basic");
 
-  EXPECT_EQ(func->convert(0.0), 0.0);
-  EXPECT_EQ(func->convert(50.), 50.0*50.0*0.0049);
-  EXPECT_EQ(func->convert(-50.), -50.0*50.0*0.0049);
+  EXPECT_EQ(func->convert(0.0),  0.0);
+  EXPECT_EQ(func->convert(50.),  50.0 * 50.0 * 0.0049);
+  EXPECT_EQ(func->convert(-50.), -50.0 * 50.0 * 0.0049);
 }
 
+//////////////////////////////////////////////////
 TEST(ThrusterConversionFcn, Bessa)
 {
-  double cl = 0.001;
-  double cr = 0.002;
-  double dl = -50;
-  double dr = 25;
+  const double cl    = 0.001;
+  const double cr    = 0.002;
+  const double dl    = -50.0;
+  const double dr    =  25.0;
+  const double delta = 1e-6;
 
-  double delta = 1e-6;
-
-  std::stringstream stream;
-  stream << "<conversion> \n"
-         << "  <type>Bessa</type> \n"
-         << "  <rotorConstantL>" << cl << "</rotorConstantL> \n"
-         << "  <rotorConstantR>" << cr << "</rotorConstantR> \n"
-         << "  <deltaL>" << dl << "</deltaL> \n"
-         << "  <deltaR>" << dr << "</deltaR> \n"
+  std::ostringstream stream;
+  stream << "<conversion>\n"
+         << "  <type>Bessa</type>\n"
+         << "  <rotorConstantL>" << cl << "</rotorConstantL>\n"
+         << "  <rotorConstantR>" << cr << "</rotorConstantR>\n"
+         << "  <deltaL>"         << dl << "</deltaL>\n"
+         << "  <deltaR>"         << dr << "</deltaR>\n"
          << "</conversion>";
 
-  std::shared_ptr<gazebo::ConversionFunction> func;
-  func = ConversionFromString(stream.str());
+  auto func = ConversionFromString(stream.str());
 
-  EXPECT_TRUE(func != NULL);
+  ASSERT_NE(func, nullptr);
   EXPECT_EQ(func->GetType(), "Bessa");
 
-  // Test dead-zone and its boundaries
+  // Dead-zone and its boundaries.
   EXPECT_EQ(0.0, func->convert(0.0));
-  EXPECT_EQ(0.0, func->convert(sqrt(dr) - delta));
-  EXPECT_EQ(0.0, func->convert(-sqrt(-dl) + delta));
+  EXPECT_EQ(0.0, func->convert( std::sqrt(dr)  - delta));
+  EXPECT_EQ(0.0, func->convert(-std::sqrt(-dl) + delta));
 
-  // Values left and right of the dead-zone
-  double cmdl = -50.0;
-  double cmdr =  50.0;
-  EXPECT_EQ(cl*(cmdl*std::abs(cmdl)-dl), func->convert(cmdl));
-  EXPECT_EQ(cr*(cmdr*std::abs(cmdr)-dr), func->convert(cmdr));
+  // Values outside the dead-zone.
+  const double cmdl = -50.0;
+  const double cmdr =  50.0;
+  EXPECT_EQ(cl * (cmdl * std::abs(cmdl) - dl), func->convert(cmdl));
+  EXPECT_EQ(cr * (cmdr * std::abs(cmdr) - dr), func->convert(cmdr));
 }
 
+//////////////////////////////////////////////////
 TEST(ThrusterConversionFcn, LinearInterp)
 {
-  std::vector<double> input = {-5.0, 0, 2.0, 5.0};
-  std::vector<double> output = {-100, -10, 20, 120};
-  std::vector<double> alpha = {0.1, 0.5, 0.9};
+  const std::vector<double> input  = {-5.0, 0.0, 2.0, 5.0};
+  const std::vector<double> output = {-100.0, -10.0, 20.0, 120.0};
+  const std::vector<double> alpha  = {0.1, 0.5, 0.9};
 
-  std::stringstream stream;
-  stream << "<conversion> \n"
-         << "  <type>LinearInterp</type> \n"
+  std::ostringstream stream;
+  stream << "<conversion>\n"
+         << "  <type>LinearInterp</type>\n"
          << "  <inputValues>";
-  for (double d : input)
-    stream << d << " ";
-  stream << "</inputValues> \n"
-         << "<outputValues>";
-  for (double d : output)
-    stream << d << " ";
-  stream  << "</outputValues> \n"
+  for (double d : input)  stream << d << " ";
+  stream << "</inputValues>\n"
+         << "  <outputValues>";
+  for (double d : output) stream << d << " ";
+  stream << "</outputValues>\n"
          << "</conversion>";
 
-  std::shared_ptr<gazebo::ConversionFunction> func;
-  func = ConversionFromString(stream.str());
+  auto func = ConversionFromString(stream.str());
 
-  EXPECT_TRUE(func != NULL);
+  ASSERT_NE(func, nullptr);
   EXPECT_EQ(func->GetType(), "LinearInterp");
 
-  // Make sure the result is exactly correct for the provided values.
-  for (int i = 0; i < input.size(); i++)
-  {
+  // Exact sample points must be reproduced perfectly.
+  for (std::size_t i = 0; i < input.size(); ++i)
     EXPECT_EQ(output[i], func->convert(input[i]));
-  }
 
-  // Outside of defined range: return closest value
-  EXPECT_EQ(output[0], func->convert(input[0] - 0.5));
-  EXPECT_EQ(output.back(), func->convert(input.back() + 0.5));
+  // Outside defined range: clamp to nearest boundary value.
+  EXPECT_EQ(output.front(), func->convert(input.front() - 0.5));
+  EXPECT_EQ(output.back(),  func->convert(input.back()  + 0.5));
 
-  // In between: make sure linear interpolation is working properly
-  for (int i = 0; i < input.size()-1; i++)
+  // Between samples: verify linear interpolation.
+  for (std::size_t i = 0; i < input.size() - 1; ++i)
   {
-    double in  = alpha[i]*input[i] + (1-alpha[i])*input[i+1];
-    double out = alpha[i]*output[i] + (1-alpha[i])*output[i+1];
+    const double a   = alpha[i];
+    const double in  = a * input[i]  + (1.0 - a) * input[i + 1];
+    const double out = a * output[i] + (1.0 - a) * output[i + 1];
     EXPECT_NEAR(out, func->convert(in), 1e-7);
   }
 }
 
-int main(int argc, char **argv)
+//////////////////////////////////////////////////
+int main(int argc, char** argv)
 {
-  testing::InitGoogleTest(&argc, argv);
+  ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

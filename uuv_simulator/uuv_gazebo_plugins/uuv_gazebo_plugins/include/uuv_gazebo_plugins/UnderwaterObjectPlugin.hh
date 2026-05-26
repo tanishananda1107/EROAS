@@ -1,128 +1,79 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-/// \file UnderwaterObjectPlugin.hh
-/// \brief Class declaration for the underwater objects subject to buoyancy,
-///        lift and drag forces.
-
-#ifndef __UUV_GAZEBO_PLUGINS_UNDERWATER_OBJECT_HH__
-#define __UUV_GAZEBO_PLUGINS_UNDERWATER_OBJECT_HH__
+#ifndef UUV_GZ_UNDERWATER_OBJECT_PLUGIN_HH_
+#define UUV_GZ_UNDERWATER_OBJECT_PLUGIN_HH_
 
 #include <map>
 #include <string>
+#include <memory>
 
-#include <gazebo/gazebo.hh>
-#include <gazebo/msgs/msgs.hh>
+#include <gz/sim/System.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/World.hh>
+#include <gz/sim/EntityComponentManager.hh>
 
-#include <uuv_gazebo_plugins/HydrodynamicModel.hh>
-#include <uuv_gazebo_plugins/Def.hh>
+#include <gz/math/Vector3.hh>
 
-namespace gazebo
+#include <gz/msgs/wrench.pb.h>
+
+#include "HydrodynamicModel.hh"
+#include "Def.hh"
+
+namespace uuv_gz_plugins
 {
-/// \brief Gazebo model plugin class for underwater objects
-class UnderwaterObjectPlugin : public gazebo::ModelPlugin
+
+class UnderwaterObjectPlugin :
+  public gz::sim::System,
+  public gz::sim::ISystemConfigure,
+  public gz::sim::ISystemPreUpdate,
+  public gz::sim::ISystemPostUpdate
 {
-  /// \brief Constructor
-  public: UnderwaterObjectPlugin();
+public:
+  UnderwaterObjectPlugin() = default;
+  virtual ~UnderwaterObjectPlugin() = default;
 
-  /// \brief Destructor
-  public: virtual ~UnderwaterObjectPlugin();
+  void Configure(const gz::sim::Entity &_entity,
+                 const std::shared_ptr<const sdf::Element> &_sdf,
+                 gz::sim::EntityComponentManager &_ecm,
+                 gz::sim::EventManager &) override;
 
-  // Documentation inherited.
-  public: virtual void Load(gazebo::physics::ModelPtr _model,
-                          sdf::ElementPtr _sdf);
+  void PreUpdate(const gz::sim::UpdateInfo &_info,
+                 gz::sim::EntityComponentManager &_ecm) override;
 
-  // Documentation inherited.
-  public: virtual void Init();
+  void PostUpdate(const gz::sim::UpdateInfo &_info,
+                  const gz::sim::EntityComponentManager &_ecm) override;
 
-  /// \brief Update the simulation state.
-  /// \param[in] _info Information used in the update event.
-  public: virtual void Update(const gazebo::common::UpdateInfo &_info);
+protected:
+  void Connect();
 
-  /// \brief Connects the update event callback
-  protected: virtual void Connect();
+  void UpdateFlowVelocity(const gz::math::Vector3d &_msg);
 
-  /// \brief Reads flow velocity topic
-  protected: void UpdateFlowVelocity(ConstVector3dPtr &_msg);
+  void PublishCurrentVelocityMarker();
+  void PublishIsSubmerged();
 
-  /// \brief Publish current velocity marker
-  protected: virtual void PublishCurrentVelocityMarker();
+  void PublishRestoringForce(gz::sim::Entity _link);
+  void PublishHydrodynamicWrenches(gz::sim::Entity _link);
 
-  /// \brief Publishes the state of the vehicle (is submerged)
-  protected: virtual void PublishIsSubmerged();
+  void GenWrenchMsg(const gz::math::Vector3d &_force,
+                    const gz::math::Vector3d &_torque,
+                    gz::msgs::WrenchStamped &_out);
 
-  /// \brief Publish restoring force
-  /// \param[in] _link Pointer to the link where the force information will
-  /// be extracted from
-  protected: virtual void PublishRestoringForce(
-    gazebo::physics::LinkPtr _link);
+  void InitDebug(gz::sim::Entity _link,
+                 std::shared_ptr<HydrodynamicModel> _hydro);
 
-  /// \brief Publish hydrodynamic wrenches
-  /// \param[in] _link Pointer to the link where the force information will
-  /// be extracted from
-  protected: virtual void PublishHydrodynamicWrenches(
-    gazebo::physics::LinkPtr _link);
+protected:
+  std::map<gz::sim::Entity,
+           std::shared_ptr<HydrodynamicModel>> models;
 
-  /// \brief Returns the wrench message for debugging topics
-  /// \param[in] _force Force vector
-  /// \param[in] _torque Torque vector
-  /// \param[in] _output Stamped wrench message to be updated
-  protected: virtual void GenWrenchMsg(
-    ignition::math::Vector3d _force, ignition::math::Vector3d _torque,
-    gazebo::msgs::WrenchStamped &_output);
+  gz::math::Vector3d flowVelocity;
 
-  /// \brief Sets the topics used for publishing the intermediate data during
-  /// the simulation
-  /// \param[in] _link Pointer to the link
-  /// \param[in] _hydro Pointer to the hydrodynamic model
-  protected: virtual void InitDebug(gazebo::physics::LinkPtr _link,
-    gazebo::HydrodynamicModelPtr _hydro);
+  gz::sim::Entity modelEntity;
+  gz::sim::Entity worldEntity;
 
-  /// \brief Pairs of links & corresponding hydrodynamic models
-  protected: std::map<gazebo::physics::LinkPtr,
-                      HydrodynamicModelPtr> models;
+  std::string baseLinkName;
 
-  /// \brief Flow velocity vector read from topic
-  protected: ignition::math::Vector3d flowVelocity;
-
-  /// \brief Update event
-  protected: gazebo::event::ConnectionPtr updateConnection;
-
-  /// \brief Pointer to the world plugin
-  protected: gazebo::physics::WorldPtr world;
-
-  /// \brief Pointer to the model structure
-  protected: gazebo::physics::ModelPtr model;
-
-  /// \brief Gazebo node
-  protected: gazebo::transport::NodePtr node;
-
-  /// \brief Name of vehicle's base_link
-  protected: std::string baseLinkName;
-
-  /// \brief Subcriber to flow message
-  protected: gazebo::transport::SubscriberPtr flowSubscriber;
-
-  /// \brief Flag to use the global current velocity or the individually
-  /// assigned current velocity
-  protected: bool useGlobalCurrent;
-
-  /// \brief Publishers of hydrodynamic and hydrostatic forces and torques in
-  /// the case the debug flag is on
-  protected: std::map<std::string, gazebo::transport::PublisherPtr> hydroPub;
+  bool useGlobalCurrent{true};
 };
-}
 
-#endif  // __UUV_GAZEBO_PLUGINS_UNDERWATER_OBJECT_HH__
+} // namespace uuv_gz_plugins
+
+#endif

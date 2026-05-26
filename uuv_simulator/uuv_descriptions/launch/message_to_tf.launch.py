@@ -1,31 +1,40 @@
-#!/usr/bin/env python3
-"""
-Launch file to publish state and TF for in relation to the world frame.
-"""
-
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch_ros.actions import Node
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
+
+    namespace = LaunchConfiguration("namespace")
+
     return LaunchDescription([
-        DeclareLaunchArgument('namespace', default_value='rexrov',
-                             description='Namespace'),
+
+        DeclareLaunchArgument(
+            "namespace",
+            default_value="rexrov"
+        ),
 
         Node(
-            package='uuv_assistants',
-            executable='uuv_message_to_tf',
-            name=f'ground_truth_to_tf_{LaunchConfiguration("namespace")}',
-            output='screen',
-            namespace=LaunchConfiguration('namespace'),
+            package="uuv_assistants",
+            executable="uuv_message_to_tf",
+            name="ground_truth_to_tf",
+            output="screen",
+
             parameters=[{
-                'odometry_topic': f'/{LaunchConfiguration("namespace")}/pose_gt',
-                'frame_id': '/world',
-                'stabilized_frame_id': f'/{LaunchConfiguration("namespace")}/base_stabilized',
-                'footprint_frame_id': f'/{LaunchConfiguration("namespace")}/base_footprint',
-                'child_frame_id': f'/{LaunchConfiguration("namespace")}/base_link',
+                "odometry_topic":
+                    ["/", namespace, "/pose_gt"],
+
+                "frame_id": "world",
+
+                "stabilized_frame_id":
+                    ["/", namespace, "/base_stabilized"],
+
+                "footprint_frame_id":
+                    ["/", namespace, "/base_footprint"],
+
+                "child_frame_id":
+                    ["/", namespace, "/base_link"]
             }]
-        ),
+        )
     ])

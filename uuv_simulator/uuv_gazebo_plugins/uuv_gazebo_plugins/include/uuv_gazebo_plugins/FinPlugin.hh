@@ -1,113 +1,57 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+#ifndef UUV_GZ_FIN_PLUGIN_HH_
+#define UUV_GZ_FIN_PLUGIN_HH_
 
-/// \file FinPlugin.hh
-/// \brief Model plugin for description of a submarine's fin.
+#include <memory>
+#include <string>
 
-#ifndef __UUV_GAZEBO_PLUGINS_FIN_PLUGIN_HH__
-#define __UUV_GAZEBO_PLUGINS_FIN_PLUGIN_HH__
+#include <gz/sim/System.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/EntityComponentManager.hh>
 
-#include <boost/scoped_ptr.hpp>
-#include <gazebo/gazebo.hh>
-#include <sdf/sdf.hh>
+#include <gz/math/Vector3.hh>
 
-#include <gazebo/msgs/msgs.hh>
-#include <uuv_gazebo_plugins/Dynamics.hh>
-#include <uuv_gazebo_plugins/LiftDragModel.hh>
+#include "LiftDragModel.hh"
+#include "Dynamics.hh"
 
-#include "Double.pb.h"
-
-namespace gazebo {
-
-/// \brief Definition of a pointer to the floating point message
-typedef const boost::shared_ptr<const uuv_gazebo_plugins_msgs::msgs::Double>
-ConstDoublePtr;
-
-class FinPlugin : public ModelPlugin
+namespace uuv_gz_plugins
 {
-    /// \brief Constructor
-    public: FinPlugin();
 
-    /// \brief Destructor
-    public: virtual ~FinPlugin();
+class FinPlugin :
+  public gz::sim::System,
+  public gz::sim::ISystemConfigure,
+  public gz::sim::ISystemPreUpdate
+{
+public:
+  FinPlugin() = default;
+  virtual ~FinPlugin() = default;
 
-    // Documentation inherited.
-    public: virtual void Load(physics::ModelPtr _model,
-                              sdf::ElementPtr _sdf);
+  void Configure(const gz::sim::Entity &_entity,
+                 const std::shared_ptr<const sdf::Element> &_sdf,
+                 gz::sim::EntityComponentManager &_ecm,
+                 gz::sim::EventManager &) override;
 
-    // Documentation inherited.
-    public: virtual void Init();
+  void PreUpdate(const gz::sim::UpdateInfo &_info,
+                 gz::sim::EntityComponentManager &_ecm) override;
 
-    /// \brief Update the simulation state.
-    /// \param[in] _info Information used in the update event.
-    public: void OnUpdate(const common::UpdateInfo &_info);
+protected:
+  void UpdateInput(double _msg);
+  void UpdateCurrentVelocity(const gz::math::Vector3d &_vel);
 
-    /// \brief Callback for the input topic subscriber
-    protected: void UpdateInput(ConstDoublePtr &_msg);
+protected:
+  gz::sim::Entity modelEntity;
+  gz::sim::Entity linkEntity;
 
-    /// \brief Reads current velocity topic
-    protected: void UpdateCurrentVelocity(ConstVector3dPtr &_msg);
+  std::unique_ptr<Dynamics> dynamics;
+  std::unique_ptr<LiftDrag> liftdrag;
 
-    /// \brief Fin dynamic model
-    protected: std::shared_ptr<Dynamics> dynamics;
+  double inputCommand{0.0};
+  double angle{0.0};
 
-    /// \brief Lift&Drag model
-    protected: std::shared_ptr<LiftDrag> liftdrag;
-
-    /// \brief Update event
-    protected: event::ConnectionPtr updateConnection;
-
-    /// \brief Gazebo node
-    protected: transport::NodePtr node;
-
-    /// \brief The fin joint
-    protected: physics::JointPtr joint;
-
-    /// \brief The fin link
-    protected: physics::LinkPtr link;
-
-    /// \brief Subscriber to the reference signal topic.
-    protected: transport::SubscriberPtr commandSubscriber;
-
-    /// \brief Publisher to the output thrust topic
-    protected: transport::PublisherPtr anglePublisher;
-
-    /// \brief Force component calculated from the lift and drag module
-    protected: ignition::math::Vector3d finForce;
-
-    /// \brief Latest input command.
-    protected: double inputCommand;
-
-    /// \brief Fin ID
-    protected: int finID;
-
-    /// \brief Topic prefix
-    protected: std::string topicPrefix;
-
-    /// \brief Latest fin angle in [rad].
-    protected: double angle;
-
-    /// \brief Time stamp of latest thrust force
-    protected: common::Time angleStamp;
-
-    /// \brief Subcriber to current message
-    protected: transport::SubscriberPtr currentSubscriber;
-
-    /// \brief Current velocity vector read from topic
-    protected: ignition::math::Vector3d currentVelocity;
+  gz::math::Vector3d currentVelocity;
+  gz::math::Vector3d finForce;
 };
-}
+
+} // namespace uuv_gz_plugins
 
 #endif

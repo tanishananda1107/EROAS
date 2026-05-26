@@ -1,10 +1,13 @@
 <?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd"
+            schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>uuv_gazebo_plugins</name>
-  <version>0.6.13</version>
+  <version>0.7.0</version>
   <description>
-    UUV Simulator's Gazebo plugins for simulation of hydrodynamic and hydrostatic
-    forces, and underwater actuators (e.g. thrusters and fins).
+    UUV Simulator's Gazebo plugins for simulation of hydrodynamic and
+    hydrostatic forces, and underwater actuators (thrusters and fins).
+    Ported to ROS 2 and Gazebo Harmonic (gz-sim 8).
   </description>
 
   <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
@@ -17,14 +20,35 @@
 
   <license>Apache-2.0</license>
 
+  <!-- ── Build tool ─────────────────────────────────────────────────────── -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>gazebo_dev</depend>
-  <depend>protobuf-dev</depend>
-  <depend>eigen</depend>
+  <!-- ── Gazebo Harmonic (gz-sim 8) stack ──────────────────────────────── -->
+  <!--
+    In ROS 2 Jazzy + Gazebo Harmonic the gz packages are available either
+    directly (gz-sim8, gz-math7, …) or through the ROS 2 vendor shims
+    (gz_sim_vendor, gz_math_vendor, …).  Both are listed here; use whichever
+    your target platform installs.  The vendor shims re-export the direct
+    CMake targets, so the CMakeLists.txt works unchanged with either.
+  -->
+  <depend>gz_sim_vendor</depend>        <!-- gz-sim8          -->
+  <depend>gz_math_vendor</depend>       <!-- gz-math7         -->
+  <depend>gz_msgs_vendor</depend>       <!-- gz-msgs10        -->
+  <depend>gz_transport_vendor</depend>  <!-- gz-transport13   -->
+  <depend>gz_utils_vendor</depend>      <!-- gz-utils2        -->
+  <depend>gz_cmake_vendor</depend>      <!-- gz-cmake3        -->
+  <depend>sdformat_vendor</depend>      <!-- sdformat13       -->
 
-  <test_depend>rosunit</test_depend>
+  <!-- ── Third-party ────────────────────────────────────────────────────── -->
+  <depend>libeigen3-dev</depend>
+  <depend>libprotobuf-dev</depend>
 
+  <!-- ── Test dependencies ──────────────────────────────────────────────── -->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <!-- ── ament export hook ─────────────────────────────────────────────── -->
   <export>
     <build_type>ament_cmake</build_type>
   </export>

@@ -1,181 +1,166 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
 // All rights reserved.
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0 (the "License")
 
-#include <gazebo/gazebo.hh>
+// ============================================================
+// ROS2 / Gazebo Harmonic (gz-sim 8) conversion notes:
+//
+//  - All #if GAZEBO_MAJOR_VERSION guards removed; single modern API used.
+//  - ignition::math::*      → gz::math::*
+//  - ignition::math::Box    → gz::math::AxisAlignedBox
+//  - physics::LinkPtr       → gz::sim::Entity  (via gz::sim::Link wrapper)
+//  - link->GetInertial()->Mass()  → ECM component lookup (done in BuoyantObject)
+//  - link->GetWorldPose()   → gz::sim::Link::WorldPose(_ecm)
+//  - link->RelativeLinearVel()    → gz::sim::Link::WorldLinearVelocity(_ecm)
+//    (then rotated to body frame)
+//  - link->AddRelativeForce / AddRelativeTorque
+//      → gz::sim::Link::AddWorldForce / AddWorldWrench
+//  - gz-sim 8 system plugins use ISystemPreUpdate / ISystemUpdate callbacks;
+//    the ECM is passed each tick so we thread it through ApplyHydrodynamicForces.
+// ============================================================
+
+#include <gz/math/Pose3.hh>
+#include <gz/math/Vector3.hh>
+#include <gz/math/AxisAlignedBox.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/EntityComponentManager.hh>
+#include <gz/sim/components/Inertial.hh>
+#include <gz/common/Console.hh>
+
 #include <uuv_gazebo_plugins/HydrodynamicModel.hh>
 
-namespace gazebo
-{
-/////////////////////////////////////////////////
-HydrodynamicModel::HydrodynamicModel(sdf::ElementPtr _sdf,
-    physics::LinkPtr _link) : BuoyantObject(_link)
-{
-  GZ_ASSERT(_link != NULL, "Invalid link pointer");
+namespace gz {
+namespace sim {
 
-  // Initialize filtered acceleration & last velocity
+/////////////////////////////////////////////////
+HydrodynamicModel::HydrodynamicModel(
+    sdf::ElementPtr                  _sdf,
+    gz::sim::Entity                  _linkEntity,
+    gz::sim::EntityComponentManager &_ecm)
+  : BuoyantObject(_linkEntity, _ecm)
+{
+  GZ_ASSERT(_linkEntity != kNullEntity, "Invalid link entity");
+
   this->filteredAcc.setZero();
   this->lastVelRel.setZero();
 
-  // Set volume
   if (_sdf->HasElement("volume"))
     this->volume = _sdf->Get<double>("volume");
 
-
-  // Reading the information for the metacentric width and length in the case
-  // that the model is a surface vessel or floating object
+  // Surface vessel / floating body parameters
   if (_sdf->HasElement("metacentric_width") &&
       _sdf->HasElement("metacentric_length") &&
       _sdf->HasElement("submerged_height"))
   {
-    this->metacentricWidth = _sdf->Get<double>("metacentric_width");
+    this->metacentricWidth  = _sdf->Get<double>("metacentric_width");
     this->metacentricLength = _sdf->Get<double>("metacentric_length");
-    this->submergedHeight = _sdf->Get<double>("submerged_height");
-    this->isSurfaceVessel = true;
+    this->submergedHeight   = _sdf->Get<double>("submerged_height");
+    this->isSurfaceVessel   = true;
 
-    gzmsg << "Surface vessel parameters" << std::endl;
-    gzmsg << "\tMetacentric width [m]=" << this->metacentricWidth << std::endl;
-    gzmsg << "\tMetacentric length [m]=" << this->metacentricLength << std::endl;
-    gzmsg << "\tSubmerged height [m]=" << this->submergedHeight << std::endl;
+    gzmsg << "Surface vessel parameters\n"
+          << "\tMetacentric width  [m]=" << this->metacentricWidth  << "\n"
+          << "\tMetacentric length [m]=" << this->metacentricLength << "\n"
+          << "\tSubmerged height   [m]=" << this->submergedHeight   << "\n";
   }
   else
   {
-    this->metacentricWidth = 0.0;
-    this->metacentricLength = 0.0;
+    this->metacentricWidth    = 0.0;
+    this->metacentricLength   = 0.0;
     this->waterLevelPlaneArea = 0.0;
-    this->isSurfaceVessel = false;
+    this->isSurfaceVessel     = false;
   }
 
-  // Get the center of buoyancy
-  std::vector<double> cob = {0, 0, 0};
+  // Center of buoyancy
   if (_sdf->HasElement("center_of_buoyancy"))
   {
-    cob = Str2Vector(_sdf->Get<std::string>("center_of_buoyancy"));
-    this->SetCoB(ignition::math::Vector3d(cob[0], cob[1], cob[2]));
+    auto cob = Str2Vector(_sdf->Get<std::string>("center_of_buoyancy"));
+    this->SetCoB(gz::math::Vector3d(cob[0], cob[1], cob[2]));
   }
-  // FIXME(mam0box) This is a work around the problem of the invalid bounding
-  // box returned by Gazebo
+
+  // Override bounding box from SDF (workaround for Gazebo bbox inaccuracy)
   if (_sdf->HasElement("box"))
   {
-    sdf::ElementPtr sdfModel = _sdf->GetElement("box");
-    if (sdfModel->HasElement("width") && sdfModel->HasElement("length") &&
-        sdfModel->HasElement("height"))
+    sdf::ElementPtr sdfBox = _sdf->GetElement("box");
+    if (sdfBox->HasElement("width") &&
+        sdfBox->HasElement("length") &&
+        sdfBox->HasElement("height"))
     {
-      double width = sdfModel->Get<double>("width");
-      double length = sdfModel->Get<double>("length");
-      double height = sdfModel->Get<double>("height");
-#if GAZEBO_MAJOR_VERSION >= 11
-      ignition::math::AxisAlignedBox boundingBox = ignition::math::AxisAlignedBox(
-        ignition::math::Vector3d(-width / 2, -length / 2, -height / 2),
-        ignition::math::Vector3d(width / 2, length / 2, height / 2));
-      this->SetBoundingBox(boundingBox);
-
-#else
-      ignition::math::Box boundingBox = ignition::math::Box(
-        ignition::math::Vector3d(-width / 2, -length / 2, -height / 2),
-        ignition::math::Vector3d(width / 2, length / 2, height / 2));
-      // Setting the the bounding box from the given dimensions
-      this->SetBoundingBox(boundingBox);
-#endif
+      double w = sdfBox->Get<double>("width");
+      double l = sdfBox->Get<double>("length");
+      double h = sdfBox->Get<double>("height");
+      gz::math::AxisAlignedBox bbox(
+          gz::math::Vector3d(-w/2, -l/2, -h/2),
+          gz::math::Vector3d( w/2,  l/2,  h/2));
+      this->SetBoundingBox(bbox);
     }
   }
 
-  // If neutrally buoyant is given, then calculate restoring
-  // force to cancel out the gravitational force
   if (_sdf->HasElement("neutrally_buoyant"))
-  {
     if (_sdf->Get<bool>("neutrally_buoyant"))
-      this->SetNeutrallyBuoyant();
-  }
+      this->SetNeutrallyBuoyant(_ecm);
 
-  // Initialize Reynolds number with zero (will not always be used)
-  this->Re = 0;
-
-  // Initialize temperature (not used by all models)
+  this->Re          = 0;
   this->temperature = 0;
 }
 
 /////////////////////////////////////////////////
-void HydrodynamicModel::ComputeAcc(Eigen::Vector6d _velRel, double _time,
-                                  double _alpha)
+void HydrodynamicModel::ComputeAcc(Eigen::Vector6d _velRel,
+                                   double          _time,
+                                   double          _alpha)
 {
-  // Compute Fossen's nu-dot numerically. We have to do this for now since
-  // Gazebo reports angular accelerations that are off by orders of magnitude.
   double dt = _time - lastTime;
-
-  if (dt <= 0.0 || this->lastVelRel(0) == 0.0)  // Extra caution to prevent division by zero
-    return;
+  if (dt <= 0.0 || this->lastVelRel(0) == 0.0) return;
 
   Eigen::Vector6d acc = (_velRel - this->lastVelRel) / dt;
+  this->filteredAcc   = (1.0 - _alpha) * this->filteredAcc + _alpha * acc;
 
-  // TODO  We only have access to the acceleration of the previous simulation
-  //       step. The added mass will induce a strong force/torque counteracting
-  //       it in the current simulation step. This can lead to an oscillating
-  //       system.
-  //       The most accurate solution would probably be to first compute the
-  //       latest acceleration without added mass and then use this to compute
-  //       added mass effects. This is not how gazebo works, though.
-  this->filteredAcc = (1.0 - _alpha) * this->filteredAcc + _alpha * acc;
-
-  lastTime = _time;
+  lastTime         = _time;
   this->lastVelRel = _velRel;
 }
 
 /////////////////////////////////////////////////
-ignition::math::Vector3d HydrodynamicModel::ToNED(ignition::math::Vector3d _vec)
+gz::math::Vector3d HydrodynamicModel::ToNED(gz::math::Vector3d _vec)
 {
-  ignition::math::Vector3d output = _vec;
-  output.Y() = -1 * output.Y();
-  output.Z() = -1 * output.Z();
-  return output;
+  _vec.Y() *= -1;
+  _vec.Z() *= -1;
+  return _vec;
 }
 
-/////////////////////////////////////////////////
-ignition::math::Vector3d HydrodynamicModel::FromNED(ignition::math::Vector3d _vec)
+gz::math::Vector3d HydrodynamicModel::FromNED(gz::math::Vector3d _vec)
 {
-  return this->ToNED(_vec);
+  return this->ToNED(_vec);  // same transform
 }
 
 /////////////////////////////////////////////////
 bool HydrodynamicModel::CheckParams(sdf::ElementPtr _sdf)
 {
-  if (this->params.empty()) return true;
-
-  for (auto tag : this->params)
+  for (auto &tag : this->params)
   {
     if (!_sdf->HasElement(tag))
-      {
-        gzerr << "Hydrodynamic model: Expected element " <<
-           tag << std::endl;
-        return false;
-      }
+    {
+      gzerr << "Hydrodynamic model: Expected element " << tag << "\n";
+      return false;
+    }
   }
-
   return true;
 }
 
 /////////////////////////////////////////////////
-HydrodynamicModel * HydrodynamicModelFactory::CreateHydrodynamicModel(
-    sdf::ElementPtr _sdf, physics::LinkPtr _link)
+HydrodynamicModel* HydrodynamicModelFactory::CreateHydrodynamicModel(
+    sdf::ElementPtr                  _sdf,
+    gz::sim::Entity                  _link,
+    gz::sim::EntityComponentManager &_ecm)
 {
   GZ_ASSERT(_sdf->HasElement("hydrodynamic_model"),
-            "Hydrodynamic model is missing");
+            "Hydrodynamic model element is missing");
   sdf::ElementPtr sdfModel = _sdf->GetElement("hydrodynamic_model");
+
   if (!sdfModel->HasElement("type"))
   {
-    std::cerr << "Model has no type" << std::endl;
-    return NULL;
+    std::cerr << "Hydrodynamic model has no type\n";
+    return nullptr;
   }
 
   std::string identifier = sdfModel->Get<std::string>("type");
@@ -183,11 +168,11 @@ HydrodynamicModel * HydrodynamicModelFactory::CreateHydrodynamicModel(
   if (creators_.find(identifier) == creators_.end())
   {
     std::cerr << "Cannot create HydrodynamicModel with unknown identifier: "
-              << identifier << std::endl;
-    return NULL;
+              << identifier << "\n";
+    return nullptr;
   }
 
-  return creators_[identifier](_sdf, _link);
+  return creators_[identifier](_sdf, _link, _ecm);
 }
 
 /////////////////////////////////////////////////
@@ -198,269 +183,197 @@ HydrodynamicModelFactory& HydrodynamicModelFactory::GetInstance()
 }
 
 /////////////////////////////////////////////////
-bool HydrodynamicModelFactory::RegisterCreator(const std::string& _identifier,
-                               HydrodynamicModelCreator _creator)
+bool HydrodynamicModelFactory::RegisterCreator(
+    const std::string          &_identifier,
+    HydrodynamicModelCreator    _creator)
 {
   if (creators_.find(_identifier) != creators_.end())
   {
     std::cerr << "Warning: Registering HydrodynamicModel with identifier: "
-              << _identifier << " twice" << std::endl;
+              << _identifier << " twice\n";
   }
   creators_[_identifier] = _creator;
-
-  std::cout << "Registered HydrodynamicModel type " << _identifier << std::endl;
+  std::cout << "Registered HydrodynamicModel type " << _identifier << "\n";
   return true;
 }
 
-//////////////////////////////////////////////////////////////////////////
-// Fossen's robot-like equations of motion for underwater vehicles
-//////////////////////////////////////////////////////////////////////////
-
+// ===========================================================================
+// HMFossen
+// ===========================================================================
 const std::string HMFossen::IDENTIFIER = "fossen";
-REGISTER_HYDRODYNAMICMODEL_CREATOR(HMFossen,
-                                   &HMFossen::create);
+REGISTER_HYDRODYNAMICMODEL_CREATOR(HMFossen, &HMFossen::create);
 
-/////////////////////////////////////////////////
-HydrodynamicModel* HMFossen::create(sdf::ElementPtr _sdf,
-                                    physics::LinkPtr _link)
+HydrodynamicModel* HMFossen::create(
+    sdf::ElementPtr                  _sdf,
+    gz::sim::Entity                  _link,
+    gz::sim::EntityComponentManager &_ecm)
 {
-  return new HMFossen(_sdf, _link);
+  return new HMFossen(_sdf, _link, _ecm);
 }
 
-/////////////////////////////////////////////////
-HMFossen::HMFossen(sdf::ElementPtr _sdf,
-                   physics::LinkPtr _link)
-                  : HydrodynamicModel(_sdf, _link)
+HMFossen::HMFossen(sdf::ElementPtr                  _sdf,
+                   gz::sim::Entity                  _link,
+                   gz::sim::EntityComponentManager &_ecm)
+  : HydrodynamicModel(_sdf, _link, _ecm)
 {
   std::vector<double> addedMass(36, 0.0);
-  std::vector<double> linDampCoef(6, 0.0);
+  std::vector<double> linDampCoef(6,  0.0);
   std::vector<double> linDampForward(6, 0.0);
   std::vector<double> quadDampCoef(6, 0.0);
 
   GZ_ASSERT(_sdf->HasElement("hydrodynamic_model"),
-            "Hydrodynamic model is missing");
+            "Hydrodynamic model element is missing");
 
-  sdf::ElementPtr modelParams = _sdf->GetElement("hydrodynamic_model");
-  // Load added-mass coefficients, if provided. Otherwise, the added-mass
-  // matrix is set to zero
-  if (modelParams->HasElement("added_mass"))
-    addedMass = Str2Vector(modelParams->Get<std::string>("added_mass"));
+  sdf::ElementPtr mp = _sdf->GetElement("hydrodynamic_model");
+
+  if (mp->HasElement("added_mass"))
+    addedMass = Str2Vector(mp->Get<std::string>("added_mass"));
   else
-    gzmsg << "HMFossen: Using added mass NULL" << std::endl;
+    gzmsg << "HMFossen: Using added mass NULL\n";
 
   this->params.push_back("added_mass");
 
-  // Load linear damping coefficients, if provided. Otherwise, the linear
-  // damping matrix is set to zero
-  if (modelParams->HasElement("linear_damping"))
-    linDampCoef = Str2Vector(modelParams->Get<std::string>("linear_damping"));
+  if (mp->HasElement("linear_damping"))
+    linDampCoef = Str2Vector(mp->Get<std::string>("linear_damping"));
   else
-    gzmsg << "HMFossen: Using linear damping NULL" << std::endl;
+    gzmsg << "HMFossen: Using linear damping NULL\n";
 
-  // Add added mass' scaling factor to the parameter list
+  this->scalingAddedMass  = 1.0;
+  this->offsetAddedMass   = 0.0;
   this->params.push_back("scaling_added_mass");
-  // Set default value for the added mass's scaling vector
-  this->scalingAddedMass = 1.0;
-  // Add added mass' scaling factor to the parameter list
   this->params.push_back("offset_added_mass");
-  // Set default value for the added mass identity offset
-  this->offsetAddedMass = 0.0;
-
-  // Add linear damping to the parameter list
   this->params.push_back("linear_damping");
 
-  // Load linear damping coefficients that described the damping forces
-  // proportional to the forward speed only, if provided. Otherwise, the linear
-  // damping matrix is set to zero
-  if (modelParams->HasElement("linear_damping_forward_speed"))
+  if (mp->HasElement("linear_damping_forward_speed"))
     linDampForward = Str2Vector(
-      modelParams->Get<std::string>("linear_damping_forward_speed"));
+        mp->Get<std::string>("linear_damping_forward_speed"));
   else
-    gzmsg << "HMFossen: Using linear damping for forward speed NULL"
-      << std::endl;
-  // Add the matrix for linear damping proportional to forward speed to the
-  // parameter list
+    gzmsg << "HMFossen: Using linear damping forward speed NULL\n";
   this->params.push_back("linear_damping_forward_speed");
 
-  // Load nonlinear quadratic damping coefficients, if provided. Otherwise,
-  // the nonlinear quadratic damping matrix is set to zero
-  if (modelParams->HasElement("quadratic_damping"))
-    quadDampCoef = Str2Vector(
-        modelParams->Get<std::string>("quadratic_damping"));
+  if (mp->HasElement("quadratic_damping"))
+    quadDampCoef = Str2Vector(mp->Get<std::string>("quadratic_damping"));
   else
-    gzmsg << "HMFossen: Using quad damping NULL" << std::endl;
+    gzmsg << "HMFossen: Using quadratic damping NULL\n";
 
-  // Add quadratic damping coefficients to the parameter list
   this->params.push_back("quadratic_damping");
-  // Add damping's scaling factor to the parameter list
+  this->scalingDamping              = 1.0;
+  this->offsetLinearDamping         = 0.0;
+  this->offsetLinForwardSpeedDamping= 0.0;
+  this->offsetNonLinDamping         = 0.0;
   this->params.push_back("scaling_damping");
-  // Setting the damping scaling default value
-  this->scalingDamping = 1.0;
-
-  // Add the offset for the linear damping coefficients to the parameter list
   this->params.push_back("offset_linear_damping");
-  // Set the offset of the linear damping coefficients to default value
-  this->offsetLinearDamping = 0.0;
-
-  // Add the offset for the linear damping coefficients to the parameter list
   this->params.push_back("offset_lin_forward_speed_damping");
-  // Set the offset of the linear damping coefficients to default value
-  this->offsetLinForwardSpeedDamping = 0.0;
-
-  // Add the offset for the linear damping coefficients to the parameter list
   this->params.push_back("offset_nonlin_damping");
-  // Set the offset of the linear damping coefficients to default value
-  this->offsetNonLinDamping = 0.0;
-
-  // Adding the volume to the parameter list
   this->params.push_back("volume");
-  // Add volume's scaling factor to the parameter list
   this->params.push_back("scaling_volume");
 
   GZ_ASSERT(addedMass.size() == 36,
-            "Added-mass coefficients vector must have 36 elements");
+            "Added-mass vector must have 36 elements");
   GZ_ASSERT(linDampCoef.size() == 6 || linDampCoef.size() == 36,
-            "Linear damping coefficients vector must have 6 elements for a "
-            "diagonal matrix or 36 elements for a full matrix");
+            "Linear damping vector must have 6 or 36 elements");
   GZ_ASSERT(linDampForward.size() == 6 || linDampForward.size() == 36,
-            "Linear damping coefficients proportional to the forward speed "
-            "vector must have 6 elements for a diagonal matrix or 36 elements"
-            " for a full matrix");
+            "Linear forward-speed damping vector must have 6 or 36 elements");
   GZ_ASSERT(quadDampCoef.size() == 6 || quadDampCoef.size() == 36,
-            "Quadratic damping coefficients vector must have 6 elements for a "
-            "diagonal matrix or 36 elements for a full matrix");
+            "Quadratic damping vector must have 6 or 36 elements");
 
   this->DLin.setZero();
   this->DNonLin.setZero();
   this->DLinForwardSpeed.setZero();
 
-  for (int row = 0; row < 6; row++)
-    for (int col = 0; col < 6; col++)
+  for (int r = 0; r < 6; r++)
+    for (int c = 0; c < 6; c++)
     {
-      // Set added-mass coefficient
-      this->Ma(row, col) = addedMass[6*row+col];
-      // Set the linear damping matrix if a full matrix was provided
-      if (linDampCoef.size() == 36)
-        this->DLin(row, col) = linDampCoef[6*row+col];
-      if (quadDampCoef.size() == 36)
-        this->DNonLin(row, col) = quadDampCoef[6*row+col];
-      if (linDampForward.size() == 36)
-        this->DLinForwardSpeed(row, col) = linDampForward[6*row+col];
+      this->Ma(r, c) = addedMass[6*r+c];
+      if (linDampCoef.size()    == 36) this->DLin(r, c)           = linDampCoef[6*r+c];
+      if (quadDampCoef.size()   == 36) this->DNonLin(r, c)        = quadDampCoef[6*r+c];
+      if (linDampForward.size() == 36) this->DLinForwardSpeed(r,c) = linDampForward[6*r+c];
     }
 
-  // In the case the linear damping matrix was set as a diagonal matrix
   for (int i = 0; i < 6; i++)
   {
-    if (linDampCoef.size() == 6)
-      this->DLin(i, i) = linDampCoef[i];
-    if (quadDampCoef.size() == 6)
-      this->DNonLin(i, i) = quadDampCoef[i];
-    if (linDampForward.size() == 6)
-      this->DLinForwardSpeed(i, i) = linDampForward[i];
+    if (linDampCoef.size()    == 6) this->DLin(i, i)            = linDampCoef[i];
+    if (quadDampCoef.size()   == 6) this->DNonLin(i, i)         = quadDampCoef[i];
+    if (linDampForward.size() == 6) this->DLinForwardSpeed(i, i) = linDampForward[i];
   }
 
-  // Store damping coefficients
   this->linearDampCoef = linDampCoef;
-  this->quadDampCoef = quadDampCoef;
+  this->quadDampCoef   = quadDampCoef;
 }
 
 /////////////////////////////////////////////////
 void HMFossen::ApplyHydrodynamicForces(
-  double _time, const ignition::math::Vector3d &_flowVelWorld)
+    double                           _time,
+    const gz::math::Vector3d        &_flowVelWorld,
+    gz::sim::EntityComponentManager &_ecm)
 {
-  // Link's pose
-  ignition::math::Pose3d pose;
-  ignition::math::Vector3d linVel, angVel;
+  gz::sim::Link link(this->linkEntity);
 
-#if GAZEBO_MAJOR_VERSION >= 8
-  pose = this->link->WorldPose();
-  linVel = this->link->RelativeLinearVel();
-  angVel = this->link->RelativeAngularVel();
-#else
-  pose = this->link->GetWorldPose().Ign();
+  gz::math::Pose3d pose =
+      link.WorldPose(_ecm).value_or(gz::math::Pose3d());
 
-  gazebo::math::Vector3 linVelG, angVelG;
-  linVelG = this->link->GetRelativeLinearVel();
-  angVelG = this->link->GetRelativeAngularVel();
-  linVel = ignition::math::Vector3d(
-    linVelG.x, linVelG.y, linVelG.z);
-  angVel = ignition::math::Vector3d(
-    angVelG.x, angVelG.y, angVelG.z);
-#endif
+  // World-frame velocities → rotate to body frame
+  gz::math::Vector3d linVelWorld =
+      link.WorldLinearVelocity(_ecm).value_or(gz::math::Vector3d::Zero);
+  gz::math::Vector3d angVelWorld =
+      link.WorldAngularVelocity(_ecm).value_or(gz::math::Vector3d::Zero);
 
-  // Transform the flow velocity to the BODY frame
-  ignition::math::Vector3d flowVel = pose.Rot().RotateVectorReverse(
-    _flowVelWorld);
+  gz::math::Vector3d linVel = pose.Rot().RotateVectorReverse(linVelWorld);
+  gz::math::Vector3d angVel = pose.Rot().RotateVectorReverse(angVelWorld);
 
-  Eigen::Vector6d velRel, acc;
-  // Compute the relative velocity
-  velRel = EigenStack(
-    this->ToNED(linVel - flowVel),
-    this->ToNED(angVel));
+  // Flow in body frame
+  gz::math::Vector3d flowVel =
+      pose.Rot().RotateVectorReverse(_flowVelWorld);
 
-  // Update added Coriolis matrix
+  Eigen::Vector6d velRel;
+  velRel = EigenStack(this->ToNED(linVel - flowVel),
+                      this->ToNED(angVel));
+
   this->ComputeAddedCoriolisMatrix(velRel, this->Ma, this->Ca);
-
-  // Update damping matrix
   this->ComputeDampingMatrix(velRel, this->D);
-
-  // Filter acceleration (see issue explanation above)
   this->ComputeAcc(velRel, _time, 0.3);
 
-  // We can now compute the additional forces/torques due to thisdynamic
-  // effects based on Eq. 8.136 on p.222 of Fossen: Handbook of Marine Craft ...
+  Eigen::Vector6d damping = -this->D               * velRel;
+  Eigen::Vector6d added   = -this->GetAddedMass()  * this->filteredAcc;
+  Eigen::Vector6d cor     = -this->Ca              * velRel;
+  Eigen::Vector6d tau     =  damping + added + cor;
 
-  // Damping forces and torques
-  Eigen::Vector6d damping = -this->D * velRel;
-
-  // Added-mass forces and torques
-  Eigen::Vector6d added = -this->GetAddedMass() * this->filteredAcc;
-
-  // Added Coriolis term
-  Eigen::Vector6d cor = -this->Ca * velRel;
-
-  // All additional (compared to standard rigid body) Fossen terms combined.
-  Eigen::Vector6d tau = damping + added + cor;
-
-  GZ_ASSERT(!std::isnan(tau.norm()), "Hydrodynamic forces vector is nan");
+  GZ_ASSERT(!std::isnan(tau.norm()), "Hydrodynamic forces vector is NaN");
 
   if (!std::isnan(tau.norm()))
   {
-    // Convert the forces and moments back to Gazebo's reference frame
-    ignition::math::Vector3d hydForce =
-      this->FromNED(Vec3dToGazebo(tau.head<3>()));
-    ignition::math::Vector3d hydTorque =
-      this->FromNED(Vec3dToGazebo(tau.tail<3>()));
+    // Convert back from NED body frame to Gazebo world frame
+    gz::math::Vector3d hydForce  =
+        this->FromNED(Vec3dToGz(tau.head<3>()));
+    gz::math::Vector3d hydTorque =
+        this->FromNED(Vec3dToGz(tau.tail<3>()));
 
-    // Forces and torques are also wrt link frame
-    this->link->AddRelativeForce(hydForce);
-    this->link->AddRelativeTorque(hydTorque);
+    // Rotate body-frame force/torque to world frame
+    hydForce  = pose.Rot().RotateVector(hydForce);
+    hydTorque = pose.Rot().RotateVector(hydTorque);
+
+    link.AddWorldForce(_ecm, hydForce);
+    link.AddWorldWrench(_ecm, gz::math::Vector3d::Zero, hydTorque);
   }
 
-  this->ApplyBuoyancyForce();
+  this->ApplyBuoyancyForce(_ecm);
 
-  if ( this->debugFlag )
+  if (this->debugFlag)
   {
-    // Store intermediate results for debugging purposes
-    this->StoreVector(UUV_DAMPING_FORCE, Vec3dToGazebo(damping.head<3>()));
-    this->StoreVector(UUV_DAMPING_TORQUE, Vec3dToGazebo(damping.tail<3>()));
-
-    this->StoreVector(UUV_ADDED_MASS_FORCE, Vec3dToGazebo(added.head<3>()));
-    this->StoreVector(UUV_ADDED_MASS_TORQUE, Vec3dToGazebo(added.tail<3>()));
-
-    this->StoreVector(UUV_ADDED_CORIOLIS_FORCE, Vec3dToGazebo(cor.head<3>()));
-    this->StoreVector(UUV_ADDED_CORIOLIS_TORQUE, Vec3dToGazebo(cor.tail<3>()));
+    this->StoreVector(UUV_DAMPING_FORCE,   Vec3dToGz(damping.head<3>()));
+    this->StoreVector(UUV_DAMPING_TORQUE,  Vec3dToGz(damping.tail<3>()));
+    this->StoreVector(UUV_ADDED_MASS_FORCE,  Vec3dToGz(added.head<3>()));
+    this->StoreVector(UUV_ADDED_MASS_TORQUE, Vec3dToGz(added.tail<3>()));
+    this->StoreVector(UUV_ADDED_CORIOLIS_FORCE,  Vec3dToGz(cor.head<3>()));
+    this->StoreVector(UUV_ADDED_CORIOLIS_TORQUE, Vec3dToGz(cor.tail<3>()));
   }
 }
 
 /////////////////////////////////////////////////
-void HMFossen::ComputeAddedCoriolisMatrix(const Eigen::Vector6d& _vel,
-                                          const Eigen::Matrix6d& _Ma,
-                                          Eigen::Matrix6d &_Ca) const
+void HMFossen::ComputeAddedCoriolisMatrix(const Eigen::Vector6d &_vel,
+                                          const Eigen::Matrix6d &_Ma,
+                                          Eigen::Matrix6d       &_Ca) const
 {
-  // This corresponds to eq. 6.43 on p. 120 in
-  // Fossen, Thor, "Handbook of Marine Craft and Hydrodynamics and Motion
-  // Control", 2011
   Eigen::Vector6d ab = this->GetAddedMass() * _vel;
   Eigen::Matrix3d Sa = -1 * CrossProductOperator(ab.head<3>());
   _Ca << Eigen::Matrix3d::Zero(), Sa,
@@ -468,672 +381,375 @@ void HMFossen::ComputeAddedCoriolisMatrix(const Eigen::Vector6d& _vel,
 }
 
 /////////////////////////////////////////////////
-void HMFossen::ComputeDampingMatrix(const Eigen::Vector6d& _vel,
-                                    Eigen::Matrix6d &_D) const
+void HMFossen::ComputeDampingMatrix(const Eigen::Vector6d &_vel,
+                                    Eigen::Matrix6d       &_D) const
 {
-  // From Antonelli 2014: the viscosity of the fluid causes
-  // the presence of dissipative drag and lift forces on the
-  // body. A common simplification is to consider only linear
-  // and quadratic damping terms and group these terms in a
-  // matrix Drb
-
   _D.setZero();
+  _D = -1 * (this->DLin +
+             this->offsetLinearDamping * Eigen::Matrix6d::Identity()) -
+       _vel[0] * (this->DLinForwardSpeed +
+                  this->offsetLinForwardSpeedDamping * Eigen::Matrix6d::Identity());
 
-  _D = -1 *
-    (this->DLin + this->offsetLinearDamping * Eigen::Matrix6d::Identity()) -
-    _vel[0] * (this->DLinForwardSpeed +
-      this->offsetLinForwardSpeedDamping * Eigen::Matrix6d::Identity());
-
-  // Nonlinear damping matrix is considered as a diagonal matrix
   for (int i = 0; i < 6; i++)
-  {
-    _D(i, i) += -1 *
-      (this->DNonLin(i, i) + this->offsetNonLinDamping) *
-      std::fabs(_vel[i]);
-  }
+    _D(i, i) += -1 * (this->DNonLin(i, i) + this->offsetNonLinDamping) *
+                std::fabs(_vel[i]);
+
   _D *= this->scalingDamping;
 }
 
-/////////////////////////////////////////////////
 Eigen::Matrix6d HMFossen::GetAddedMass() const
 {
   return this->scalingAddedMass *
-    (this->Ma + this->offsetAddedMass * Eigen::Matrix6d::Identity());
+         (this->Ma + this->offsetAddedMass * Eigen::Matrix6d::Identity());
 }
 
 /////////////////////////////////////////////////
-bool HMFossen::GetParam(std::string _tag, std::vector<double>& _output)
+bool HMFossen::GetParam(std::string _tag, std::vector<double> &_output)
 {
-  _output = std::vector<double>();
-  if (!_tag.compare("added_mass"))
-  {
+  _output.clear();
+  auto pushMatrix = [&](const Eigen::Matrix6d &M) {
     for (int i = 0; i < 6; i++)
       for (int j = 0; j < 6; j++)
-        _output.push_back(this->Ma(i, j));
-  }
-  else if (!_tag.compare("linear_damping"))
+        _output.push_back(M(i, j));
+  };
+
+  if      (_tag == "added_mass")                  pushMatrix(this->Ma);
+  else if (_tag == "linear_damping")              pushMatrix(this->DLin);
+  else if (_tag == "linear_damping_forward_speed")pushMatrix(this->DLinForwardSpeed);
+  else if (_tag == "quadratic_damping")           pushMatrix(this->DNonLin);
+  else if (_tag == "center_of_buoyancy")
   {
-    for (int i = 0; i < 6; i++)
-      for (int j = 0; j < 6; j++)
-        _output.push_back(this->DLin(i, j));
+    _output = {this->centerOfBuoyancy.X(),
+               this->centerOfBuoyancy.Y(),
+               this->centerOfBuoyancy.Z()};
   }
-  else if (!_tag.compare("linear_damping_forward_speed"))
-  {
-    for (int i = 0; i < 6; i++)
-      for (int j = 0; j < 6; j++)
-        _output.push_back(this->DLinForwardSpeed(i, j));
-  }
-  else if (!_tag.compare("quadratic_damping"))
-  {
-    for (int i = 0; i < 6; i++)
-      for (int j = 0; j < 6; j++)
-        _output.push_back(this->DNonLin(i, j));
-  }
-  else if (!_tag.compare("center_of_buoyancy"))
-  {
-    _output.push_back(this->centerOfBuoyancy.X());
-    _output.push_back(this->centerOfBuoyancy.Y());
-    _output.push_back(this->centerOfBuoyancy.Z());
-  }
-  else
-    return false;
-  gzmsg << "HydrodynamicModel::GetParam <" << _tag << ">=" << std::endl;
-  for (auto elem : _output)
-    std::cout << elem << " ";
-  std::cout << std::endl;
+  else return false;
+
+  gzmsg << "HydrodynamicModel::GetParam <" << _tag << ">\n";
   return true;
 }
 
-/////////////////////////////////////////////////
-bool HMFossen::GetParam(std::string _tag, double& _output)
+bool HMFossen::GetParam(std::string _tag, double &_output)
 {
   _output = -1.0;
-  if (!_tag.compare("volume"))
-    _output = this->volume;
-  else if (!_tag.compare("scaling_volume"))
-    _output = this->scalingVolume;
-  else if (!_tag.compare("scaling_added_mass"))
-    _output = this->scalingAddedMass;
-  else if (!_tag.compare("scaling_damping"))
-    _output = this->scalingDamping;
-  else if (!_tag.compare("fluid_density"))
-    _output = this->fluidDensity;
-  else if (!_tag.compare("bbox_height"))
-    _output = this->boundingBox.ZLength();
-  else if (!_tag.compare("bbox_width"))
-    _output = this->boundingBox.YLength();
-  else if (!_tag.compare("bbox_length"))
-    _output = this->boundingBox.XLength();
-  else if (!_tag.compare("offset_volume"))
-    _output = this->offsetVolume;
-  else if (!_tag.compare("offset_added_mass"))
-    _output = this->offsetAddedMass;
-  else if (!_tag.compare("offset_linear_damping"))
-    _output = this->offsetLinearDamping;
-  else if (!_tag.compare("offset_lin_forward_speed_damping"))
-    _output = this->offsetLinForwardSpeedDamping;
-  else if (!_tag.compare("offset_nonlin_damping"))
-    _output = this->offsetNonLinDamping;
-  else
-  {
-    _output = -1.0;
-    return false;
-  }
+  if      (_tag == "volume")                       _output = this->volume;
+  else if (_tag == "scaling_volume")               _output = this->scalingVolume;
+  else if (_tag == "scaling_added_mass")           _output = this->scalingAddedMass;
+  else if (_tag == "scaling_damping")              _output = this->scalingDamping;
+  else if (_tag == "fluid_density")                _output = this->fluidDensity;
+  else if (_tag == "bbox_height")                  _output = this->boundingBox.ZLength();
+  else if (_tag == "bbox_width")                   _output = this->boundingBox.YLength();
+  else if (_tag == "bbox_length")                  _output = this->boundingBox.XLength();
+  else if (_tag == "offset_volume")                _output = this->offsetVolume;
+  else if (_tag == "offset_added_mass")            _output = this->offsetAddedMass;
+  else if (_tag == "offset_linear_damping")        _output = this->offsetLinearDamping;
+  else if (_tag == "offset_lin_forward_speed_damping") _output = this->offsetLinForwardSpeedDamping;
+  else if (_tag == "offset_nonlin_damping")        _output = this->offsetNonLinDamping;
+  else { _output = -1.0; return false; }
 
-  gzmsg << "HydrodynamicModel::GetParam <" << _tag << ">=" << _output <<
-    std::endl;
+  gzmsg << "HydrodynamicModel::GetParam <" << _tag << ">=" << _output << "\n";
   return true;
 }
 
-/////////////////////////////////////////////////
 bool HMFossen::SetParam(std::string _tag, double _input)
 {
-  if (!_tag.compare("scaling_volume"))
-  {
-    if (_input < 0)
-      return false;
-    this->scalingVolume = _input;
-  }
-  else if (!_tag.compare("scaling_added_mass"))
-  {
-    if (_input < 0)
-      return false;
-    this->scalingAddedMass = _input;
-  }
-  else if (!_tag.compare("scaling_damping"))
-  {
-    if (_input < 0)
-      return false;
-    this->scalingDamping = _input;
-  }
-  else if (!_tag.compare("fluid_density"))
-  {
-    if (_input < 0)
-      return false;
-    this->fluidDensity = _input;
-  }
-  else if (!_tag.compare("offset_volume"))
-    this->offsetVolume = _input;
-  else if (!_tag.compare("offset_added_mass"))
-    this->offsetAddedMass = _input;
-  else if (!_tag.compare("offset_linear_damping"))
-    this->offsetLinearDamping = _input;
-  else if (!_tag.compare("offset_lin_forward_speed_damping"))
-    this->offsetLinForwardSpeedDamping = _input;
-  else if (!_tag.compare("offset_nonlin_damping"))
-    this->offsetNonLinDamping = _input;
-  else
-    return false;
-  gzmsg << "HydrodynamicModel::SetParam <" << _tag << ">=" << _input <<
-    std::endl;
+  if (_tag == "scaling_volume")
+  { if (_input < 0) return false; this->scalingVolume = _input; }
+  else if (_tag == "scaling_added_mass")
+  { if (_input < 0) return false; this->scalingAddedMass = _input; }
+  else if (_tag == "scaling_damping")
+  { if (_input < 0) return false; this->scalingDamping = _input; }
+  else if (_tag == "fluid_density")
+  { if (_input < 0) return false; this->fluidDensity = _input; }
+  else if (_tag == "offset_volume")                this->offsetVolume = _input;
+  else if (_tag == "offset_added_mass")            this->offsetAddedMass = _input;
+  else if (_tag == "offset_linear_damping")        this->offsetLinearDamping = _input;
+  else if (_tag == "offset_lin_forward_speed_damping") this->offsetLinForwardSpeedDamping = _input;
+  else if (_tag == "offset_nonlin_damping")        this->offsetNonLinDamping = _input;
+  else return false;
+
+  gzmsg << "HydrodynamicModel::SetParam <" << _tag << ">=" << _input << "\n";
   return true;
 }
 
-/////////////////////////////////////////////////
 void HMFossen::Print(std::string _paramName, std::string _message)
 {
-  if (!_paramName.compare("all"))
+  if (_paramName == "all")
   {
-    for (auto tag : this->params)
-      this->Print(tag);
+    for (auto &tag : this->params) this->Print(tag);
     return;
   }
-  if (!_message.empty())
-    std::cout << _message << std::endl;
-  else
-    std::cout << this->link->GetModel()->GetName() << "::"
-      << this->link->GetName() << "::" << _paramName
-      << std::endl;
-  if (!_paramName.compare("added_mass"))
-  {
-    for (int i = 0; i < 6; i++)
-    {
-      for (int j = 0; j < 6; j++)
-        std::cout << std::setw(12) << this->Ma(i, j);
-      std::cout << std::endl;
+  std::cout << (_message.empty() ? _paramName : _message) << "\n";
+  auto printMatrix = [](const Eigen::Matrix6d &M) {
+    for (int i = 0; i < 6; i++) {
+      for (int j = 0; j < 6; j++) std::cout << std::setw(12) << M(i,j);
+      std::cout << "\n";
     }
-  }
-  else if (!_paramName.compare("linear_damping"))
-  {
-    for (int i = 0; i < 6; i++)
-    {
-      for (int j = 0; j < 6; j++)
-        std::cout << std::setw(12) << this->DLin(i, j);
-      std::cout << std::endl;
-    }
-  }
-  else if (!_paramName.compare("linear_damping_forward_speed"))
-  {
-    for (int i = 0; i < 6; i++)
-    {
-      for (int j = 0; j < 6; j++)
-        std::cout << std::setw(12) << this->DLinForwardSpeed(i, j);
-      std::cout << std::endl;
-    }
-  }
-  else if (!_paramName.compare("quadratic_damping"))
-  {
-    for (int i = 0; i < 6; i++)
-    {
-      for (int j = 0; j < 6; j++)
-        std::cout << std::setw(12) << this->DNonLin(i, j);
-      std::cout << std::endl;
-    }
-  }
-  else if (!_paramName.compare("volume"))
-  {
-    std::cout << std::setw(12) << this->volume << " m^3" << std::endl;
-  }
+  };
+  if      (_paramName == "added_mass")                   printMatrix(this->Ma);
+  else if (_paramName == "linear_damping")               printMatrix(this->DLin);
+  else if (_paramName == "linear_damping_forward_speed") printMatrix(this->DLinForwardSpeed);
+  else if (_paramName == "quadratic_damping")            printMatrix(this->DNonLin);
+  else if (_paramName == "volume")
+    std::cout << std::setw(12) << this->volume << " m^3\n";
 }
 
-//////////////////////////////////////////////////////////////////////////
-// Hydrodynamic model for a sphere
-//////////////////////////////////////////////////////////////////////////
-
+// ===========================================================================
+// HMSphere
+// ===========================================================================
 const std::string HMSphere::IDENTIFIER = "sphere";
-REGISTER_HYDRODYNAMICMODEL_CREATOR(HMSphere,
-                                   &HMSphere::create);
+REGISTER_HYDRODYNAMICMODEL_CREATOR(HMSphere, &HMSphere::create);
 
-/////////////////////////////////////////////////
-HydrodynamicModel* HMSphere::create(sdf::ElementPtr _sdf,
-                                    physics::LinkPtr _link)
+HydrodynamicModel* HMSphere::create(
+    sdf::ElementPtr _sdf, gz::sim::Entity _link,
+    gz::sim::EntityComponentManager &_ecm)
+{ return new HMSphere(_sdf, _link, _ecm); }
+
+HMSphere::HMSphere(sdf::ElementPtr _sdf, gz::sim::Entity _link,
+                   gz::sim::EntityComponentManager &_ecm)
+  : HMFossen(_sdf, _link, _ecm)
 {
-  return new HMSphere(_sdf, _link);
-}
+  sdf::ElementPtr mp = _sdf->GetElement("hydrodynamic_model");
 
-/////////////////////////////////////////////////
-HMSphere::HMSphere(sdf::ElementPtr _sdf,
-                   physics::LinkPtr _link)
-                   : HMFossen(_sdf, _link)
-{
-  GZ_ASSERT(_sdf->HasElement("hydrodynamic_model"),
-            "Hydrodynamic model is missing");
-
-  sdf::ElementPtr modelParams = _sdf->GetElement("hydrodynamic_model");
-
-  if (modelParams->HasElement("radius"))
-    this->radius = modelParams->Get<double>("radius");
+  if (mp->HasElement("radius"))
+    this->radius = mp->Get<double>("radius");
   else
   {
-    gzmsg << "HMSphere: Using the smallest length of bounding box as radius"
-          << std::endl;
-    this->radius = std::min(this->boundingBox.XLength(),
-                            std::min(this->boundingBox.YLength(),
-                                     this->boundingBox.ZLength()));
+    gzmsg << "HMSphere: Using smallest bbox dimension as radius\n";
+    this->radius = std::min({this->boundingBox.XLength(),
+                             this->boundingBox.YLength(),
+                             this->boundingBox.ZLength()});
   }
-  gzmsg << "HMSphere::radius=" << this->radius << std::endl;
-  gzmsg << "HMSphere: Computing added mass" << std::endl;
+  gzmsg << "HMSphere::radius=" << this->radius << "\n";
 
   this->params.push_back("radius");
-  // Reynolds number for subcritical flow
-  // Reference:
-  //    - MIT Marine Hydrodynamic (Lecture Notes)
-  // TODO Consider also critical flow
-  this->Re = 3e5;
+  this->Re          = 3e5;
+  this->Cd          = 0.5;
+  this->areaSection = GZ_PI * std::pow(this->radius, 2.0);
 
-  // Drag coefficient for a sphere in subcritical flow
-  // Reference:
-  //    - MIT Marine Hydrodynamic (Lecture Notes)
-  this->Cd = 0.5;
-
-  // Area of the cross section
-  this->areaSection = PI * std::pow(this->radius, 2.0);
-
-  // See derivation in MIT's Marine Hydrodynamics lecture notes
-  // The sphere has the same projected area for X, Y and Z
-
-  // TODO Interpolate temperatures in look-up table
-  double sphereMa = -2.0 / 3.0 * this->fluidDensity * PI * \
-                   std::pow(this->radius, 3.0);
-  // At the moment, only pressure drag is calculated, no skin friction drag
+  double sphereMa = -2.0/3.0 * this->fluidDensity * GZ_PI *
+                    std::pow(this->radius, 3.0);
   double Dq = -0.5 * this->fluidDensity * this->Cd * this->areaSection;
 
   for (int i = 0; i < 3; i++)
   {
-    // Setting the added mass
-    this->Ma(i, i) = -sphereMa;
-    // Setting the pressure drag    
+    this->Ma(i, i)      = -sphereMa;
     this->DNonLin(i, i) = Dq;
   }
 }
 
-/////////////////////////////////////////////////
 void HMSphere::Print(std::string _paramName, std::string _message)
 {
-  if (!_paramName.compare("all"))
-  {
-    for (auto tag : this->params)
-      this->Print(tag);
-    return;
-  }
-  if (!_message.empty())
-    std::cout << _message << std::endl;
-  else
-    std::cout << this->link->GetModel()->GetName() << "::"
-      << this->link->GetName() << "::" << _paramName
-      << std::endl;
-  if (!_paramName.compare("radius"))
-    std::cout << std::setw(12) << this->radius << std::endl;
+  if (_paramName == "all")
+  { for (auto &tag : this->params) this->Print(tag); return; }
+  if (!_message.empty()) std::cout << _message << "\n";
+  if (_paramName == "radius")
+    std::cout << std::setw(12) << this->radius << "\n";
   else
     HMFossen::Print(_paramName, _message);
 }
 
-//////////////////////////////////////////////////////////////////////////
-// Hydrodynamic model for a cylinder
-//////////////////////////////////////////////////////////////////////////
-
+// ===========================================================================
+// HMCylinder
+// ===========================================================================
 const std::string HMCylinder::IDENTIFIER = "cylinder";
-REGISTER_HYDRODYNAMICMODEL_CREATOR(HMCylinder,
-                                   &HMCylinder::create);
+REGISTER_HYDRODYNAMICMODEL_CREATOR(HMCylinder, &HMCylinder::create);
 
-/////////////////////////////////////////////////
-HydrodynamicModel* HMCylinder::create(sdf::ElementPtr _sdf,
-                                      physics::LinkPtr _link)
+HydrodynamicModel* HMCylinder::create(
+    sdf::ElementPtr _sdf, gz::sim::Entity _link,
+    gz::sim::EntityComponentManager &_ecm)
+{ return new HMCylinder(_sdf, _link, _ecm); }
+
+HMCylinder::HMCylinder(sdf::ElementPtr _sdf, gz::sim::Entity _link,
+                       gz::sim::EntityComponentManager &_ecm)
+  : HMFossen(_sdf, _link, _ecm)
 {
-  return new HMCylinder(_sdf, _link);
-}
+  sdf::ElementPtr mp = _sdf->GetElement("hydrodynamic_model");
 
-/////////////////////////////////////////////////
-HMCylinder::HMCylinder(sdf::ElementPtr _sdf,
-                       physics::LinkPtr _link)
-                       : HMFossen(_sdf, _link)
-{
-  GZ_ASSERT(_sdf->HasElement("hydrodynamic_model"),
-            "Hydrodynamic model is missing");
-
-  sdf::ElementPtr modelParams = _sdf->GetElement("hydrodynamic_model");
-
-  if (modelParams->HasElement("radius"))
-    this->radius = modelParams->Get<double>("radius");
+  if (mp->HasElement("radius"))
+    this->radius = mp->Get<double>("radius");
   else
-  {
-    gzmsg << "HMCylinder: Using the smallest length of bounding box as radius"
-          << std::endl;
-    this->radius = std::min(this->boundingBox.XLength(),
-                            std::min(this->boundingBox.YLength(),
-                                     this->boundingBox.ZLength()));
-  }
-  gzmsg << "HMCylinder::radius=" << this->radius << std::endl;
+    this->radius = std::min({this->boundingBox.XLength(),
+                             this->boundingBox.YLength(),
+                             this->boundingBox.ZLength()});
 
-  if (modelParams->HasElement("length"))
-    this->length = modelParams->Get<double>("length");
+  if (mp->HasElement("length"))
+    this->length = mp->Get<double>("length");
   else
+    this->length = std::max({this->boundingBox.XLength(),
+                             this->boundingBox.YLength(),
+                             this->boundingBox.ZLength()});
+
+  this->dimRatio = this->length / (2 * this->radius);
+
+  // Drag coefficients (circular & rectangular profiles)
+  if      (this->dimRatio <= 1)                      { this->cdCirc = 0.91; this->cdLength = 0.63; }
+  else if (this->dimRatio > 1 && this->dimRatio <= 2) { this->cdCirc = 0.85; this->cdLength = 0.68; }
+  else if (this->dimRatio > 2 && this->dimRatio <= 4) { this->cdCirc = 0.87; this->cdLength = 0.74; }
+  else if (this->dimRatio > 4 && this->dimRatio <= 5) { this->cdCirc = 0.99; this->cdLength = 0.74; }
+  else if (this->dimRatio > 5 && this->dimRatio <= 7) { this->cdCirc = 0.99; this->cdLength = 0.82; }
+  else if (this->dimRatio > 7 && this->dimRatio <= 10){ this->cdCirc = 0.99; this->cdLength = 0.82; }
+  else                                                 { this->cdCirc = 0.99; this->cdLength = 0.98; }
+
+  if (mp->HasElement("axis"))
   {
-      gzmsg << "HMCylinder: Using the biggest length of bounding box as length"
-            << std::endl;
-      this->length = std::max(this->boundingBox.XLength(),
-                              std::max(this->boundingBox.YLength(),
-                                       this->boundingBox.ZLength()));
-  }
-  gzmsg << "HMCylinder::length=" << this->length << std::endl;
-
-  this->dimRatio = this->length / (2* this->radius);
-
-  gzmsg << "HMCylinder::dimension_ratio=" << this->dimRatio << std::endl;
-
-  // Approximation of drag coefficients
-  // Reference: http://www.mech.pk.edu.pl/~m52/pdf/fm/R_09.pdf
-  // For the circular profile
-  if (this->dimRatio <= 1) this->cdCirc = 0.91;
-  else if (this->dimRatio > 1 && this->dimRatio <= 2) this->cdCirc = 0.85;
-  else if (this->dimRatio > 2 && this->dimRatio <= 4) this->cdCirc = 0.87;
-  else if (this->dimRatio > 4 && this->dimRatio <= 7) this->cdCirc = 0.99;
-
-  // For the rectagular profile
-  if (this->dimRatio <= 1) this->cdLength = 0.63;
-  else if (this->dimRatio > 1 && this->dimRatio <= 2) this->cdLength = 0.68;
-  else if (this->dimRatio > 2 && this->dimRatio <= 5) this->cdLength = 0.74;
-  else if (this->dimRatio > 5 && this->dimRatio <= 10) this->cdLength = 0.82;
-  else if (this->dimRatio > 10 && this->dimRatio <= 40) this->cdLength = 0.98;
-  else if (this->dimRatio > 40) this->cdLength = 0.98;
-
-  if (modelParams->HasElement("axis"))
-  {
-    this->axis = modelParams->Get<std::string>("axis");
-    GZ_ASSERT(this->axis.compare("i") == 0 ||
-              this->axis.compare("j") == 0 ||
-              this->axis.compare("k") == 0, "Invalid axis of rotation");
+    this->axis = mp->Get<std::string>("axis");
+    GZ_ASSERT(this->axis == "i" || this->axis == "j" || this->axis == "k",
+              "Invalid axis");
   }
   else
   {
-    gzmsg << "HMCylinder: Using the direction of biggest length as axis"
-          << std::endl;
-    double maxLength = std::max(this->boundingBox.XLength(),
-                                std::max(this->boundingBox.YLength(),
-                                         this->boundingBox.ZLength()));
-    if (maxLength == this->boundingBox.XLength())
-      this->axis = "i";
-    else if (maxLength == this->boundingBox.YLength())
-      this->axis = "j";
-    else
-      this->axis = "k";
+    double maxLen = std::max({this->boundingBox.XLength(),
+                              this->boundingBox.YLength(),
+                              this->boundingBox.ZLength()});
+    this->axis = (maxLen == this->boundingBox.XLength()) ? "i" :
+                 (maxLen == this->boundingBox.YLength()) ? "j" : "k";
   }
-  gzmsg << "HMCylinder::rotation_axis=" << this->axis << std::endl;
 
-  // Calculating the added mass and damping for the cylinder
-  // Calculate added mass coefficients for the cylinder along its length
-  double MaLength = -this->fluidDensity * PI *
-                    std::pow(this->radius, 2.0) * this->length;
+  double MaLen  = -this->fluidDensity * GZ_PI *
+                   std::pow(this->radius, 2.0) * this->length;
+  double MaCirc = -this->fluidDensity * GZ_PI * std::pow(this->radius, 2.0);
+  double MaLenT = (-1.0/12.0) * this->fluidDensity * GZ_PI *
+                   std::pow(this->radius, 2.0) * std::pow(this->length, 3.0);
+  double DCirc  = -0.5 * this->cdCirc  * GZ_PI * std::pow(this->radius, 2.0) * this->fluidDensity;
+  double DLen   = -0.5 * this->cdLength * this->radius * this->length          * this->fluidDensity;
 
-  // Calculate the added mass coefficients for the circular area
-  double MaCirc = -this->fluidDensity * PI * std::pow(this->radius, 2.0);
-
-  // Calculating added mass torque coefficients
-  // Reference: Schjolberg, 1994 (Modelling and Control of Underwater-Vehicle
-  // Manipulator System)
-  double MaLengthTorque = (-1.0/12.0) * this->fluidDensity * PI \
-                * std::pow(this->radius, 2.0) * std::pow(this->length, 3.0);
-
-  // Calculate drag forces and moments
-  // At the moment, only pressure drag is calculated, no skin friction drag
-  double DCirc = -0.5 * this->cdCirc * PI * std::pow(this->radius, 2.0) \
-                    * this->fluidDensity;
-  double DLength = -0.5 * this->cdLength * this->radius * this->length \
-                    * this->fluidDensity;
-
-  if (this->axis.compare("i") == 0)
+  if (this->axis == "i")
   {
-      this->Ma(0, 0) = -MaCirc;
-      this->Ma(1, 1) = -MaLength;
-      this->Ma(2, 2) = -MaLength;
-
-      this->Ma(4, 4) = -MaLengthTorque;
-      this->Ma(5, 5) = -MaLengthTorque;
-
-      this->DNonLin(0, 0) = DCirc;
-      this->DNonLin(1, 1) = DLength;
-      this->DNonLin(2, 2) = DLength;
+    this->Ma(0,0)=-MaCirc; this->Ma(1,1)=-MaLen; this->Ma(2,2)=-MaLen;
+    this->Ma(4,4)=-MaLenT; this->Ma(5,5)=-MaLenT;
+    this->DNonLin(0,0)=DCirc; this->DNonLin(1,1)=DLen; this->DNonLin(2,2)=DLen;
   }
-  else if (this->axis.compare("j") == 0)
+  else if (this->axis == "j")
   {
-      this->Ma(0, 0) = -MaLength;
-      this->Ma(1, 1) = -MaCirc;
-      this->Ma(2, 2) = -MaLength;
-
-      this->Ma(3, 3) = -MaLengthTorque;
-      this->Ma(5, 5) = -MaLengthTorque;
-
-      this->DNonLin(0, 0) = DLength;
-      this->DNonLin(1, 1) = DCirc;
-      this->DNonLin(2, 2) = DLength;
+    this->Ma(0,0)=-MaLen; this->Ma(1,1)=-MaCirc; this->Ma(2,2)=-MaLen;
+    this->Ma(3,3)=-MaLenT; this->Ma(5,5)=-MaLenT;
+    this->DNonLin(0,0)=DLen; this->DNonLin(1,1)=DCirc; this->DNonLin(2,2)=DLen;
   }
   else
   {
-      this->Ma(0, 0) = -MaLength;
-      this->Ma(1, 1) = -MaLength;
-      this->Ma(2, 2) = -MaCirc;
-
-      this->Ma(3, 3) = -MaLengthTorque;
-      this->Ma(4, 4) = -MaLengthTorque;
-
-      this->DNonLin(0, 0) = DLength;
-      this->DNonLin(1, 1) = DLength;
-      this->DNonLin(2, 2) = DCirc;
+    this->Ma(0,0)=-MaLen; this->Ma(1,1)=-MaLen; this->Ma(2,2)=-MaCirc;
+    this->Ma(3,3)=-MaLenT; this->Ma(4,4)=-MaLenT;
+    this->DNonLin(0,0)=DLen; this->DNonLin(1,1)=DLen; this->DNonLin(2,2)=DCirc;
   }
 }
 
-/////////////////////////////////////////////////
 void HMCylinder::Print(std::string _paramName, std::string _message)
 {
-  if (!_paramName.compare("radius"))
-  {
-    if (!_message.empty())
-      gzmsg << this->link->GetName() << std::endl;
-    std::cout << std::setw(12) << this->radius << std::endl;
-  }
-  else if (!_paramName.compare("length"))
-  {
-    if (!_message.empty())
-      gzmsg << _message << std::endl;
-    std::cout << std::setw(12) << this->length << std::endl;
-  }
-  else
-    HMFossen::Print(_paramName, _message);
+  if (!_message.empty()) gzmsg << _message << "\n";
+  if      (_paramName == "radius") std::cout << std::setw(12) << this->radius << "\n";
+  else if (_paramName == "length") std::cout << std::setw(12) << this->length << "\n";
+  else HMFossen::Print(_paramName, _message);
 }
 
-//////////////////////////////////////////////////////////////////////////
-// Hydrodynamic model for a spheroid (STILL IN DEVELOPMENT, DON'T USE IT)
-//////////////////////////////////////////////////////////////////////////
+// ===========================================================================
+// HMSpheroid
+// ===========================================================================
 const std::string HMSpheroid::IDENTIFIER = "spheroid";
-REGISTER_HYDRODYNAMICMODEL_CREATOR(HMSpheroid,
-                                   &HMSpheroid::create);
+REGISTER_HYDRODYNAMICMODEL_CREATOR(HMSpheroid, &HMSpheroid::create);
 
-/////////////////////////////////////////////////
-HydrodynamicModel* HMSpheroid::create(sdf::ElementPtr _sdf,
-                                      physics::LinkPtr _link)
+HydrodynamicModel* HMSpheroid::create(
+    sdf::ElementPtr _sdf, gz::sim::Entity _link,
+    gz::sim::EntityComponentManager &_ecm)
+{ return new HMSpheroid(_sdf, _link, _ecm); }
+
+HMSpheroid::HMSpheroid(sdf::ElementPtr _sdf, gz::sim::Entity _link,
+                       gz::sim::EntityComponentManager &_ecm)
+  : HMFossen(_sdf, _link, _ecm)
 {
-  return new HMSpheroid(_sdf, _link);
-}
+  gzerr << "Hydrodynamic model for a spheroid is still in development!\n";
 
-/////////////////////////////////////////////////
-HMSpheroid::HMSpheroid(sdf::ElementPtr _sdf,
-                       physics::LinkPtr _link)
-                       : HMFossen(_sdf, _link)
-{
-  gzerr << "Hydrodynamic model for a spheroid is still in development!"
-    << std::endl;
-  GZ_ASSERT(_sdf->HasElement("hydrodynamic_model"),
-            "Hydrodynamic model is missing");
+  sdf::ElementPtr mp = _sdf->GetElement("hydrodynamic_model");
 
-  sdf::ElementPtr modelParams = _sdf->GetElement("hydrodynamic_model");
-
-  if (modelParams->HasElement("radius"))
-    this->radius = modelParams->Get<double>("radius");
+  if (mp->HasElement("radius"))
+    this->radius = mp->Get<double>("radius");
   else
-  {
-    gzmsg << "HMSpheroid: Using the smallest length of bounding box as radius"
-          << std::endl;
-    this->radius = std::min(this->boundingBox.XLength(),
-                            std::min(this->boundingBox.YLength(),
-                                     this->boundingBox.ZLength()));
-  }
+    this->radius = std::min({this->boundingBox.XLength(),
+                             this->boundingBox.YLength(),
+                             this->boundingBox.ZLength()});
   GZ_ASSERT(this->radius > 0, "Radius cannot be negative");
-  gzmsg << "HMSpheroid::radius=" << this->radius << std::endl;
 
-  if (modelParams->HasElement("length"))
-    this->length = modelParams->Get<double>("length");
+  if (mp->HasElement("length"))
+    this->length = mp->Get<double>("length");
   else
-  {
-      gzmsg << "HMSpheroid: Using the biggest length of bounding box as length"
-            << std::endl;
-      this->length = std::max(this->boundingBox.XLength(),
-                              std::max(this->boundingBox.YLength(),
-                                       this->boundingBox.ZLength()));
-  }
+    this->length = std::max({this->boundingBox.XLength(),
+                             this->boundingBox.YLength(),
+                             this->boundingBox.ZLength()});
   GZ_ASSERT(this->length > 0, "Length cannot be negative");
-  gzmsg << "HMSpheroid::length=" << this->length << std::endl;
 
-  // Eccentricity
-  double ecc = std::sqrt(1 -
-               std::pow(this->radius / this->length, 2.0));
+  double ecc = std::sqrt(1 - std::pow(this->radius / this->length, 2.0));
+  double ln  = std::log((1 + ecc) / (1 - ecc));
+  double alpha = 2 * (1 - std::pow(ecc, 2.0)) / std::pow(ecc, 3.0) *
+                 (0.5 * ln - ecc);
+  double beta  = 1 / std::pow(ecc, 2.0) -
+                 (1 - std::pow(ecc, 2.0)) / (2 * std::pow(ecc, 3.0)) * ln;
 
-  gzmsg << "ecc=" << ecc << std::endl;
+  auto inertial = _ecm.Component<gz::sim::components::Inertial>(
+      this->linkEntity);
+  double mass = inertial ? inertial->Data().MassMatrix().Mass() : 0.0;
 
-  double ln = std::log((1 + ecc) / (1 - ecc));
-  double alpha = 2 * (1 - std::pow(ecc, 2.0)) / std::pow(ecc, 3.0);
-
-  alpha *= (0.5 * ln - ecc);
-
-  double beta = 1 / std::pow(ecc, 2.0) - \
-                (1 - std::pow(ecc, 2.0) / (2 * std::pow(ecc, 3.0))) * ln;
-
-  gzmsg << "alpha=" << alpha << std::endl;
-  gzmsg << "beta=" << beta << std::endl;
-
-  double mass;
-#if GAZEBO_MAJOR_VERSION >= 8
-  mass = this->link->GetInertial()->Mass();
-#else
-  mass = this->link->GetInertial()->GetMass();
-#endif
-
-  this->Ma(0, 0) = mass * alpha / (2 - alpha);
-  this->Ma(1, 1) = mass * beta / (2 - beta);
-  this->Ma(2, 2) = this->Ma(1, 1);
-  this->Ma(3, 3) = 0;
+  this->Ma(0,0) = mass * alpha / (2 - alpha);
+  this->Ma(1,1) = mass * beta  / (2 - beta);
+  this->Ma(2,2) = this->Ma(1,1);
+  this->Ma(3,3) = 0;
 
   double ba_minus = std::pow(this->radius, 2.0) - std::pow(this->length, 2.0);
-  double ba_plus = std::pow(this->radius, 2.0) + std::pow(this->length, 2.0);
-  this->Ma(4, 4) = -0.2 * mass * std::pow(ba_minus, 2.0) * (alpha - beta);
-  this->Ma(4, 4) /= (2 * ba_minus - ba_plus * (alpha - beta));
-
-  this->Ma(5, 5) = this->Ma(4, 4);
+  double ba_plus  = std::pow(this->radius, 2.0) + std::pow(this->length, 2.0);
+  this->Ma(4,4) = -0.2 * mass * std::pow(ba_minus, 2.0) * (alpha - beta) /
+                  (2 * ba_minus - ba_plus * (alpha - beta));
+  this->Ma(5,5) = this->Ma(4,4);
 }
 
-/////////////////////////////////////////////////
 void HMSpheroid::Print(std::string _paramName, std::string _message)
 {
-  if (!_paramName.compare("radius"))
-  {
-    if (!_message.empty())
-      gzmsg << this->link->GetName() << std::endl;
-    std::cout << std::setw(12) << this->radius << std::endl;
-  }
-  else if (!_paramName.compare("length"))
-  {
-    if (!_message.empty())
-      gzmsg << _message << std::endl;
-    std::cout << std::setw(12) << this->length << std::endl;
-  }
-  else
-    HMFossen::Print(_paramName, _message);
+  if (!_message.empty()) gzmsg << _message << "\n";
+  if      (_paramName == "radius") std::cout << std::setw(12) << this->radius << "\n";
+  else if (_paramName == "length") std::cout << std::setw(12) << this->length << "\n";
+  else HMFossen::Print(_paramName, _message);
 }
 
-//////////////////////////////////////////////////////////////////////////
-// Hydrodynamic model for a box (STILL IN DEVELOPMENT, DON'T USE IT)
-//////////////////////////////////////////////////////////////////////////
-
+// ===========================================================================
+// HMBox
+// ===========================================================================
 const std::string HMBox::IDENTIFIER = "box";
-REGISTER_HYDRODYNAMICMODEL_CREATOR(HMBox,
-                                   &HMBox::create);
+REGISTER_HYDRODYNAMICMODEL_CREATOR(HMBox, &HMBox::create);
 
-/////////////////////////////////////////////////
-HydrodynamicModel* HMBox::create(sdf::ElementPtr _sdf,
-                                 physics::LinkPtr _link)
+HydrodynamicModel* HMBox::create(
+    sdf::ElementPtr _sdf, gz::sim::Entity _link,
+    gz::sim::EntityComponentManager &_ecm)
+{ return new HMBox(_sdf, _link, _ecm); }
+
+HMBox::HMBox(sdf::ElementPtr _sdf, gz::sim::Entity _link,
+             gz::sim::EntityComponentManager &_ecm)
+  : HMFossen(_sdf, _link, _ecm)
 {
-  return new HMBox(_sdf, _link);
+  gzerr << "Hydrodynamic model for box is still in development!\n";
+
+  sdf::ElementPtr mp = _sdf->GetElement("hydrodynamic_model");
+
+  this->Cd = mp->HasElement("cd") ? mp->Get<double>("cd") : 1.0;
+
+  GZ_ASSERT(mp->HasElement("length"), "Length missing");
+  GZ_ASSERT(mp->HasElement("width"),  "Width missing");
+  GZ_ASSERT(mp->HasElement("height"), "Height missing");
+
+  this->length = mp->Get<double>("length");
+  this->width  = mp->Get<double>("width");
+  this->height = mp->Get<double>("height");
+
+  this->quadDampCoef[0] = -0.5 * this->Cd * this->width  * this->height * this->fluidDensity;
+  this->quadDampCoef[1] = -0.5 * this->Cd * this->length * this->height * this->fluidDensity;
+  this->quadDampCoef[2] = -0.5 * this->Cd * this->width  * this->length * this->fluidDensity;
 }
 
-/////////////////////////////////////////////////
-HMBox::HMBox(sdf::ElementPtr _sdf,
-             physics::LinkPtr _link)
-             : HMFossen(_sdf, _link)
-{
-  gzerr << "Hydrodynamic model for box is still in development!" << std::endl;
-
-  GZ_ASSERT(_sdf->HasElement("hydrodynamic_model"),
-            "Hydrodynamic model is missing");
-
-  sdf::ElementPtr modelParams = _sdf->GetElement("hydrodynamic_model");
-
-  if (modelParams->HasElement("cd"))
-    this->Cd = modelParams->Get<double>("cd");
-  else
-  {
-    gzmsg << "HMBox: Using 1 as drag coefficient"
-          << std::endl;
-    this->Cd = 1;
-  }
-
-  GZ_ASSERT(modelParams->HasElement("length"), "Length of the box is missing");
-  GZ_ASSERT(modelParams->HasElement("width"), "Width of the box is missing");
-  GZ_ASSERT(modelParams->HasElement("height"), "Height of the box is missing");
-
-  this->length = modelParams->Get<double>("length");
-  this->width = modelParams->Get<double>("width");
-  this->height = modelParams->Get<double>("height");
-
-  // Calculate drag force coefficients
-  this->quadDampCoef[0] = -0.5 * this->Cd * this->width * this->height \
-                    * this->fluidDensity;
-  this->quadDampCoef[1] = -0.5 * this->Cd * this->length * this->height \
-                    * this->fluidDensity;
-  this->quadDampCoef[2] = -0.5 * this->Cd * this->width * this->length \
-                    * this->fluidDensity;
-}
-
-/////////////////////////////////////////////////
 void HMBox::Print(std::string _paramName, std::string _message)
 {
-    if (!_paramName.compare("length"))
-    {
-      if (!_message.empty())
-        gzmsg << _message << std::endl;
-      std::cout << std::setw(12) << this->length << std::endl;
-    }
-    else if (!_paramName.compare("width"))
-    {
-      if (!_message.empty())
-        gzmsg << _message << std::endl;
-      std::cout << std::setw(12) << this->width << std::endl;
-    }
-    else if (!_paramName.compare("height"))
-    {
-      if (!_message.empty())
-        gzmsg << _message << std::endl;
-      std::cout << std::setw(12) << this->height << std::endl;
-    }
-    else
-      HMFossen::Print(_paramName, _message);
+  if (!_message.empty()) gzmsg << _message << "\n";
+  if      (_paramName == "length") std::cout << std::setw(12) << this->length << "\n";
+  else if (_paramName == "width")  std::cout << std::setw(12) << this->width  << "\n";
+  else if (_paramName == "height") std::cout << std::setw(12) << this->height << "\n";
+  else HMFossen::Print(_paramName, _message);
 }
-}
+
+}  // namespace sim
+}  // namespace gz

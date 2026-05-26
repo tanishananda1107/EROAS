@@ -1,95 +1,76 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+#include "GaussMarkovProcess.hh"
+#include <iostream>
+#include <cmath>
+#include <chrono>
 
-/// \file GaussMarkovProcess.cc
-
-#include <uuv_world_plugins/GaussMarkovProcess.hh>
-
-namespace uuv_world_plugins
+namespace uuv_gz_sim
 {
-/////////////////////////////////////////////////
+
 GaussMarkovProcess::GaussMarkovProcess()
+: rng(std::random_device{}()),
+  dist(-0.5, 0.5)
 {
-  this->mean = 0;
-  this->min = -1;
-  this->max = 1;
-  this->mu = 0;
-  this->noiseAmp = 0;
-  this->Reset();
-  std::srand(std::time(NULL));
+  Reset();
 }
 
-/////////////////////////////////////////////////
 void GaussMarkovProcess::Reset()
 {
-  this->var = this->mean;
+  var = mean;
 }
 
-/////////////////////////////////////////////////
 bool GaussMarkovProcess::SetMean(double _mean)
 {
-  if (this->min > _mean || this->max < _mean)
+  if (_mean < min || _mean > max)
     return false;
 
-  this->mean = _mean;
-  this->Reset();
+  mean = _mean;
+  Reset();
   return true;
 }
 
-/////////////////////////////////////////////////
 bool GaussMarkovProcess::SetModel(double _mean, double _min, double _max,
-    double _mu, double _noise)
+                                  double _mu, double _noise)
 {
-  if (_min >= _max)
-    return false;
-  if (_min > _mean || _max < _mean)
-    return false;
-  if (_noise < 0)
+  if (_min >= _max || _mean < _min || _mean > _max)
     return false;
   if (_mu < 0 || _mu > 1)
     return false;
-  this->mean = _mean;
-  this->min = _min;
-  this->max = _max;
-  this->mu = _mu;
-  this->noiseAmp = _noise;
+  if (_noise < 0)
+    return false;
 
-  this->Reset();
+  mean = _mean;
+  min = _min;
+  max = _max;
+  mu = _mu;
+  noiseAmp = _noise;
+
+  Reset();
   return true;
 }
 
-/////////////////////////////////////////////////
 double GaussMarkovProcess::Update(double _time)
 {
-  double step = _time - this->lastUpdate;
-  double random =  static_cast<double>(static_cast<double>(rand()) / RAND_MAX)
-    - 0.5;
-  this->var = (1 - step * this->mu) * this->var + this->noiseAmp * random;
-  if (this->var >= this->max)
-    this->var = this->max;
-  if (this->var <= this->min)
-    this->var = this->min;
-  this->lastUpdate = _time;
-  return this->var;
+  double step = _time - lastUpdate;
+
+  double random = dist(rng);
+
+  var = (1.0 - step * mu) * var + noiseAmp * random;
+
+  if (var > max) var = max;
+  if (var < min) var = min;
+
+  lastUpdate = _time;
+  return var;
 }
 
-/////////////////////////////////////////////////
-void GaussMarkovProcess::Print()
+void GaussMarkovProcess::Print() const
 {
-  RCLCPP_INFO(rclcpp::get_logger("uuv_world_plugins"),
-    "\tMean = %f\n\tMin. Limit = %f\n\tMax. Limit = %f\n\tMu = %f\n\tNoise Amp. = %f",
-    this->mean, this->min, this->max, this->mu, this->noiseAmp);
+  std::cout
+    << "Mean: " << mean << "\n"
+    << "Min: " << min << "\n"
+    << "Max: " << max << "\n"
+    << "Mu: " << mu << "\n"
+    << "Noise: " << noiseAmp << std::endl;
 }
-}
+
+} // namespace uuv_gz_sim

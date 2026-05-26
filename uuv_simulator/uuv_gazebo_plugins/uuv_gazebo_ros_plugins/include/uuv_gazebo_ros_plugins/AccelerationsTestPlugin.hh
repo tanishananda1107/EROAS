@@ -1,17 +1,5 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0.
 
 #ifndef __UUV_GAZEBO_PLUGINS_ACCELERATIONS_TEST_PLUGIN_H__
 #define __UUV_GAZEBO_PLUGINS_ACCELERATIONS_TEST_PLUGIN_H__
@@ -19,66 +7,56 @@
 #include <map>
 #include <string>
 
-#include <gazebo/gazebo.hh>
-#include <gazebo/msgs/msgs.hh>
+#include <gz/sim/System.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/EntityComponentManager.hh>
+#include <gz/sim/EventManager.hh>
+
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/vector3_stamped.hpp>
 
 #include <uuv_gazebo_plugins/HydrodynamicModel.hh>
 #include <uuv_gazebo_plugins/Def.hh>
 
-namespace gazebo
+namespace gz::sim::systems
 {
-/// \brief Gazebo model plugin class for underwater objects
-class AccelerationsTestPlugin : public gazebo::ModelPlugin
+class AccelerationsTestPlugin :
+  public gz::sim::System,
+  public gz::sim::ISystemConfigure,
+  public gz::sim::ISystemPreUpdate,
+  public gz::sim::ISystemUpdate
 {
-  /// \brief Constructor
-  public: AccelerationsTestPlugin();
+public:
+  AccelerationsTestPlugin();
+  virtual ~AccelerationsTestPlugin();
 
-  /// \brief Destructor
-  public: virtual ~AccelerationsTestPlugin();
+  void Configure(
+    const gz::sim::Entity &_entity,
+    const std::shared_ptr<const sdf::Element> &_sdf,
+    gz::sim::EntityComponentManager &_ecm,
+    gz::sim::EventManager &_eventMgr) override;
 
-  // Documentation inherited.
-  public: virtual void Load(gazebo::physics::ModelPtr _model,
-                          sdf::ElementPtr _sdf);
+  void PreUpdate(
+    const gz::sim::UpdateInfo &_info,
+    gz::sim::EntityComponentManager &_ecm) override;
 
-  // Documentation inherited.
-  public: virtual void Init();
+  void Update(
+    const gz::sim::UpdateInfo &_info,
+    gz::sim::EntityComponentManager &_ecm) override;
 
-  /// \brief Update the simulation state.
-  /// \param[in] _info Information used in the update event.
-  public: void Update(const gazebo::common::UpdateInfo &_info);
+private:
+  std::shared_ptr<rclcpp::Node> rosNode;
 
-  /// \brief Connects the update event callback
-  protected: virtual void Connect();
+  rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr pub_accel_b_gazebo;
+  rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr pub_accel_b_numeric;
+  rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr pub_accel_w_gazebo;
+  rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr pub_accel_w_numeric;
 
-  /// \brief Update event
-  protected: gazebo::event::ConnectionPtr updateConnection;
+  Eigen::Matrix<double, 6, 1> last_w_v_w_b;
+  std::chrono::steady_clock::duration lastTime{0};
 
-  /// \brief Pointer to the world plugin
-  protected: gazebo::physics::WorldPtr world;
-
-  /// \brief Pointer to the model structure
-  protected: gazebo::physics::ModelPtr model;
-
-  /// \brief Gazebo node
-  protected: gazebo::transport::NodePtr node;
-
-  /// \brief Link of test object
-  protected: physics::LinkPtr link;
-
-  // ROS things
-  private: boost::scoped_ptr<ros::NodeHandle> rosNode;
-
-  protected: ros::Publisher pub_accel_b_gazebo;
-  protected: ros::Publisher pub_accel_b_numeric;
-
-  protected: ros::Publisher pub_accel_w_gazebo;
-  protected: ros::Publisher pub_accel_w_numeric;
-
-  /// \brief Velocity of link with respect to world frame in previous time step.
-  Eigen::Vector6d last_w_v_w_b;
-
-  /// \brief Time stamp of previous time step.
-  common::Time lastTime;
+  gz::sim::Entity modelEntity{gz::sim::kNullEntity};
+  gz::sim::Entity linkEntity{gz::sim::kNullEntity};
 };
 }
 

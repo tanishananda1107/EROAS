@@ -1,6 +1,4 @@
-
 from setuptools import setup
-from ament_index_python.packages import resolve_package_text_file
 
 package_name = "uuv_trajectory_control"
 
@@ -16,33 +14,31 @@ setup(
         "uuv_trajectory_generator.path_generator"
     ],
 
-    package_dir={"": "src"},
+    package_dir={
+        "": "src"
+    },
 
     install_requires=[
         "setuptools",
         "numpy",
         "scipy",
-        "matplotlib",
-        "PyYAML",
-        "rclpy",
-        "tf2_ros"
+        "pyyaml",
+        "matplotlib"
     ],
 
     zip_safe=True,
 
-    maintainer="AIRLab IISc",
+    maintainer="Luiz Ricardo Douat",
 
-    description="ROS2 Jazzy port of UUV trajectory control",
+    description="ROS2 UUV trajectory control package",
 
     license="Apache-2.0",
+
+    tests_require=[
+        "pytest"
+    ],
+
+    entry_points={
+        "console_scripts": []
+    }
 )
-
-Note that the following changes were made:
-
-1. `catkin` was replaced with `ament_cmake`.
-2. `rospy` and `tf` dependencies were added to `install_requires`.
-3. The package directory structure remained unchanged, but the `package_dir[12D[K
-`package_dir` dictionary now uses the empty string as the key.
-
-The converted code is ready for use in ROS2 Jazzy.
-

@@ -1,85 +1,79 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+#ifndef UUV_GZ_SIM_GAUSS_MARKOV_PROCESS_HH_
+#define UUV_GZ_SIM_GAUSS_MARKOV_PROCESS_HH_
 
-/// \file GaussMarkovProcess.hh
-/// \brief Implementation of a Gauss-Markov process model
-
-#ifndef UUV_WORLD_PLUGINS__GAUSS_MARKOV_PROCESS_HH__
-#define UUV_WORLD_PLUGINS__GAUSS_MARKOV_PROCESS_HH__
-
-#include <cstdlib>
-#include <ctime>
 #include <random>
+#include <string>
 
-namespace uuv_world_plugins
+namespace uuv_gz_sim
 {
-  /// \brief Implementation of a Gauss-Markov process to model the current
-  /// velocity and direction according to [1]
-  /// [1] Fossen, Thor I. Handbook of marine craft hydrodynamics and motion
-  /// control. John Wiley & Sons, 2011.
-  class GaussMarkovProcess
+
+class GaussMarkovProcess
+{
+public:
+  GaussMarkovProcess() { this->Reset(); }
+
+  void Reset()
   {
-    /// \brief Class constructor
-    public: GaussMarkovProcess();
+    this->var = this->mean;
+    this->lastUpdate = 0.0;
+  }
 
-    /// \brief Resets the process parameters
-    public: void Reset();
+  bool SetModel(double _mean, double _min, double _max,
+                double _mu = 0.0, double _noise = 0.0)
+  {
+    if (_min > _max)
+      return false;
 
-    /// \brief Sets all the necessary parameters for the computation
-    /// \param _mean Mean value
-    /// \param _min Minimum limit
-    /// \param _max Maximum limit
-    /// \param _mu Process constant
-    /// \param _noise Amplitude for the Gaussian white noise
-    /// \return True, if all parameters were valid
-    public: bool SetModel(double _mean, double _min, double _max,
-        double _mu = 0, double _noise = 0);
+    mean = _mean;
+    min = _min;
+    max = _max;
+    mu = _mu;
+    noiseAmp = _noise;
 
-    /// \brief Set mean process value
-    /// \param _mean New mean value
-    /// \return True, if value inside the limit range
-    public: bool SetMean(double _mean);
+    this->var = mean;
+    return true;
+  }
 
-    /// \brief Process variable
-    public: double var;
+  bool SetMean(double _mean)
+  {
+    if (_mean < min || _mean > max)
+      return false;
 
-    /// \brief Mean process value
-    public: double mean;
+    mean = _mean;
+    return true;
+  }
 
-    /// \brief Minimum limit for the process variable
-    public: double min;
+  double Update(double _time)
+  {
+    double dt = _time - lastUpdate;
+    lastUpdate = _time;
 
-    /// \brief Maximum limit for the process variable
-    public: double max;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::normal_distribution<double> dist(0.0, noiseAmp);
 
-    /// \brief Process constant, if zero, process becomes a random walk
-    public: double mu;
+    double noise = dist(gen);
 
-    /// \brief Gaussian white noise amplitude
-    public: double noiseAmp;
+    var += mu * (mean - var) * dt + noise;
 
-    /// \brief Timestamp for the last update
-    public: double lastUpdate;
+    if (var > max) var = max;
+    if (var < min) var = min;
 
-    /// \brief Update function for a new time stamp
-    /// \param _time Current time stamp
-    public: double Update(double _time);
+    return var;
+  }
 
-    /// \brief Print current model paramters
-    public: void Print();
-  };
-}
+  void Print() {}
 
-#endif  // UUV_WORLD_PLUGINS__GAUSS_MARKOV_PROCESS_HH__
+public:
+  double var;
+  double mean;
+  double min;
+  double max;
+  double mu;
+  double noiseAmp;
+  double lastUpdate;
+};
+
+} // namespace uuv_gz_sim
+
+#endif

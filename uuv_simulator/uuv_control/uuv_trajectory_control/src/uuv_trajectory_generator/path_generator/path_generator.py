@@ -1,14 +1,50 @@
+# Copyright (c) 2016-2019 The UUV Simulator Authors.
+# All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ROS2 + Gazebo Sim 8 (Harmonic) conversion
+# Changes from ROS1:
+#   - Removed `import rospy`; logging now uses rclpy.logging
+#   - MarkerArray import kept (still valid in ROS2 via visualization_msgs)
+#   - quaternion_about_axis / quaternion_multiply remain via tf_transformations
+#     (ros-humble-tf-transformations or similar)
+#   - get_logger() now returns an rclpy logger
 
 import numpy as np
 from copy import deepcopy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile
-from tf2_ros.buffer import Buffer
+
+# ROS2 imports
+import rclpy
+from rclpy.logging import get_logger as rclpy_get_logger
+
 from visualization_msgs.msg import MarkerArray
 from uuv_waypoints import Waypoint, WaypointSet
 
-class PathGenerator(Node):
-    """Base class to be inherited by custom path generator 
+# tf_transformations is the ROS2 equivalent of tf.transformations
+from tf_transformations import (
+    quaternion_multiply,
+    quaternion_about_axis,
+    quaternion_from_euler,
+    quaternion_from_matrix,
+)
+
+from ..trajectory_point import TrajectoryPoint
+from .._log import get_logger
+
+
+class PathGenerator(object):
+    """Base class to be inherited by custom path generator
     to generate paths from interpolated waypoints.
 
     > *Attributes*
@@ -17,20 +53,19 @@ class PathGenerator(Node):
 
     > *Input arguments*
 
-    * `full_dof` (*type:* `bool`, *default:* `False`): If `True`, generate [K
-
+    * `full_dof` (*type:* `bool`, *default:* `False`): If `True`, generate
     6 DoF paths, if `False`, roll and pitch are set to zero.
     """
     LABEL = ''
 
-    def __init__(self, node_name='path_generator', full_dof=False):
-        super().__init__(node_name)
-        self._logger = self.get_logger()
+    def __init__(self, full_dof=False):
+        # ROS2: use rclpy logger instead of rospy logger
+        self._logger = get_logger()
+
         # Waypoint set
         self._waypoints = None
 
-        # True if the path is generated for all degrees of freedom, otherwi[7D[K
-otherwise
+        # True if the path is generated for all degrees of freedom, otherwise
         # the path will be generated for (x, y, z, yaw) only
         self._is_full_dof = full_dof
 
@@ -56,19 +91,17 @@ otherwise
     @staticmethod
     def get_generator(name, *args, **kwargs):
         """Factory method for all derived path generators.
-        
+
         > *Input arguments*
-        
+
         * `name` (*type:* `str`): Name identifier of the path generator
-        * `args` (*type:* `list`): List of arguments for the path generator[9D[K
-generator constructor
-        * `kwards` (*type:* `dict`): Keyword arguments for the path generat[7D[K
-generator constructor 
-        
+        * `args` (*type:* `list`): List of arguments for the path generator constructor
+        * `kwargs` (*type:* `dict`): Keyword arguments for the path generator constructor
+
         > *Returns*
-        
+
         An instance of the desired path generator. If the `name` input
-        does not describe any of the derived path generator classes, an
+        does not describe any of the derived path generator classes, a
         `ValueError` will be raised.
         """
         for gen in PathGenerator.__subclasses__():
@@ -76,15 +109,16 @@ generator constructor
                 return gen(*args, **kwargs)
 
         msg = 'Invalid path generator method'
-        self._logger.error(msg)
+        # ROS2: use module-level logger (no self available in static method)
+        rclpy_get_logger('path_generator').error(msg)
         raise ValueError(msg)
 
     @staticmethod
     def get_all_generators():
         """Get the name identifiers of all path generator classes.
-        
+
         > *Returns*
-        
+
         List of `str`
         """
         generators = list()
@@ -99,8 +133,7 @@ generator constructor
 
     @property
     def max_time(self):
-        """`float`: Absolute final timestamp assigned to the path in second[6D[K
-seconds"""
+        """`float`: Absolute final timestamp assigned to the path in seconds"""
         return self._duration + self._start_time
 
     @property
@@ -125,17 +158,16 @@ seconds"""
 
     @property
     def closest_waypoint(self):
-        """`uuv_waypoints.Waypoint`: Return the closest waypoint 
+        """`uuv_waypoints.Waypoint`: Return the closest waypoint
         to the current position on the path.
         """
         return self._waypoints.get_waypoint(self.closest_waypoint_idx)
 
     @property
     def closest_waypoint_idx(self):
-        """Return the index of the closest waypoint to the current 
+        """Return the index of the closest waypoint to the current
         position on the path.
         """
-
         if self._cur_s == 0:
             return 0
         if self._cur_s == 1:
@@ -146,7 +178,7 @@ seconds"""
 
     @property
     def s_step(self):
-        """`float`: Value of the step size for the path's parametric 
+        """`float`: Value of the step size for the path's parametric
         variable
         """
         return self._s_step
@@ -158,7 +190,7 @@ seconds"""
 
     @property
     def termination_by_time(self):
-        """`data_type`: Property description"""
+        """`bool`: Whether termination is determined by time"""
         return self._termination_by_time
 
     def reset(self):
@@ -166,7 +198,6 @@ seconds"""
         self._segment_to_wp_map = list()
         self._cur_s = 0
         self._s_step = 0.0001
-
         self._start_time = None
         self._duration = None
 
@@ -176,7 +207,6 @@ seconds"""
         # Ensure the parameter s is 0 <= s <= 1
         s = max(0, s)
         s = min(s, 1)
-
         if s == 1:
             idx = self._s.size - 1
         else:
@@ -188,7 +218,7 @@ seconds"""
         try:
             wps = self._segment_to_wp_map[idx::]
             return np.unique(wps)
-        except:
+        except Exception:
             self._logger.error('Invalid segment index')
             return None
 
@@ -211,18 +241,15 @@ seconds"""
         return self._markers_msg
 
     def add_waypoint(self, waypoint, add_to_beginning=False):
-        """Add waypoint to the existing waypoint set. If no waypoint set ha[2D[K
-has
-        been initialized, create new waypoint set structure and add the giv[3D[K
-given
+        """Add waypoint to the existing waypoint set. If no waypoint set has
+        been initialized, create new waypoint set structure and add the given
         waypoint."""
         if self._waypoints is None:
             self._waypoints = WaypointSet()
         self._waypoints.add_waypoint(waypoint, add_to_beginning)
         return self.init_interpolator()
 
-    def init_waypoints(self, waypoints=None, init_rot=np.array([0, 0, 0, 1][2D[K
-1])):
+    def init_waypoints(self, waypoints=None, init_rot=np.array([0, 0, 0, 1])):
         if waypoints is not None:
             self._waypoints = deepcopy(waypoints)
 
@@ -231,8 +258,7 @@ given
             return False
 
         self._init_rot = init_rot
-        self._logger.info('Setting initial rotation as={}'.format(init_rot)[23D[K
-as={}'.format(init_rot))
+        self._logger.info('Setting initial rotation as={}'.format(init_rot))
         return True
 
     def interpolate(self, tag, s):
@@ -275,16 +301,9 @@ as={}'.format(init_rot))
                 [0, 1, 0])
             rotq = quaternion_multiply(rotq, rote)
 
-        # Certify that the next quaternion remains in the same half hemisph[7D[K
-hemisphere
+        # Certify that the next quaternion remains in the same half hemisphere
         d_prod = np.dot(self._last_rot, rotq)
         if d_prod < 0:
             rotq *= -1
 
         return rotq
-
-Note: The conversion process is quite straightforward. You just need to rep[3D[K
-replace `rospy` with `rclpy`, and adjust the import statements accordingly.[12D[K
-accordingly. Also, you may need to modify some of the code snippets as per [K
-your specific requirements.
-

@@ -1,117 +1,131 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-/// \file UmbilicalModel.hh
-/// \brief Various umbilical models.
-
-#ifndef __UUV_GAZEBO_PLUGINS_UMBILICAL_MODEL_HH__
-#define __UUV_GAZEBO_PLUGINS_UMBILICAL_MODEL_HH__
+#ifndef UUV_GZ_SIM_UMBILICAL_MODEL_HH_
+#define UUV_GZ_SIM_UMBILICAL_MODEL_HH_
 
 #include <string>
 #include <map>
-#include <gazebo/gazebo.hh>
-#include <gazebo/common/UpdateInfo.hh>
-#include <gazebo/physics/Link.hh>
-#include <gazebo/physics/Model.hh>
+#include <memory>
+
 #include <sdf/sdf.hh>
 
-namespace gazebo
+#include <gz/physics/Model.hh>
+#include <gz/physics/Link.hh>
+
+#include <gz/math/Vector3.hh>
+
+#include <gz/sim/Model.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/EntityComponentManager.hh>
+
+namespace uuv_gz_sim
 {
+
+/// Base class for all tether / umbilical models (gz-sim8 compatible)
 class UmbilicalModel
 {
-  /// \brief Protected constructor: Use the factory instead
-  protected: UmbilicalModel() {}
+public:
+  UmbilicalModel() = default;
+  virtual ~UmbilicalModel() = default;
 
-  /// \brief Destructor.
-  public: virtual ~UmbilicalModel() {}
+  /// Initialize model after creation
+  virtual void Init() {}
 
-  /// \brief Initialize model.
-  public: virtual void Init();
+  /// Update physics every simulation step
+  virtual void OnUpdate(
+      const double _dt,
+      const gz::math::Vector3d &_flow) = 0;
 
-  /// \brief Update Umbilical (and apply forces)
-  public: virtual void OnUpdate(const common::UpdateInfo &_info,
-                                const ignition::math::Vector3d& _flow) = 0;
+  /// Attach model from ECS (gz-sim architecture)
+  virtual void SetModel(
+      const gz::sim::Model & _model,
+      const gz::sim::EntityComponentManager & _ecm)
+  {
+    this->model = _model;
+    this->ecm = &_ecm;
+  }
 
-  /// \brief Gazebo model to which this umbilical belongs.
-  protected: physics::ModelPtr model;
+protected:
+  gz::sim::Model model;
+  const gz::sim::EntityComponentManager *ecm{nullptr};
 
-  /// \brief Moving connector link of this umbilical.
-  protected: physics::LinkPtr connector;
+  gz::sim::Link connector;
 };
 
-/// \brief Function pointer to create a certain conversion function.
-typedef UmbilicalModel* (*UmbilicalModelCreator)(sdf::ElementPtr,
-                                                 physics::ModelPtr);
 
-/// \brief Factory singleton class that creates an UmbilicalModel from sdf.
+/// Factory function type (gz-sim8 safe: no model copying)
+using UmbilicalModelCreator =
+  UmbilicalModel* (*)(sdf::ElementPtr, const gz::sim::Model &);
+
+
+/// Factory for tether models
 class UmbilicalModelFactory
 {
-  /// \brief Create a ConversionFunction object according to its sdf Description
-  public: UmbilicalModel* CreateUmbilicalModel(sdf::ElementPtr _sdf,
-                                               physics::ModelPtr _model);
+public:
+  UmbilicalModel* CreateUmbilicalModel(
+      sdf::ElementPtr _sdf,
+      const gz::sim::Model & _model)
+  {
+    std::string type = _sdf->Get<std::string>("type", "berg").first;
 
-  /// \brief Return the singleton instance of this factory.
-  public: static UmbilicalModelFactory& GetInstance();
+    auto it = creators_.find(type);
+    if (it == creators_.end())
+      return nullptr;
 
-  /// \brief Register an UmbilicalModel class with its creator.
-  public: bool RegisterCreator(const std::string& _identifier,
-                               UmbilicalModelCreator _creator);
+    return (it->second)(_sdf, _model);
+  }
 
-  /// \brief Constructor is private since this is a singleton.
-  private: UmbilicalModelFactory() {}
+  static UmbilicalModelFactory &GetInstance()
+  {
+    static UmbilicalModelFactory inst;
+    return inst;
+  }
 
-  /// \brief Map of each registered identifiers to its corresponding creator
-  private: std::map<std::string, UmbilicalModelCreator> creators_;
+  bool RegisterCreator(const std::string &_id,
+                       UmbilicalModelCreator _creator)
+  {
+    creators_[_id] = _creator;
+    return true;
+  }
+
+private:
+  UmbilicalModelFactory() = default;
+
+  std::map<std::string, UmbilicalModelCreator> creators_;
 };
 
-/// Use the following macro within a ThrusterDynamics declaration:
+
+/// Macros
 #define REGISTER_UMBILICALMODEL(type) \
   static const bool registeredWithFactory
 
-/// Use the following macro before a ThrusterDynamics's definition:
 #define REGISTER_UMBILICALMODEL_CREATOR(type, creator) \
   const bool type::registeredWithFactory = \
-  UmbilicalModelFactory::GetInstance().RegisterCreator( \
-  type::IDENTIFIER, creator);
+    UmbilicalModelFactory::GetInstance().RegisterCreator( \
+      type::IDENTIFIER, creator);
 
+
+/// Berg implementation
 class UmbilicalModelBerg : public UmbilicalModel
 {
-  /// \brief Protected constructor: Use the factory instead
-  protected: UmbilicalModelBerg(sdf::ElementPtr _sdf,
-                                physics::ModelPtr _model);
+protected:
+  UmbilicalModelBerg(sdf::ElementPtr _sdf,
+                     const gz::sim::Model & _model);
 
-  /// \brief Create UmbilicalModel according to its description.
-  public: static UmbilicalModel* create(sdf::ElementPtr _sdf,
-                                        physics::ModelPtr _model);
+public:
+  static UmbilicalModel* create(sdf::ElementPtr _sdf,
+                                const gz::sim::Model & _model);
 
-  /// \brief Update Umbilical (and apply forces)
-  public: virtual void OnUpdate(const common::UpdateInfo &_info,
-                                const ignition::math::Vector3d& _flow);
+  void OnUpdate(const double _dt,
+                const gz::math::Vector3d &_flow) override;
 
-  /// \brief Register this UmbilicalModel function with the factory.
-  private: REGISTER_UMBILICALMODEL(UmbilicalModelBerg);
+private:
+  REGISTER_UMBILICALMODEL(UmbilicalModelBerg);
 
-  /// \brief The unique identifier of this UmbilicalModel.
-  private: static const std::string IDENTIFIER;
+  static const std::string IDENTIFIER;
 
-  /// \brief Umbilical diameter.
-  private: double diameter;
-
-  /// \brief Water density.
-  private: double rho;
+  double diameter{0.0};
+  double rho{1000.0};
 };
-}
 
-#endif  // __UUV_GAZEBO_PLUGINS_UMBILICAL_MODEL_HH__
+} // namespace uuv_gz_sim
+
+#endif

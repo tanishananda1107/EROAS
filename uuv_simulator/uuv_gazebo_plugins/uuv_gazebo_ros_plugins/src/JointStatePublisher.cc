@@ -1,233 +1,156 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0.
 
 #include <uuv_gazebo_ros_plugins/JointStatePublisher.hh>
-#include <gz/sim/components/Joint.hh>
-#include <gz/sim/Joint.hh>
+
+#include <gz/sim/Model.hh>
+#include <gz/sim/components/JointPosition.hh>
+#include <gz/sim/components/JointVelocity.hh>
+#include <gz/sim/components/JointForce.hh>
+#include <gz/sim/components/JointAxis.hh>
+#include <gz/sim/components/JointType.hh>
+#include <gz/sim/components/Name.hh>
+#include <gz/plugin/Register.hh>
+
+#include <sdf/Joint.hh>
 
 namespace uuv_simulator_ros
 {
-GZ_ADD_PLUGIN(JointStatePublisher)
 
-JointStatePublisher::JointStatePublisher()
-    : updateRate(50.0),
-      updatePeriod(0.02),
-      modelEntity(gz::sim::kNullEntity)
+/////////////////////////////////////////////////
+JointStatePublisher::JointStatePublisher() = default;
+JointStatePublisher::~JointStatePublisher() = default;
+
+/////////////////////////////////////////////////
+void JointStatePublisher::Configure(
+  const gz::sim::Entity &_entity,
+  const std::shared_ptr<const sdf::Element> &_sdf,
+  gz::sim::EntityComponentManager &_ecm,
+  gz::sim::EventManager &)
 {
-}
+  modelEntity = _entity;
+  model = gz::sim::Model(_entity);
 
-JointStatePublisher::~JointStatePublisher()
-{
-}
+  if (!rclcpp::ok())
+    rclcpp::init(0, nullptr);
 
-void JointStatePublisher::Configure(const gz::sim::Entity &_entity,
-                                    const std::shared_ptr<const sdf::Element> &_sdf,
-                                    gz::sim::EntityComponentManager &_ecm,
-                                    gz::sim::EventManager &_eventManager)
-{
-  this->modelEntity = _entity;
-
-  if (this->modelEntity == gz::sim::kNullEntity)
-  {
-    gzerr << "Invalid model entity" << std::endl;
-    return;
-  }
-
-  // Get the model name for the namespace
-  this->robotNamespace = _ecm.Component<gz::sim::components::ModelName>(this->modelEntity)->Data();
-
-  // Initialize ROS 2 node
-  this->node = std::make_shared<rclcpp::Node>("joint_state_publisher");
-
-  // Retrieve the namespace used to publish the joint states
   if (_sdf->HasElement("robotNamespace"))
-  {
-    this->robotNamespace = _sdf->Get<std::string>("robotNamespace");
-  }
+    robotNamespace = _sdf->Get<std::string>("robotNamespace");
   else
+    robotNamespace = _ecm.ComponentData<gz::sim::components::Name>(_entity)
+      .value_or("robot");
+
+  if (robotNamespace[0] != '/')
+    robotNamespace = "/" + robotNamespace;
+
+  node = std::make_shared<rclcpp::Node>("joint_state_publisher",
+    robotNamespace.substr(1)); // strip leading slash for node namespace
+
+  gzmsg << "JointStatePublisher::robotNamespace=" << robotNamespace << std::endl;
+
+  updateRate = _sdf->HasElement("updateRate") ?
+    _sdf->Get<double>("updateRate") : 50.0;
+
+  GZ_ASSERT(updateRate > 0, "Update rate must be positive");
+  updatePeriod = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+    std::chrono::duration<double>(1.0 / updateRate));
+
+  // Collect moving joints
+  movingJoints.clear();
+  model.ForEachJoint(_ecm, [&](const gz::sim::Entity &jointEntity) -> bool
   {
-    this->robotNamespace = "/" + this->robotNamespace;
-  }
+    auto jointType = _ecm.Component<gz::sim::components::JointType>(jointEntity);
+    if (jointType && jointType->Data() == sdf::JointType::FIXED)
+      return true;
 
-  if (this->robotNamespace[0] != '/')
-  {
-    this->robotNamespace = "/" + this->robotNamespace;
-  }
-
-  gzmsg << "JointStatePublisher::robotNamespace=" << this->robotNamespace << std::endl;
-
-  if (_sdf->HasElement("updateRate"))
-  {
-    this->updateRate = _sdf->Get<double>("updateRate");
-  }
-  else
-  {
-    this->updateRate = 50.0;
-  }
-
-  gzmsg << "JointStatePublisher::Retrieving moving joints:" << std::endl;
-  this->movingJoints.clear();
-  this->updatePeriod = 1.0 / this->updateRate;
-
-  // Get all joints from the model
-  auto jointEntities = _ecm.ChildrenByComponents(
-    this->modelEntity, gz::sim::components::Joint());
-
-  for (const auto &jointEntity : jointEntities)
-  {
-    auto jointNameComp = _ecm.Component<gz::sim::components::JointName>(jointEntity);
-    if (!jointNameComp)
+    auto axis = _ecm.Component<gz::sim::components::JointAxis>(jointEntity);
+    if (axis)
     {
-      continue;
+      double lower = axis->Data().Lower();
+      double upper = axis->Data().Upper();
+      if (lower == 0.0 && upper == 0.0)
+        return true;
     }
 
-    std::string jointName = jointNameComp->Data();
-
-    auto jointLowerLimitComp = _ecm.Component<gz::sim::components::JointLowerLimit>(jointEntity);
-    auto jointUpperLimitComp = _ecm.Component<gz::sim::components::JointUpperLimit>(jointEntity);
-
-    double lowerLimit = 0.0;
-    double upperLimit = 0.0;
-
-    if (jointLowerLimitComp)
+    auto name = _ecm.ComponentData<gz::sim::components::Name>(jointEntity);
+    if (name)
     {
-      lowerLimit = jointLowerLimitComp->Data()[0];
+      movingJoints.push_back(*name);
+      gzmsg << "\t- " << *name << std::endl;
+      // Enable position/velocity/effort components
+      _ecm.CreateComponent(jointEntity, gz::sim::components::JointPosition());
+      _ecm.CreateComponent(jointEntity, gz::sim::components::JointVelocity());
+      _ecm.CreateComponent(jointEntity, gz::sim::components::JointForce());
     }
-    if (jointUpperLimitComp)
-    {
-      upperLimit = jointUpperLimitComp->Data()[0];
-    }
-
-    if (lowerLimit == 0.0 && upperLimit == 0.0)
-    {
-      continue;
-    }
-
-    this->movingJoints.push_back(jointName);
-    gzmsg << "\t- " << jointName << std::endl;
-  }
-
-  GZ_ASSERT(this->updateRate > 0.0, "Update rate must be positive");
-
-  // Advertise the joint states topic
-  this->jointStatePub = this->node->create_publisher<sensor_msgs::msg::JointState>(
-    this->robotNamespace + "/joint_states", 1);
-
-  this->lastUpdate = this->node->get_clock()->now();
-}
-
-void JointStatePublisher::Update(const gz::sim::UpdateInfo &_info,
-                                 gz::sim::EntityComponentManager &_ecm)
-{
-  auto simTime = rclcpp::Time(
-    static_cast<uint64_t>(_info.simTime.Double() * 1e9),
-    RCL_ROS_TIME);
-
-  if ((simTime - this->lastUpdate).seconds() >= this->updatePeriod)
-  {
-    this->PublishJointStates(_ecm);
-    this->lastUpdate = simTime;
-  }
-}
-
-void JointStatePublisher::PublishJointStates(const gz::sim::EntityComponentManager &_ecm)
-{
-  auto modelEntity = _ecm.Component<gz::sim::components::ModelName>(this->modelEntity);
-  if (!modelEntity)
-  {
-    return;
-  }
-
-  auto jointEntities = _ecm.ChildrenByComponents(
-    this->modelEntity, gz::sim::components::Joint());
-
-  sensor_msgs::msg::JointState jointState;
-
-  jointState.name.resize(jointEntities.size());
-  jointState.position.resize(jointEntities.size());
-  jointState.velocity.resize(jointEntities.size());
-  jointState.effort.resize(jointEntities.size());
-
-  int i = 0;
-  for (const auto &jointEntity : jointEntities)
-  {
-    auto jointNameComp = _ecm.Component<gz::sim::components::JointName>(jointEntity);
-    if (!jointNameComp)
-    {
-      continue;
-    }
-
-    std::string jointName = jointNameComp->Data();
-
-    if (!this->IsIgnoredJoint(jointName))
-    {
-      jointState.name[i] = jointName;
-
-      auto jointPosComp = _ecm.Component<gz::sim::components::JointPosition>(jointEntity);
-      auto jointVelComp = _ecm.Component<gz::sim::components::JointVelocity>(jointEntity);
-
-      if (jointPosComp)
-      {
-        jointState.position[i] = jointPosComp->Data()[0];
-      }
-      else
-      {
-        jointState.position[i] = 0.0;
-      }
-
-      if (jointVelComp)
-      {
-        jointState.velocity[i] = jointVelComp->Data()[0];
-      }
-      else
-      {
-        jointState.velocity[i] = 0.0;
-      }
-
-      jointState.effort[i] = 0.0;
-    }
-    else
-    {
-      jointState.name[i] = jointName;
-      jointState.position[i] = 0.0;
-      jointState.velocity[i] = 0.0;
-      jointState.effort[i] = 0.0;
-    }
-
-    ++i;
-  }
-
-  jointState.header.stamp = this->node->get_clock()->now();
-  this->jointStatePub->publish(jointState);
-}
-
-bool JointStatePublisher::IsIgnoredJoint(const std::string &_jointName)
-{
-  if (this->movingJoints.empty())
-  {
     return true;
-  }
+  });
 
-  for (const auto &joint : this->movingJoints)
+  jointStatePub = node->create_publisher<sensor_msgs::msg::JointState>(
+    robotNamespace + "/joint_states", 1);
+
+  lastUpdate = std::chrono::steady_clock::duration::zero();
+}
+
+/////////////////////////////////////////////////
+void JointStatePublisher::PostUpdate(
+  const gz::sim::UpdateInfo &_info,
+  const gz::sim::EntityComponentManager &_ecm)
+{
+  if (_info.simTime - lastUpdate >= updatePeriod)
   {
-    if (_jointName.compare(joint) == 0)
-    {
-      return false;
-    }
+    PublishJointStates(_info, _ecm);
+    lastUpdate = _info.simTime;
   }
+}
 
+/////////////////////////////////////////////////
+void JointStatePublisher::PublishJointStates(
+  const gz::sim::UpdateInfo &_info,
+  const gz::sim::EntityComponentManager &_ecm)
+{
+  sensor_msgs::msg::JointState msg;
+  msg.header.stamp = rclcpp::Time(_info.simTime.count());
+
+  model.ForEachJoint(_ecm, [&](const gz::sim::Entity &jointEntity) -> bool
+  {
+    auto nameComp = _ecm.ComponentData<gz::sim::components::Name>(jointEntity);
+    if (!nameComp) return true;
+    const std::string &jName = *nameComp;
+
+    double pos = 0.0, vel = 0.0, eff = 0.0;
+    if (!IsIgnoredJoint(jName))
+    {
+      auto posComp = _ecm.Component<gz::sim::components::JointPosition>(jointEntity);
+      auto velComp = _ecm.Component<gz::sim::components::JointVelocity>(jointEntity);
+      auto effComp = _ecm.Component<gz::sim::components::JointForce>(jointEntity);
+
+      if (posComp && !posComp->Data().empty()) pos = posComp->Data()[0];
+      if (velComp && !velComp->Data().empty()) vel = velComp->Data()[0];
+      if (effComp && !effComp->Data().empty()) eff = effComp->Data()[0];
+    }
+
+    msg.name.push_back(jName);
+    msg.position.push_back(pos);
+    msg.velocity.push_back(vel);
+    msg.effort.push_back(eff);
+    return true;
+  });
+
+  jointStatePub->publish(msg);
+}
+
+/////////////////////////////////////////////////
+bool JointStatePublisher::IsIgnoredJoint(const std::string &_jointName) const
+{
+  if (movingJoints.empty()) return true;
+  for (const auto &j : movingJoints)
+    if (_jointName == j) return false;
   return true;
 }
-}
+
+} // namespace uuv_simulator_ros
+
+GZ_ADD_PLUGIN(uuv_simulator_ros::JointStatePublisher,
+              gz::sim::System,
+              uuv_simulator_ros::JointStatePublisher::ISystemConfigure,
+              uuv_simulator_ros::JointStatePublisher::ISystemPostUpdate)

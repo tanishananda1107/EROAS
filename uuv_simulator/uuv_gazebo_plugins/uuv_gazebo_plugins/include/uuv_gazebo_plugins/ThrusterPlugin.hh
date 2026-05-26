@@ -1,138 +1,60 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+#ifndef UUV_GZ_THRUSTER_PLUGIN_HH_
+#define UUV_GZ_THRUSTER_PLUGIN_HH_
 
-/// \file ThrusterPlugin.hh
-/// \brief Model plugin for description of the thruster dynamics
-
-#ifndef __UUV_GAZEBO_PLUGINS_THRUSTER_PLUGIN_HH__
-#define __UUV_GAZEBO_PLUGINS_THRUSTER_PLUGIN_HH__
-
-#include <boost/scoped_ptr.hpp>
-
-#include <map>
-#include <string>
 #include <memory>
+#include <string>
 
-#include <gazebo/gazebo.hh>
-#include <gazebo/transport/TransportTypes.hh>
+#include <gz/sim/System.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/Entity.hh>
 
-#include <sdf/sdf.hh>
+#include <gz/math/Vector3.hh>
 
-#include <uuv_gazebo_plugins/ThrusterConversionFcn.hh>
-#include <uuv_gazebo_plugins/Dynamics.hh>
+#include "Dynamics.hh"
+#include "ThrusterConversionFcn.hh"
 
-#include "Double.pb.h"
-
-namespace gazebo
+namespace uuv_gz_plugins
 {
-/// \brief Definition of a pointer to the floating point message
-typedef const boost::shared_ptr<const uuv_gazebo_plugins_msgs::msgs::Double>
-ConstDoublePtr;
 
-/// \brief Class for the thruster plugin
-class ThrusterPlugin : public ModelPlugin
+class ThrusterPlugin :
+  public gz::sim::System,
+  public gz::sim::ISystemConfigure,
+  public gz::sim::ISystemPreUpdate
 {
-  /// \brief Constructor
-  public: ThrusterPlugin();
+public:
+  ThrusterPlugin() = default;
+  virtual ~ThrusterPlugin() = default;
 
-  /// \brief Destructor
-  public: virtual ~ThrusterPlugin();
+  void Configure(const gz::sim::Entity &_entity,
+                 const std::shared_ptr<const sdf::Element> &_sdf,
+                 gz::sim::EntityComponentManager &_ecm,
+                 gz::sim::EventManager &) override;
 
-  // Documentation inherited.
-  public: virtual void Load(physics::ModelPtr _model,
-                            sdf::ElementPtr _sdf);
+  void PreUpdate(const gz::sim::UpdateInfo &_info,
+                 gz::sim::EntityComponentManager &_ecm) override;
 
-  // Documentation inherited.
-  public: virtual void Init();
+protected:
+  void UpdateInput(double _cmd);
 
-  /// \brief Custom plugin reset behavior.
-  public: virtual void Reset();
+protected:
+  gz::sim::Entity modelEntity;
+  gz::sim::Entity linkEntity;
 
-  /// \brief Update the simulation state.
-  /// \param[in] _info Information used in the update event.
-  public: void Update(const common::UpdateInfo &_info);
+  std::shared_ptr<Dynamics> thrusterDynamics;
+  std::shared_ptr<ConversionFunction> conversionFunction;
 
-  /// \brief Callback for the input topic subscriber
-  protected: void UpdateInput(ConstDoublePtr &_msg);
+  double inputCommand{0.0};
+  double thrustForce{0.0};
 
-  /// \brief Thruster dynamic model
-  protected: std::shared_ptr<Dynamics> thrusterDynamics;
+  double clampMin{-1.0};
+  double clampMax{1.0};
 
-  /// \brief Thruster conversion function
-  protected: std::shared_ptr<ConversionFunction> conversionFunction;
+  double thrustMin{-10.0};
+  double thrustMax{10.0};
 
-  /// \brief Update event
-  protected: event::ConnectionPtr updateConnection;
-
-  /// \brief Pointer to the thruster link
-  protected: physics::LinkPtr thrusterLink;
-
-  /// \brief Gazebo node
-  protected: transport::NodePtr node;
-
-  /// \brief Subscriber to the reference signal topic.
-  protected: transport::SubscriberPtr commandSubscriber;
-
-  /// \brief Publisher to the output thrust topic
-  protected: transport::PublisherPtr thrustTopicPublisher;
-
-  /// \brief Input command, typically desired angular velocity of the
-  ///        rotor.
-  protected: double inputCommand;
-
-  /// \brief Latest thrust force in [N]
-  protected: double thrustForce;
-
-  /// \brief Time stamp of latest thrust force
-  protected: common::Time thrustForceStamp;
-
-  /// \brief Optional: The rotor joint, used for visualization
-  protected: physics::JointPtr joint;
-
-  /// \brief: Optional: Commands less than this value will be clamped.
-  protected: double clampMin;
-
-  /// \brief: Optional: Commands greater than this value will be clamped.
-  protected: double clampMax;
-
-  /// \brief: Optional: Minimum thrust force output
-  protected: double thrustMin;
-
-  /// \brief: Optional: Maximum thrust force output
-  protected: double thrustMax;
-
-  /// \brief Thruster ID, used to generated topic names automatically
-  protected: int thrusterID;
-
-  /// \brief Thruster topics prefix
-  protected: std::string topicPrefix;
-
-  /// \brief: Optional: Gain factor: Desired angular velocity = command * gain
-  protected: double gain;
-
-  /// \brief Optional: Flag to indicate if the thruster is turned on or off
-  protected: bool isOn;
-
-  /// \brief Optional: Output thrust efficiency factor of the thruster
-  protected: double thrustEfficiency;
-
-  /// \brief Optional: Propeller angular velocity efficiency term
-  protected: double propellerEfficiency;
-
-  /// \brief The axis about which the thruster rotates
-  protected: ignition::math::Vector3d thrusterAxis;
+  bool isOn{true};
 };
-}
-#endif  // __UUV_GAZEBO_PLUGINS_THRUSTER_PLUGIN_HH__
+
+} // namespace uuv_gz_plugins
+
+#endif

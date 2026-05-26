@@ -1,357 +1,277 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0.
 
 #include <uuv_gazebo_ros_plugins/ThrusterROSPlugin.hh>
-
-#include <string>
-
-#include <gazebo/physics/Base.hh>
-#include <gazebo/physics/Link.hh>
-#include <gazebo/physics/Model.hh>
-#include <gazebo/physics/World.hh>
-
-#include <uuv_gazebo_ros_plugins_msgs/FloatStamped.h>
+#include <gz/plugin/Register.hh>
 
 namespace uuv_simulator_ros
 {
+
 /////////////////////////////////////////////////
 ThrusterROSPlugin::ThrusterROSPlugin()
 {
-  this->rosPublishPeriod = gazebo::common::Time(0.05);
-  this->lastRosPublishTime = gazebo::common::Time(0.0);
+  rosPublishPeriod = std::chrono::milliseconds(50);
+  lastRosPublishTime = std::chrono::steady_clock::now();
 }
 
 /////////////////////////////////////////////////
-ThrusterROSPlugin::~ThrusterROSPlugin()
-{
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->rosPublishConnection.reset();
-#else
-  gazebo::event::Events::DisconnectWorldUpdateBegin(
-    this->rosPublishConnection);
-#endif
-
-  this->rosNode->shutdown();
-}
+ThrusterROSPlugin::~ThrusterROSPlugin() = default;
 
 /////////////////////////////////////////////////
 void ThrusterROSPlugin::SetThrustReference(
-    const uuv_gazebo_ros_plugins_msgs::FloatStamped::ConstPtr &_msg)
+  const uuv_gazebo_ros_plugins_msgs::msg::FloatStamped::SharedPtr &_msg)
 {
   if (std::isnan(_msg->data))
   {
-    ROS_WARN("ThrusterROSPlugin: Ignoring nan command");
+    RCLCPP_WARN(rosNode->get_logger(), "ThrusterROSPlugin: Ignoring nan command");
     return;
   }
-
   this->inputCommand = _msg->data;
 }
 
 /////////////////////////////////////////////////
-gazebo::common::Time ThrusterROSPlugin::GetRosPublishPeriod()
+std::chrono::nanoseconds ThrusterROSPlugin::GetRosPublishPeriod()
 {
-  return this->rosPublishPeriod;
+  return rosPublishPeriod;
 }
 
 /////////////////////////////////////////////////
 void ThrusterROSPlugin::SetRosPublishRate(double _hz)
 {
-  if (_hz > 0.0)
-    this->rosPublishPeriod = 1.0 / _hz;
-  else
-    this->rosPublishPeriod = 0.;
+  rosPublishPeriod = (_hz > 0.0) ?
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::duration<double>(1.0 / _hz)) :
+    std::chrono::nanoseconds(0);
 }
 
 /////////////////////////////////////////////////
-void ThrusterROSPlugin::Init()
-{
-  ThrusterPlugin::Init();
-}
+void ThrusterROSPlugin::Init()  { ThrusterPlugin::Init(); }
+void ThrusterROSPlugin::Reset() { lastRosPublishTime = std::chrono::steady_clock::now(); }
 
 /////////////////////////////////////////////////
-void ThrusterROSPlugin::Reset()
-{
-  this->lastRosPublishTime.Set(0, 0);
-}
-
-/////////////////////////////////////////////////
-void ThrusterROSPlugin::Load(gazebo::physics::ModelPtr _parent,
-                             sdf::ElementPtr _sdf)
+void ThrusterROSPlugin::Load(gz::sim::EntityComponentManager &_ecm,
+                             const std::shared_ptr<const sdf::Element> &_sdf)
 {
   try {
-    ThrusterPlugin::Load(_parent, _sdf);
-  } catch(gazebo::common::Exception &_e)
-  {
-    gzerr << "Error loading plugin."
-          << "Please ensure that your model is correct."
-          << '\n';
+    ThrusterPlugin::Load(_ecm, _sdf);
+  } catch (const std::exception &e) {
+    gzerr << "Error loading ThrusterPlugin: " << e.what() << "\n";
     return;
   }
 
-  if (!ros::isInitialized())
-  {
-    gzerr << "Not loading plugin since ROS has not been "
-          << "properly initialized.  Try starting gazebo with ros plugin:\n"
-          << "  gazebo -s libgazebo_ros_api_plugin.so\n";
-    return;
-  }
+  if (!rclcpp::ok())
+    rclcpp::init(0, nullptr);
 
-  this->rosNode.reset(new ros::NodeHandle(""));
+  rosNode = std::make_shared<rclcpp::Node>(
+    "thruster_ros_plugin_" + std::to_string(this->thrusterID));
 
-  this->services["set_thrust_force_efficiency"] =
-    this->rosNode->advertiseService(
+  auto mkSrv = [&](auto srvName, auto handler) {
+    services[srvName] = rosNode->create_service
+      std::remove_pointer_t<decltype(handler)>>(
+        this->topicPrefix + srvName, handler);
+  };
+
+  services["set_thrust_force_efficiency"] = rosNode->create_service
+    uuv_gazebo_ros_plugins_msgs::srv::SetThrusterEfficiency>(
       this->topicPrefix + "set_thrust_force_efficiency",
-      &ThrusterROSPlugin::SetThrustForceEfficiency, this);
+      [this](auto req, auto res){ SetThrustForceEfficiency(req, res); });
 
-  this->services["get_thrust_force_efficiency"] =
-    this->rosNode->advertiseService(
+  services["get_thrust_force_efficiency"] = rosNode->create_service
+    uuv_gazebo_ros_plugins_msgs::srv::GetThrusterEfficiency>(
       this->topicPrefix + "get_thrust_force_efficiency",
-      &ThrusterROSPlugin::GetThrustForceEfficiency, this);
+      [this](auto req, auto res){ GetThrustForceEfficiency(req, res); });
 
-  this->services["set_dynamic_state_efficiency"] =
-    this->rosNode->advertiseService(
+  services["set_dynamic_state_efficiency"] = rosNode->create_service
+    uuv_gazebo_ros_plugins_msgs::srv::SetThrusterEfficiency>(
       this->topicPrefix + "set_dynamic_state_efficiency",
-      &ThrusterROSPlugin::SetDynamicStateEfficiency, this);
+      [this](auto req, auto res){ SetDynamicStateEfficiency(req, res); });
 
-  this->services["get_dynamic_state_efficiency"] =
-    this->rosNode->advertiseService(
+  services["get_dynamic_state_efficiency"] = rosNode->create_service
+    uuv_gazebo_ros_plugins_msgs::srv::GetThrusterEfficiency>(
       this->topicPrefix + "get_dynamic_state_efficiency",
-      &ThrusterROSPlugin::GetDynamicStateEfficiency, this);
+      [this](auto req, auto res){ GetDynamicStateEfficiency(req, res); });
 
-  this->services["set_thruster_state"] =
-    this->rosNode->advertiseService(
+  services["set_thruster_state"] = rosNode->create_service
+    uuv_gazebo_ros_plugins_msgs::srv::SetThrusterState>(
       this->topicPrefix + "set_thruster_state",
-      &ThrusterROSPlugin::SetThrusterState, this);
+      [this](auto req, auto res){ SetThrusterState(req, res); });
 
-  this->services["get_thruster_state"] =
-    this->rosNode->advertiseService(
+  services["get_thruster_state"] = rosNode->create_service
+    uuv_gazebo_ros_plugins_msgs::srv::GetThrusterState>(
       this->topicPrefix + "get_thruster_state",
-      &ThrusterROSPlugin::GetThrusterState, this);
+      [this](auto req, auto res){ GetThrusterState(req, res); });
 
-  this->services["get_thruster_conversion_fcn"] =
-    this->rosNode->advertiseService(
+  services["get_thruster_conversion_fcn"] = rosNode->create_service
+    uuv_gazebo_ros_plugins_msgs::srv::GetThrusterConversionFcn>(
       this->topicPrefix + "get_thruster_conversion_fcn",
-      &ThrusterROSPlugin::GetThrusterConversionFcn, this);
+      [this](auto req, auto res){ GetThrusterConversionFcn(req, res); });
 
-  this->subThrustReference = this->rosNode->subscribe<
-    uuv_gazebo_ros_plugins_msgs::FloatStamped
-    >(this->commandSubscriber->GetTopic(), 10,
-      boost::bind(&ThrusterROSPlugin::SetThrustReference, this, _1));
+  subThrustReference =
+    rosNode->create_subscription<uuv_gazebo_ros_plugins_msgs::msg::FloatStamped>(
+      this->commandTopic, 10,
+      [this](const uuv_gazebo_ros_plugins_msgs::msg::FloatStamped::SharedPtr msg) {
+        SetThrustReference(msg);
+      });
 
-  this->pubThrust = this->rosNode->advertise<
-    uuv_gazebo_ros_plugins_msgs::FloatStamped
-    >(this->thrustTopicPublisher->GetTopic(), 10);
+  pubThrust = rosNode->create_publisher
+    uuv_gazebo_ros_plugins_msgs::msg::FloatStamped>(this->thrustTopic, 10);
 
-  this->pubThrustWrench =
-    this->rosNode->advertise<geometry_msgs::WrenchStamped>(
-      this->thrustTopicPublisher->GetTopic() + "_wrench", 10);
+  pubThrustWrench = rosNode->create_publisher
+    geometry_msgs::msg::WrenchStamped>(this->thrustTopic + "_wrench", 10);
 
-  this->pubThrusterState = this->rosNode->advertise<std_msgs::Bool>(
+  pubThrusterState = rosNode->create_publisher<std_msgs::msg::Bool>(
     this->topicPrefix + "is_on", 1);
 
-  this->pubThrustForceEff = this->rosNode->advertise<std_msgs::Float64>(
+  pubThrustForceEff = rosNode->create_publisher<std_msgs::msg::Float64>(
     this->topicPrefix + "thrust_efficiency", 1);
 
-  this->pubDynamicStateEff = this->rosNode->advertise<std_msgs::Float64>(
+  pubDynamicStateEff = rosNode->create_publisher<std_msgs::msg::Float64>(
     this->topicPrefix + "dynamic_state_efficiency", 1);
 
-  gzmsg << "Thruster #" << this->thrusterID << " initialized" << std::endl
-    << "\t- Link: " << this->thrusterLink->GetName() << std::endl
-    << "\t- Robot model: " << _parent->GetName() << std::endl
-    << "\t- Input command topic: " <<
-      this->commandSubscriber->GetTopic() << std::endl
-    << "\t- Thrust output topic: " <<
-      this->thrustTopicPublisher->GetTopic() << std::endl;
-
-  this->rosPublishConnection = gazebo::event::Events::ConnectWorldUpdateBegin(
-    boost::bind(&ThrusterROSPlugin::RosPublishStates, this));
+  gzmsg << "Thruster #" << this->thrusterID << " initialized\n"
+        << "\t- Input command topic: " << this->commandTopic << "\n"
+        << "\t- Thrust output topic: " << this->thrustTopic << std::endl;
 }
 
 /////////////////////////////////////////////////
 void ThrusterROSPlugin::RosPublishStates()
 {
-  // Limit publish rate according to publish period
-  if (this->thrustForceStamp - this->lastRosPublishTime >=
-      this->rosPublishPeriod)
-  {
-    this->lastRosPublishTime = this->thrustForceStamp;
+  auto now = std::chrono::steady_clock::now();
+  if (now - lastRosPublishTime < rosPublishPeriod)
+    return;
+  lastRosPublishTime = now;
 
-    // Publish the thrust force magnitude
-    uuv_gazebo_ros_plugins_msgs::FloatStamped thrustMsg;
-    thrustMsg.header.stamp = ros::Time().now();
-    thrustMsg.header.frame_id = this->thrusterLink->GetName();
-    thrustMsg.data = this->thrustForce;
-    this->pubThrust.publish(thrustMsg);
+  rclcpp::Time stamp = rosNode->now();
 
-    // Publish the thrust force vector wrt the thruster frame
-    geometry_msgs::WrenchStamped thrustWrenchMsg;
-    thrustWrenchMsg.header.stamp = ros::Time().now();
-    thrustWrenchMsg.header.frame_id = this->thrusterLink->GetName();
-    ignition::math::Vector3d thrustVector = this->thrustForce * this->thrusterAxis;
-    thrustWrenchMsg.wrench.force.x = thrustVector.X();
-    thrustWrenchMsg.wrench.force.y = thrustVector.Y();
-    thrustWrenchMsg.wrench.force.z = thrustVector.Z();
-    this->pubThrustWrench.publish(thrustWrenchMsg);
+  uuv_gazebo_ros_plugins_msgs::msg::FloatStamped thrustMsg;
+  thrustMsg.header.stamp = stamp;
+  thrustMsg.header.frame_id = this->linkName;
+  thrustMsg.data = this->thrustForce;
+  pubThrust->publish(thrustMsg);
 
-    // Publish the thruster current state (ON or OFF)
-    std_msgs::Bool isOnMsg;
-    isOnMsg.data = this->isOn;
-    this->pubThrusterState.publish(isOnMsg);
+  geometry_msgs::msg::WrenchStamped wrenchMsg;
+  wrenchMsg.header.stamp = stamp;
+  wrenchMsg.header.frame_id = this->linkName;
+  gz::math::Vector3d tv = this->thrustForce * this->thrusterAxis;
+  wrenchMsg.wrench.force.x = tv.X();
+  wrenchMsg.wrench.force.y = tv.Y();
+  wrenchMsg.wrench.force.z = tv.Z();
+  pubThrustWrench->publish(wrenchMsg);
 
-    // Publish thrust output efficiency
-    std_msgs::Float64 thrustEffMsg;
-    thrustEffMsg.data = this->thrustEfficiency;
-    this->pubThrustForceEff.publish(thrustEffMsg);
+  std_msgs::msg::Bool isOnMsg;
+  isOnMsg.data = this->isOn;
+  pubThrusterState->publish(isOnMsg);
 
-    // Publish dynamic state efficiency
-    std_msgs::Float64 dynStateEffMsg;
-    dynStateEffMsg.data = this->propellerEfficiency;
-    this->pubDynamicStateEff.publish(dynStateEffMsg);
-  }
+  std_msgs::msg::Float64 effMsg;
+  effMsg.data = this->thrustEfficiency;
+  pubThrustForceEff->publish(effMsg);
+
+  std_msgs::msg::Float64 dynMsg;
+  dynMsg.data = this->propellerEfficiency;
+  pubDynamicStateEff->publish(dynMsg);
 }
 
 /////////////////////////////////////////////////
 bool ThrusterROSPlugin::SetThrustForceEfficiency(
-  uuv_gazebo_ros_plugins_msgs::SetThrusterEfficiency::Request& _req,
-  uuv_gazebo_ros_plugins_msgs::SetThrusterEfficiency::Response& _res)
+  uuv_gazebo_ros_plugins_msgs::srv::SetThrusterEfficiency::Request::SharedPtr _req,
+  uuv_gazebo_ros_plugins_msgs::srv::SetThrusterEfficiency::Response::SharedPtr _res)
 {
-  if (_req.efficiency < 0.0 || _req.efficiency > 1.0)
-  {
-    _res.success = false;
-  }
+  if (_req->efficiency < 0.0 || _req->efficiency > 1.0)
+    _res->success = false;
   else
   {
-    this->thrustEfficiency = _req.efficiency;
-    _res.success = true;
-    gzmsg << "Setting thrust efficiency at thruster " <<
-      this->thrusterLink->GetName() << "=" << _req.efficiency  * 100
-      << "%" << std::endl;
+    this->thrustEfficiency = _req->efficiency;
+    _res->success = true;
+    gzmsg << "Setting thrust efficiency=" << _req->efficiency * 100 << "%\n";
   }
   return true;
 }
 
-/////////////////////////////////////////////////
 bool ThrusterROSPlugin::GetThrustForceEfficiency(
-  uuv_gazebo_ros_plugins_msgs::GetThrusterEfficiency::Request& _req,
-  uuv_gazebo_ros_plugins_msgs::GetThrusterEfficiency::Response& _res)
+  uuv_gazebo_ros_plugins_msgs::srv::GetThrusterEfficiency::Request::SharedPtr,
+  uuv_gazebo_ros_plugins_msgs::srv::GetThrusterEfficiency::Response::SharedPtr _res)
 {
-  _res.efficiency = this->thrustEfficiency;
+  _res->efficiency = this->thrustEfficiency;
   return true;
 }
 
-/////////////////////////////////////////////////
 bool ThrusterROSPlugin::SetDynamicStateEfficiency(
-  uuv_gazebo_ros_plugins_msgs::SetThrusterEfficiency::Request& _req,
-  uuv_gazebo_ros_plugins_msgs::SetThrusterEfficiency::Response& _res)
+  uuv_gazebo_ros_plugins_msgs::srv::SetThrusterEfficiency::Request::SharedPtr _req,
+  uuv_gazebo_ros_plugins_msgs::srv::SetThrusterEfficiency::Response::SharedPtr _res)
 {
-  if (_req.efficiency < 0.0 || _req.efficiency > 1.0)
-  {
-    _res.success = false;
-  }
+  if (_req->efficiency < 0.0 || _req->efficiency > 1.0)
+    _res->success = false;
   else
   {
-    this->propellerEfficiency = _req.efficiency;
-    _res.success = true;
-    gzmsg << "Setting propeller efficiency at thruster " <<
-      this->thrusterLink->GetName() << "=" << _req.efficiency * 100
-      << "%" << std::endl;
+    this->propellerEfficiency = _req->efficiency;
+    _res->success = true;
+    gzmsg << "Setting propeller efficiency=" << _req->efficiency * 100 << "%\n";
   }
   return true;
 }
 
-/////////////////////////////////////////////////
 bool ThrusterROSPlugin::GetDynamicStateEfficiency(
-  uuv_gazebo_ros_plugins_msgs::GetThrusterEfficiency::Request& _req,
-  uuv_gazebo_ros_plugins_msgs::GetThrusterEfficiency::Response& _res)
+  uuv_gazebo_ros_plugins_msgs::srv::GetThrusterEfficiency::Request::SharedPtr,
+  uuv_gazebo_ros_plugins_msgs::srv::GetThrusterEfficiency::Response::SharedPtr _res)
 {
-  _res.efficiency = this->propellerEfficiency;
+  _res->efficiency = this->propellerEfficiency;
   return true;
 }
 
-/////////////////////////////////////////////////
 bool ThrusterROSPlugin::SetThrusterState(
-  uuv_gazebo_ros_plugins_msgs::SetThrusterState::Request& _req,
-  uuv_gazebo_ros_plugins_msgs::SetThrusterState::Response& _res)
+  uuv_gazebo_ros_plugins_msgs::srv::SetThrusterState::Request::SharedPtr _req,
+  uuv_gazebo_ros_plugins_msgs::srv::SetThrusterState::Response::SharedPtr _res)
 {
-  this->isOn = _req.on;
-  gzmsg << "Turning thruster " << this->thrusterLink->GetName() << " " <<
-    (this->isOn ? "ON" : "OFF") << std::endl;
-  _res.success = true;
+  this->isOn = _req->on;
+  gzmsg << "Thruster " << (this->isOn ? "ON" : "OFF") << "\n";
+  _res->success = true;
   return true;
 }
 
-/////////////////////////////////////////////////
 bool ThrusterROSPlugin::GetThrusterState(
-  uuv_gazebo_ros_plugins_msgs::GetThrusterState::Request& _req,
-  uuv_gazebo_ros_plugins_msgs::GetThrusterState::Response& _res)
+  uuv_gazebo_ros_plugins_msgs::srv::GetThrusterState::Request::SharedPtr,
+  uuv_gazebo_ros_plugins_msgs::srv::GetThrusterState::Response::SharedPtr _res)
 {
-  _res.is_on = this->isOn;
+  _res->is_on = this->isOn;
   return true;
 }
 
-/////////////////////////////////////////////////
 bool ThrusterROSPlugin::GetThrusterConversionFcn(
-  uuv_gazebo_ros_plugins_msgs::GetThrusterConversionFcn::Request& _req,
-  uuv_gazebo_ros_plugins_msgs::GetThrusterConversionFcn::Response& _res)
+  uuv_gazebo_ros_plugins_msgs::srv::GetThrusterConversionFcn::Request::SharedPtr,
+  uuv_gazebo_ros_plugins_msgs::srv::GetThrusterConversionFcn::Response::SharedPtr _res)
 {
-  _res.fcn.function_name = this->conversionFunction->GetType();
-
+  _res->fcn.function_name = this->conversionFunction->GetType();
   double param;
 
-  if (!_res.fcn.function_name.compare("Basic"))
+  if (_res->fcn.function_name == "Basic")
   {
-    gzmsg << "ThrusterROSPlugin::GetThrusterConversionFcn::Basic" << std::endl;
-    _res.fcn.tags.push_back("rotor_constant");
+    _res->fcn.tags.push_back("rotor_constant");
     this->conversionFunction->GetParam("rotor_constant", param);
-    _res.fcn.data.push_back(param);
+    _res->fcn.data.push_back(param);
   }
-  else if (!_res.fcn.function_name.compare("Bessa"))
+  else if (_res->fcn.function_name == "Bessa")
   {
-    gzmsg << "ThrusterROSPlugin::GetThrusterConversionFcn::Bessa" << std::endl;
-    _res.fcn.tags.push_back("rotor_constant_l");
-    this->conversionFunction->GetParam("rotor_constant_l", param);
-    _res.fcn.data.push_back(param);
-
-    _res.fcn.tags.push_back("rotor_constant_r");
-    this->conversionFunction->GetParam("rotor_constant_r", param);
-    _res.fcn.data.push_back(param);
-
-    _res.fcn.tags.push_back("delta_l");
-    this->conversionFunction->GetParam("delta_l", param);
-    _res.fcn.data.push_back(param);
-
-    _res.fcn.tags.push_back("delta_r");
-    this->conversionFunction->GetParam("delta_r", param);
-    _res.fcn.data.push_back(param);
-  }
-  else if (!_res.fcn.function_name.compare("LinearInterp"))
-  {
-    gzmsg << "ThrusterROSPlugin::GetThrusterConversionFcn::LinearInterp" << std::endl;
-    std::map<double, double> table = this->conversionFunction->GetTable();
-
-    for (auto& item : table)
+    for (const auto &tag : {"rotor_constant_l","rotor_constant_r","delta_l","delta_r"})
     {
-      gzmsg << item.first << " " << item.second << std::endl;
-      _res.fcn.lookup_table_input.push_back(item.first);
-      _res.fcn.lookup_table_output.push_back(item.second);
+      _res->fcn.tags.push_back(tag);
+      this->conversionFunction->GetParam(tag, param);
+      _res->fcn.data.push_back(param);
     }
   }
-
+  else if (_res->fcn.function_name == "LinearInterp")
+  {
+    for (auto &item : this->conversionFunction->GetTable())
+    {
+      _res->fcn.lookup_table_input.push_back(item.first);
+      _res->fcn.lookup_table_output.push_back(item.second);
+    }
+  }
   return true;
 }
 
-/////////////////////////////////////////////////
-GZ_REGISTER_MODEL_PLUGIN(ThrusterROSPlugin)
-}
+} // namespace uuv_simulator_ros
+
+GZ_ADD_PLUGIN(uuv_simulator_ros::ThrusterROSPlugin,
+              gz::sim::System,
+              uuv_simulator_ros::ThrusterROSPlugin::ISystemConfigure,
+              uuv_simulator_ros::ThrusterROSPlugin::ISystemUpdate)

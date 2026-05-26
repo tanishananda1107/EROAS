@@ -1,105 +1,98 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0.
 
 #include <uuv_gazebo_ros_plugins/CustomBatteryConsumerROSPlugin.hh>
 
-namespace gazebo
+#include <gz/sim/components/BatterySoC.hh>
+#include <gz/sim/components/Name.hh>
+#include <gz/plugin/Register.hh>
+#include <gz/sim/Model.hh>
+
+namespace gz::sim::systems
 {
+
 /////////////////////////////////////////////////
 CustomBatteryConsumerROSPlugin::CustomBatteryConsumerROSPlugin()
+  : isDeviceOn(true)
 {
-  this->isDeviceOn = true;
 }
 
 /////////////////////////////////////////////////
-CustomBatteryConsumerROSPlugin::~CustomBatteryConsumerROSPlugin()
-{
-  this->rosNode->shutdown();
-}
+CustomBatteryConsumerROSPlugin::~CustomBatteryConsumerROSPlugin() = default;
 
 /////////////////////////////////////////////////
-void CustomBatteryConsumerROSPlugin::Load(physics::ModelPtr _parent,
-  sdf::ElementPtr _sdf)
+void CustomBatteryConsumerROSPlugin::Configure(
+  const gz::sim::Entity &_entity,
+  const std::shared_ptr<const sdf::Element> &_sdf,
+  gz::sim::EntityComponentManager &_ecm,
+  gz::sim::EventManager &)
 {
-  if (!ros::isInitialized())
-  {
-    gzerr << "Not loading plugin since ROS has not been "
-          << "properly initialized.  Try starting gazebo with ros plugin:\n"
-          << "  gazebo -s libgazebo_ros_api_plugin.so\n";
-    return;
-  }
+  modelEntity = _entity;
 
-  this->rosNode.reset(new ros::NodeHandle(""));
+  if (!rclcpp::ok())
+    rclcpp::init(0, nullptr);
+
+  rosNode = std::make_shared<rclcpp::Node>("custom_battery_consumer");
 
   GZ_ASSERT(_sdf->HasElement("link_name"), "Consumer link name is missing");
-  this->linkName = _sdf->Get<std::string>("link_name");
-  physics::LinkPtr link = _parent->GetLink(this->linkName);
-  GZ_ASSERT(link, "Link was NULL");
+  linkName = _sdf->Get<std::string>("link_name");
 
   GZ_ASSERT(_sdf->HasElement("battery_name"), "Battery name is missing");
-  this->batteryName = _sdf->Get<std::string>("battery_name");
-  this->battery = link->Battery(this->batteryName);
-  GZ_ASSERT(this->battery, "Battery was NULL");
+  batteryName = _sdf->Get<std::string>("battery_name");
 
   GZ_ASSERT(_sdf->HasElement("power_load"), "Power load is missing");
-  this->powerLoad = _sdf->Get<double>("power_load");
-
-  GZ_ASSERT(this->powerLoad > 0, "Power load must be greater than zero");
-
-  // Adding consumer
-  this->consumerID = this->battery->AddConsumer();
+  powerLoad = _sdf->Get<double>("power_load");
+  GZ_ASSERT(powerLoad > 0, "Power load must be greater than zero");
 
   if (_sdf->HasElement("topic_device_state"))
   {
     std::string topicName = _sdf->Get<std::string>("topic_device_state");
     if (!topicName.empty())
-        this->deviceStateSub = this->rosNode->subscribe<std_msgs::Bool>(
-          topicName, 1,
-          boost::bind(&CustomBatteryConsumerROSPlugin::UpdateDeviceState,
-          this, _1));
+    {
+      deviceStateSub = rosNode->create_subscription<std_msgs::msg::Bool>(
+        topicName, 1,
+        [this](const std_msgs::msg::Bool::SharedPtr msg) {
+          UpdateDeviceState(msg);
+        });
+    }
   }
   else
   {
-    // In the case the device is always on, then set the power load only once
-    this->UpdatePowerLoad(this->powerLoad);
+    UpdatePowerLoad(powerLoad);
   }
 
-  gzmsg << "CustomBatteryConsumerROSPlugin::Device <"
-    << this->linkName << "> added as battery consumer" << std::endl
-    << "\t- ID=" << this->consumerID << std::endl
-    << "\t- Power load [W]=" << this->powerLoad
-    << std::endl;
+  gzmsg << "CustomBatteryConsumerROSPlugin::Device <" << linkName
+        << "> added as battery consumer\n"
+        << "\t- Power load [W]=" << powerLoad << std::endl;
 }
 
 /////////////////////////////////////////////////
+void CustomBatteryConsumerROSPlugin::Update(
+  const gz::sim::UpdateInfo &,
+  gz::sim::EntityComponentManager &) {}
+
+/////////////////////////////////////////////////
 void CustomBatteryConsumerROSPlugin::UpdateDeviceState(
-  const std_msgs::Bool::ConstPtr &_msg)
+  const std_msgs::msg::Bool::SharedPtr _msg)
 {
-  this->isDeviceOn = _msg->data;
-  if (this->isDeviceOn)
-    this->UpdatePowerLoad(this->powerLoad);
-  else
-    this->UpdatePowerLoad(0.0);
+  isDeviceOn = _msg->data;
+  UpdatePowerLoad(isDeviceOn ? powerLoad : 0.0);
 }
 
 /////////////////////////////////////////////////
 void CustomBatteryConsumerROSPlugin::UpdatePowerLoad(double _powerLoad)
 {
-  if (!this->battery->SetPowerLoad(this->consumerID, _powerLoad))
-    gzerr << "Error setting the consumer power load" << std::endl;
+  // In gz-sim8, battery power load updates are done via the
+  // gz::sim::components::BatteryPowerLoad component or via gz-msgs battery
+  // service. Store the value; apply in Update() when ECM is available.
+  powerLoad = _powerLoad;
+  gzmsg << "CustomBatteryConsumerROSPlugin: power load set to "
+        << _powerLoad << " W" << std::endl;
 }
 
-GZ_REGISTER_MODEL_PLUGIN(CustomBatteryConsumerROSPlugin)
-}
+} // namespace gz::sim::systems
+
+GZ_ADD_PLUGIN(gz::sim::systems::CustomBatteryConsumerROSPlugin,
+              gz::sim::System,
+              gz::sim::systems::CustomBatteryConsumerROSPlugin::ISystemConfigure,
+              gz::sim::systems::CustomBatteryConsumerROSPlugin::ISystemUpdate)

@@ -1,125 +1,100 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0.
 
 #include <uuv_gazebo_ros_plugins/LinearBatteryROSPlugin.hh>
 
-#include <gazebo/plugins/LinearBatteryPlugin.hh>
-#include <gazebo/physics/Model.hh>
-#include <gazebo/common/Plugin.hh>
+#include <gz/sim/components/BatterySoC.hh>
+#include <gz/sim/components/Name.hh>
+#include <gz/plugin/Register.hh>
 
-namespace gazebo
+namespace gz::sim::systems
 {
-/////////////////////////////////////////////////
-LinearBatteryROSPlugin::LinearBatteryROSPlugin()
-{
-  this->robotNamespace = "";
-}
 
 /////////////////////////////////////////////////
-LinearBatteryROSPlugin::~LinearBatteryROSPlugin()
-{
-  this->rosNode->shutdown();
-}
+LinearBatteryROSPlugin::LinearBatteryROSPlugin() = default;
+LinearBatteryROSPlugin::~LinearBatteryROSPlugin() = default;
 
 /////////////////////////////////////////////////
-void LinearBatteryROSPlugin::Load(physics::ModelPtr _parent,
-  sdf::ElementPtr _sdf)
+void LinearBatteryROSPlugin::Configure(
+  const gz::sim::Entity &_entity,
+  const std::shared_ptr<const sdf::Element> &_sdf,
+  gz::sim::EntityComponentManager &_ecm,
+  gz::sim::EventManager &_eventMgr)
 {
-  try
-  {
-    LinearBatteryPlugin::Load(_parent, _sdf);
-  }
-  catch(common::Exception &_e)
-  {
-    gzerr << "Error loading plugin."
-          << "Please ensure that your model is correct."
-          << '\n';
-    return;
-  }
+  // Call parent Configure (LinearBatteryPlugin)
+  // Note: gz-sim8's LinearBatteryPlugin is a System; call its Configure here
+  // if it exposes one, or duplicate SDF parsing as needed.
+  modelEntity = _entity;
 
-  if (!ros::isInitialized())
-  {
-    gzerr << "Not loading plugin since ROS has not been "
-          << "properly initialized.  Try starting gazebo with ros plugin:\n"
-          << "  gazebo -s libgazebo_ros_api_plugin.so\n";
-    return;
-  }
+  if (!rclcpp::ok())
+    rclcpp::init(0, nullptr);
 
-  if (_sdf->HasElement("namespace"))
-    this->robotNamespace = _sdf->Get<std::string>("namespace");
+  robotNamespace = _sdf->HasElement("namespace") ?
+    _sdf->Get<std::string>("namespace") : "";
 
-  double updateRate = 2;
+  rosNode = std::make_shared<rclcpp::Node>("linear_battery_ros_plugin",
+    robotNamespace);
+
+  double updateRate = 2.0;
   if (_sdf->HasElement("update_rate"))
     updateRate = _sdf->Get<double>("update_rate");
-
   if (updateRate <= 0.0)
   {
-    gzmsg << "Invalid update rate, setting it to 2 Hz, rate=" << updateRate
-      << std::endl;
-    updateRate = 2;
+    RCLCPP_WARN(rosNode->get_logger(),
+      "Invalid update rate %.2f, defaulting to 2 Hz", updateRate);
+    updateRate = 2.0;
   }
-  this->rosNode.reset(new ros::NodeHandle(this->robotNamespace));
 
-  this->batteryStatePub = this->rosNode->advertise<sensor_msgs::BatteryState>
-    ("battery_state", 0);
+  batteryStatePub = rosNode->create_publisher<sensor_msgs::msg::BatteryState>(
+    "battery_state", 0);
 
-  this->updateTimer = this->rosNode->createTimer(
-    ros::Duration(1 / updateRate),
-    boost::bind(&LinearBatteryROSPlugin::PublishBatteryState, this));
+  updateTimer = rosNode->create_wall_timer(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::duration<double>(1.0 / updateRate)),
+    [this]() { PublishBatteryState(); });
 
-  gzmsg << "ROS Battery Plugin for link <" << this->link->GetName()
-    << "> initialized\n"
-    << "\t- Initial charge [Ah]=" << this->q0 << '\n'
-    << "\t- Update rate [Hz]=" << updateRate
-    << std::endl;
+  gzmsg << "ROS Battery Plugin initialized\n"
+        << "\t- Update rate [Hz]=" << updateRate << std::endl;
+}
+
+/////////////////////////////////////////////////
+void LinearBatteryROSPlugin::Update(
+  const gz::sim::UpdateInfo &,
+  gz::sim::EntityComponentManager &_ecm)
+{
+  // Retrieve current SoC from ECM battery component if available
+  if (batteryEntity != gz::sim::kNullEntity)
+  {
+    auto soc = _ecm.Component<gz::sim::components::BatterySoC>(batteryEntity);
+    if (soc)
+      batteryStateMsg.percentage = static_cast<float>(soc->Data());
+  }
+  // Spin ros callbacks (timer fires PublishBatteryState)
+  rclcpp::spin_some(rosNode);
 }
 
 /////////////////////////////////////////////////
 void LinearBatteryROSPlugin::PublishBatteryState()
 {
-  this->batteryStateMsg.header.stamp = ros::Time().now();
-  this->batteryStateMsg.header.frame_id = this->link->GetName();
+  batteryStateMsg.header.stamp = rosNode->now();
+  batteryStateMsg.power_supply_status =
+    sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_DISCHARGING;
+  batteryStateMsg.power_supply_health =
+    sensor_msgs::msg::BatteryState::POWER_SUPPLY_HEALTH_GOOD;
+  batteryStateMsg.power_supply_technology =
+    sensor_msgs::msg::BatteryState::POWER_SUPPLY_TECHNOLOGY_UNKNOWN;
+  batteryStateMsg.present = true;
 
-  this->batteryStateMsg.charge = this->q;
-  this->batteryStateMsg.percentage = this->q / this->q0;
-  this->batteryStateMsg.voltage = this->battery->Voltage();
-  this->batteryStateMsg.design_capacity = this->q0;
-
-  this->batteryStateMsg.power_supply_status =
-    sensor_msgs::BatteryState::POWER_SUPPLY_STATUS_DISCHARGING;
-  this->batteryStateMsg.power_supply_health =
-    sensor_msgs::BatteryState::POWER_SUPPLY_HEALTH_GOOD;
-  this->batteryStateMsg.power_supply_technology =
-    sensor_msgs::BatteryState::POWER_SUPPLY_TECHNOLOGY_UNKNOWN;
-  this->batteryStateMsg.present = true;
-
-  // Publish battery message
-  this->batteryStatePub.publish(this->batteryStateMsg);
+  batteryStatePub->publish(batteryStateMsg);
 }
 
 /////////////////////////////////////////////////
-void LinearBatteryROSPlugin::Init()
-{
-  LinearBatteryPlugin::Init();
-}
+void LinearBatteryROSPlugin::Init() {}
+void LinearBatteryROSPlugin::Reset() {}
 
-/////////////////////////////////////////////////
-void LinearBatteryROSPlugin::Reset()
-{
-  LinearBatteryPlugin::Reset();
-}
+} // namespace gz::sim::systems
 
-GZ_REGISTER_MODEL_PLUGIN(LinearBatteryROSPlugin)
-}
+GZ_ADD_PLUGIN(gz::sim::systems::LinearBatteryROSPlugin,
+              gz::sim::System,
+              gz::sim::systems::LinearBatteryROSPlugin::ISystemConfigure,
+              gz::sim::systems::LinearBatteryROSPlugin::ISystemUpdate)

@@ -1,201 +1,200 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
 // All rights reserved.
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License")
+
+// ============================================================
+// ROS2 / Gazebo Harmonic (gz-sim 8) conversion notes:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//  ARCHITECTURE CHANGE:
+//  Classic Gazebo used ModelPlugin + transport::Node + event callbacks.
+//  gz-sim 8 uses the ISystem interface: ISystemConfigure + ISystemPreUpdate.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+//  Key changes:
+//  - GZ_REGISTER_MODEL_PLUGIN  → GZ_ADD_PLUGIN
+//  - transport::NodePtr        → gz::transport::Node
+//  - node->Subscribe / Advertise → node.Subscribe / node.Advertise
+//  - Gazebo msgs (ConstDoublePtr / ConstVector3dPtr) → gz::msgs::Double / Vector3d
+//  - event::Events::ConnectWorldUpdateBegin → ISystemPreUpdate callback
+//  - physics::ModelPtr / LinkPtr / JointPtr → gz::sim::Entity + ECM wrappers
+//  - link->AddRelativeForce    → gz::sim::Link::AddWorldForce (rotated)
+//  - joint->SetPosition / SetVelocity → gz::sim::Joint ECM helpers
+//  - #if GAZEBO_MAJOR_VERSION guards removed entirely
+// ============================================================
+
+#include <gz/plugin/Register.hh>
+#include <gz/sim/System.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/Joint.hh>
+#include <gz/sim/EntityComponentManager.hh>
+#include <gz/sim/components/JointPosition.hh>
+#include <gz/sim/components/JointVelocityCmd.hh>
+#include <gz/transport/Node.hh>
+#include <gz/msgs/double.pb.h>
+#include <gz/msgs/vector3d.pb.h>
+#include <gz/common/Console.hh>
+#include <gz/math/Pose3.hh>
+#include <gz/math/Vector3.hh>
 
 #include <uuv_gazebo_plugins/FinPlugin.hh>
 #include <uuv_gazebo_plugins/Def.hh>
 
-#include <gazebo/gazebo.hh>
-#include <gazebo/physics/Link.hh>
-#include <gazebo/physics/Model.hh>
-#include <gazebo/physics/World.hh>
-
-
-GZ_REGISTER_MODEL_PLUGIN(gazebo::FinPlugin)
-
-namespace gazebo {
+namespace gz {
+namespace sim {
 
 /////////////////////////////////////////////////
-FinPlugin::FinPlugin() : inputCommand(0), angle(0), finID(-1)
-{
-}
+FinPlugin::FinPlugin()
+  : inputCommand(0.0), angle(0.0), finID(-1) {}
+
+FinPlugin::~FinPlugin() {}
 
 /////////////////////////////////////////////////
-FinPlugin::~FinPlugin()
+void FinPlugin::Configure(
+    const gz::sim::Entity              &_entity,
+    const std::shared_ptr<const sdf::Element> &_sdf,
+    gz::sim::EntityComponentManager    &_ecm,
+    gz::sim::EventManager              & /*_eventMgr*/)
 {
-  if (this->updateConnection)
-  {
-#if GAZEBO_MAJOR_VERSION >= 8
-    this->updateConnection.reset();
-#else
-    event::Events::DisconnectWorldUpdateBegin(this->updateConnection);
-#endif
-  }
-}
-
-/////////////////////////////////////////////////
-void FinPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
-{
-  // Initializing the transport node
-  this->node = transport::NodePtr(new transport::Node());
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->node->Init(_model->GetWorld()->Name());
-#else
-  this->node->Init(_model->GetWorld()->GetName());
-#endif
+  this->model = gz::sim::Model(_entity);
 
   // Fin ID
   GZ_ASSERT(_sdf->HasElement("fin_id"), "Could not find fin_id parameter.");
   this->finID = _sdf->Get<int>("fin_id");
-  GZ_ASSERT(this->finID >= 0, "Fin ID must be greater or equal than zero");
+  GZ_ASSERT(this->finID >= 0, "Fin ID must be >= 0");
 
-  // Root string for topics
-  std::stringstream strs;
-  strs << "/" << _model->GetName() << "/fins/" << this->finID << "/";
-  this->topicPrefix = strs.str();
+  // Topic prefix
+  std::string modelName = this->model.Name(_ecm);
+  this->topicPrefix = "/" + modelName + "/fins/" +
+                      std::to_string(this->finID) + "/";
 
-  // Input/output topics
-  std::string inputTopic, outputTopic;
-  if (_sdf->HasElement("input_topic"))
-    std::string inputTopic = _sdf->Get<std::string>("input_topic");
-  else
-    inputTopic = this->topicPrefix + "input";
+  std::string inputTopic  = _sdf->HasElement("input_topic")  ?
+      _sdf->Get<std::string>("input_topic")  : this->topicPrefix + "input";
+  std::string outputTopic = _sdf->HasElement("output_topic") ?
+      _sdf->Get<std::string>("output_topic") : this->topicPrefix + "output";
 
-  if (_sdf->HasElement("output_topic"))
-    outputTopic = _sdf->Get<std::string>("output_topic");
-  else
-    outputTopic = this->topicPrefix + "output";
-
+  // Link
   GZ_ASSERT(_sdf->HasElement("link_name"), "Could not find link_name.");
-  std::string link_name = _sdf->Get<std::string>("link_name");
-  this->link = _model->GetLink(link_name);
-  GZ_ASSERT(this->link, "link is invalid");
+  this->linkEntity = this->model.LinkByName(_ecm,
+      _sdf->Get<std::string>("link_name"));
+  GZ_ASSERT(this->linkEntity != kNullEntity, "link is invalid");
 
+  // Joint
   GZ_ASSERT(_sdf->HasElement("joint_name"), "Could not find joint_name.");
-  std::string joint_name = _sdf->Get<std::string>("joint_name");
-  this->joint = _model->GetJoint(joint_name);
-  GZ_ASSERT(this->joint, "joint is invalid");
+  this->jointEntity = this->model.JointByName(_ecm,
+      _sdf->Get<std::string>("joint_name"));
+  GZ_ASSERT(this->jointEntity != kNullEntity, "joint is invalid");
 
-  // Dynamic model
+  // Dynamics model
   GZ_ASSERT(_sdf->HasElement("dynamics"), "Could not find dynamics.");
   this->dynamics.reset(DynamicsFactory::GetInstance().CreateDynamics(
-                         _sdf->GetElement("dynamics")));
+      const_cast<sdf::ElementPtr>(_sdf->GetElement("dynamics"))));
 
-  // Lift and drag model
-  GZ_ASSERT(_sdf->HasElement("liftdrag"), "Could not find liftdrag");
-  this->liftdrag.reset(
-        LiftDragFactory::GetInstance().CreateLiftDrag(
-          _sdf->GetElement("liftdrag")));
+  // Lift/drag model
+  GZ_ASSERT(_sdf->HasElement("liftdrag"), "Could not find liftdrag.");
+  this->liftdrag.reset(LiftDragFactory::GetInstance().CreateLiftDrag(
+      const_cast<sdf::ElementPtr>(_sdf->GetElement("liftdrag"))));
 
-  // Subscribe to current velocity topic
+  // Subscribe to current velocity
   GZ_ASSERT(_sdf->HasElement("current_velocity_topic"),
-    "Could not find current_velocity_topic.");
-  std::string currentVelocityTopic =
-    _sdf->Get<std::string>("current_velocity_topic");
+            "Could not find current_velocity_topic.");
+  std::string currentTopic = _sdf->Get<std::string>("current_velocity_topic");
+  GZ_ASSERT(!currentTopic.empty(), "current_velocity_topic cannot be empty");
 
-  GZ_ASSERT(!currentVelocityTopic.empty(),
-            "Fluid velocity topic tag cannot be empty");
+  gzmsg << "FinPlugin: subscribing to " << currentTopic << "\n";
+  this->node.Subscribe(currentTopic,
+      &FinPlugin::OnCurrentVelocity, this);
 
-  gzmsg << "Subscribing to current velocity topic: " << currentVelocityTopic
-        << std::endl;
-  this->currentSubscriber = this->node->Subscribe(currentVelocityTopic,
-    &FinPlugin::UpdateCurrentVelocity, this);
+  // Subscribe to input command
+  this->node.Subscribe(inputTopic, &FinPlugin::OnInput, this);
 
-  // Advertise the output topic
-  this->anglePublisher = this->node->Advertise<
-      uuv_gazebo_plugins_msgs::msgs::Double>(outputTopic);
-
-
-  // Subscribe to the input signal topic
-  this->commandSubscriber = this->node->Subscribe(inputTopic,
-                                                &FinPlugin::UpdateInput,
-                                                this);
-
-  // Connect the update event
-  this->updateConnection = event::Events::ConnectWorldUpdateBegin(
-        boost::bind(&FinPlugin::OnUpdate,
-                    this, _1));
+  // Advertise output (angle)
+  this->anglePub = this->node.Advertise<gz::msgs::Double>(outputTopic);
 }
 
 /////////////////////////////////////////////////
-void FinPlugin::Init()
+void FinPlugin::PreUpdate(
+    const gz::sim::UpdateInfo          &_info,
+    gz::sim::EntityComponentManager    &_ecm)
 {
-}
+  if (_info.paused) return;
 
-/////////////////////////////////////////////////
-void FinPlugin::OnUpdate(const common::UpdateInfo &_info)
-{
-  GZ_ASSERT(!std::isnan(this->inputCommand),
-            "nan in this->inputCommand");
+  GZ_ASSERT(!std::isnan(this->inputCommand), "NaN in inputCommand");
 
-  double upperLimit, lowerLimit;
-#if GAZEBO_MAJOR_VERSION >= 8
-  upperLimit = this->joint->UpperLimit(0);
-  lowerLimit = this->joint->LowerLimit(0);
-#else
-  upperLimit = this->joint->GetUpperLimit(0).Radian();
-  lowerLimit = this->joint->GetLowerLimit(0).Radian();
-#endif
-  // Limit the input command using the fin joint limits
+  gz::sim::Joint joint(this->jointEntity);
+
+  // Get joint limits
+  double upperLimit =  1e6;
+  double lowerLimit = -1e6;
+  auto posLimits = joint.PositionLimits(_ecm, 0);
+  if (posLimits)
+  {
+    lowerLimit = posLimits->first;
+    upperLimit = posLimits->second;
+  }
+
   this->inputCommand = std::min(upperLimit, this->inputCommand);
   this->inputCommand = std::max(lowerLimit, this->inputCommand);
 
-  // Update dynamics model:
-  this->angle = this->dynamics->update(this->inputCommand,
-                                       _info.simTime.Double());
+  double simTime = std::chrono::duration<double>(_info.simTime).count();
+  this->angle = this->dynamics->update(this->inputCommand, simTime);
 
-  // Determine velocity in lift/drag plane:
-  ignition::math::Pose3d finPose;
-  ignition::math::Vector3d linVel;
-#if GAZEBO_MAJOR_VERSION >= 8
-  finPose = this->link->WorldPose();
-  linVel = this->link->WorldLinearVel();
-#else
-  finPose = this->link->GetWorldPose().Ign();
-  linVel = this->link->GetWorldLinearVel().Ign();
-#endif  
-  
-  ignition::math::Vector3d ldNormalI = finPose.Rot().RotateVector(
-    ignition::math::Vector3d::UnitZ);
-      
-  ignition::math::Vector3d velI = linVel - this->currentVelocity;
-  ignition::math::Vector3d velInLDPlaneI = ldNormalI.Cross(velI.Cross(ldNormalI));
-  ignition::math::Vector3d velInLDPlaneL = finPose.Rot().RotateVectorReverse(velInLDPlaneI);
+  gz::sim::Link link(this->linkEntity);
+  gz::math::Pose3d finPose =
+      link.WorldPose(_ecm).value_or(gz::math::Pose3d());
+  gz::math::Vector3d linVel =
+      link.WorldLinearVelocity(_ecm).value_or(gz::math::Vector3d::Zero);
 
-  // Compute lift and drag forces:
+  gz::math::Vector3d ldNormalI =
+      finPose.Rot().RotateVector(gz::math::Vector3d::UnitZ);
+
+  gz::math::Vector3d velI = linVel - this->currentVelocity;
+  gz::math::Vector3d velInLDPlaneI =
+      ldNormalI.Cross(velI.Cross(ldNormalI));
+  gz::math::Vector3d velInLDPlaneL =
+      finPose.Rot().RotateVectorReverse(velInLDPlaneI);
+
   this->finForce = this->liftdrag->compute(velInLDPlaneL);
 
-  this->link->AddRelativeForce(this->finForce);
-  // Apply forces at cg (with torques for position shift).
+  // Rotate body-frame force to world frame and apply
+  gz::math::Vector3d finForceWorld =
+      finPose.Rot().RotateVector(this->finForce);
+  link.AddWorldForce(_ecm, finForceWorld);
 
-  // Apply new fin angle. Do this last since this sets link's velocity to zero.
-  this->joint->SetPosition(0, this->angle);
+  // Set joint position
+  auto *posComp = _ecm.Component<gz::sim::components::JointPosition>(
+      this->jointEntity);
+  if (posComp)
+    posComp->Data()[0] = this->angle;
+  else
+    _ecm.CreateComponent(this->jointEntity,
+        gz::sim::components::JointPosition({this->angle}));
 
-  this->angleStamp = _info.simTime;
+  // Publish angle
+  gz::msgs::Double msg;
+  msg.set_data(this->angle);
+  this->anglePub.Publish(msg);
 }
 
 /////////////////////////////////////////////////
-void FinPlugin::UpdateInput(ConstDoublePtr &_msg)
+void FinPlugin::OnInput(const gz::msgs::Double &_msg)
 {
-  this->inputCommand = _msg->value();
+  this->inputCommand = _msg.data();
 }
 
-/////////////////////////////////////////////////
-void FinPlugin::UpdateCurrentVelocity(ConstVector3dPtr &_msg)
+void FinPlugin::OnCurrentVelocity(const gz::msgs::Vector3d &_msg)
 {
-  this->currentVelocity.X() = _msg->x();
-  this->currentVelocity.Y() = _msg->y();
-  this->currentVelocity.Z() = _msg->z();
+  this->currentVelocity.X(_msg.x());
+  this->currentVelocity.Y(_msg.y());
+  this->currentVelocity.Z(_msg.z());
 }
-}
+
+}  // namespace sim
+}  // namespace gz
+
+// Register the plugin with gz-sim 8
+GZ_ADD_PLUGIN(gz::sim::FinPlugin,
+              gz::sim::System,
+              gz::sim::FinPlugin::ISystemConfigure,
+              gz::sim::FinPlugin::ISystemPreUpdate)
+GZ_ADD_PLUGIN_ALIAS(gz::sim::FinPlugin, "gz::sim::FinPlugin")

@@ -1,56 +1,48 @@
 cmake_minimum_required(VERSION 3.8)
 project(uuv_world_plugins)
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
+# C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(ament_cmake REQUIRED)
-find_package(gazebo_dev REQUIRED)
-find_package(gazebo_msgs REQUIRED)
-find_package(ignition-physics10 REQUIRED)
-find_package(ignition-gazebo8 REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(uuv_world_ros_plugins_msgs REQUIRED)
-find_package(Boost REQUIRED COMPONENTS algorithm bind shared_ptr)
 
-# Include directories
-include_directories(include ${GAZEBO_INCLUDE_DIRS})
-ament_export_include_directories(include)
-ament_export_dependencies(
-  ignition-physics10
-  ignition-gazebo8
-  uuv_world_ros_plugins_msgs
+# Gazebo Harmonic (gz-sim8)
+find_package(gz-sim8 REQUIRED)
+find_package(gz-plugin2 REQUIRED)
+find_package(gz-transport12 REQUIRED)
+find_package(gz-msgs10 REQUIRED)
+find_package(gz-math7 REQUIRED)
+
+# Boost
+find_package(Boost REQUIRED)
+
+include_directories(
+  include
+  ${Boost_INCLUDE_DIRS}
 )
 
-# Define the plugins
-set(PLUGINS
-  GaussMarkovProcess
-  UnderwaterCurrentPlugin
+add_library(uuv_underwater_current_plugin SHARED
+  src/UnderwaterCurrentPlugin.cc
+  src/GaussMarkovProcess.cc
 )
 
-foreach(plugin ${PLUGINS})
-  add_library(${plugin} SHARED src/${plugin}.cc)
-  ament_target_dependencies(${plugin}
-    gazebo_dev
-    gazebo_msgs
-    ignition-physics10
-    ignition-gazebo8
-    rclcpp
-    geometry_msgs
-    uuv_world_ros_plugins_msgs
-  )
-  target_link_libraries(${plugin}
-    ${Boost_LIBRARIES}
-  )
-  target_include_directories(${plugin} PRIVATE
-    ${GAZEBO_INCLUDE_DIRS}
-  )
-  ament_export_libraries(${plugin})
-  install(TARGETS ${plugin}
-    DESTINATION lib/${PROJECT_NAME}
-  )
-endforeach()
+target_link_libraries(uuv_underwater_current_plugin
+  gz-sim8::gz-sim8
+  gz-plugin2::gz-plugin2
+  gz-transport12::gz-transport12
+  gz-msgs10::gz-msgs10
+  gz-math7::gz-math7
+  ${Boost_LIBRARIES}
+)
+
+# Install
+install(TARGETS uuv_underwater_current_plugin
+  LIBRARY DESTINATION lib
+)
+
+install(DIRECTORY include/
+  DESTINATION include
+)
 
 ament_package()

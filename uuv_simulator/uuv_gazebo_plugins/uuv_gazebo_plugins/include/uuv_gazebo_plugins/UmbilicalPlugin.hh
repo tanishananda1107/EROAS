@@ -1,100 +1,82 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-/// \file UmbilicalPlugin.hh
-/// \brief Model plugin for the umbilical (tether) of an ROV.
-
-#ifndef __UUV_GAZEBO_PLUGINS_UMBILICAL_PLUGIN_HH__
-#define __UUV_GAZEBO_PLUGINS_UMBILICAL_PLUGIN_HH__
+#ifndef UUV_GZ_UMBILICAL_PLUGIN_HH_
+#define UUV_GZ_UMBILICAL_PLUGIN_HH_
 
 #include <memory>
 #include <string>
 
-#include <gazebo/gazebo.hh>
-#include <gazebo/common/UpdateInfo.hh>
-#include <gazebo/common/Plugin.hh>
-#include <gazebo/physics/World.hh>
-#include <gazebo/transport/TransportTypes.hh>
+#include <gz/sim/System.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/World.hh>
+#include <gz/sim/Entity.hh>
+#include <gz/sim/UpdateInfo.hh>
 
-#include <uuv_gazebo_plugins/UmbilicalModel.hh>
+#include <gz/math/Pose3.hh>
+#include <gz/math/Vector3.hh>
 
-namespace gazebo
+#include "UmbilicalModel.hh"
+
+namespace uuv_gz_plugins
 {
+
 class UmbilicalSegment
 {
-  public:
-    UmbilicalSegment() { initSdfSegment(); }
+public:
+  UmbilicalSegment() = default;
 
-    UmbilicalSegment(const std::string& _name,
-                     const std::string& _fromLink,
-                     const ignition::math::Pose3d& _fromPose,
-                     const ignition::math::Pose3d& _toPose,
-                     physics::ModelPtr _model);
+  UmbilicalSegment(const std::string &_name,
+                   const std::string &_fromLink,
+                   const gz::math::Pose3d &_fromPose,
+                   const gz::math::Pose3d &_toPose,
+                   gz::sim::Entity _modelEntity)
+  : modelEntity(_modelEntity)
+  {}
 
-    void initSdfSegment();
+  void InitSdfSegment();
 
-    physics::LinkPtr link;
-    physics::LinkPtr linkA;
-    physics::JointPtr jointA;
-    physics::JointPtr jointB;
+  gz::sim::Entity link;
+  gz::sim::Entity linkA;
 
-    std::shared_ptr<UmbilicalSegment> prev, next;
+  gz::sim::Entity jointA;
+  gz::sim::Entity jointB;
 
-    static sdf::SDFPtr sdfSegment;
+  std::shared_ptr<UmbilicalSegment> prev;
+  std::shared_ptr<UmbilicalSegment> next;
+
+  static std::shared_ptr<void> sdfSegment;
 };
 
-typedef boost::shared_ptr<UmbilicalSegment> UmbilicalSegmentPtr;
+using UmbilicalSegmentPtr = std::shared_ptr<UmbilicalSegment>;
 
-class UmbilicalPlugin : public ModelPlugin
+class UmbilicalPlugin :
+  public gz::sim::System,
+  public gz::sim::ISystemConfigure,
+  public gz::sim::ISystemPreUpdate
 {
-  /// \brief Destructor.
-  public: UmbilicalPlugin();
+public:
+  UmbilicalPlugin() = default;
+  virtual ~UmbilicalPlugin() = default;
 
-  /// \brief Constructor.
-  public: ~UmbilicalPlugin();
+  void Configure(const gz::sim::Entity &_entity,
+                 const std::shared_ptr<const sdf::Element> &_sdf,
+                 gz::sim::EntityComponentManager &_ecm,
+                 gz::sim::EventManager &) override;
 
-  /// \brief Load plugin and its configuration from sdf
-  protected: virtual void Load(physics::ModelPtr _model, sdf::ElementPtr _sdf);
+  void PreUpdate(const gz::sim::UpdateInfo &_info,
+                 gz::sim::EntityComponentManager &_ecm) override;
 
-  /// \brief Update callback from simulation.
-  protected: virtual void OnUpdate(const common::UpdateInfo&);
+protected:
+  void UpdateFlowVelocity(const gz::math::Vector3d &_msg);
 
-  /// \brief Reads flow velocity topic
-  protected: void UpdateFlowVelocity(ConstVector3dPtr &_msg);
+protected:
+  gz::sim::Entity modelEntity;
+  gz::sim::Entity worldEntity;
 
-  /// \brief Pointer to the update event connection.
-  protected: event::ConnectionPtr updateConnection;
+  gz::math::Vector3d flowVelocity;
 
-  /// \brief Pointer to the model structure
-  protected: gazebo::physics::ModelPtr model;
-
-  /// \brief Pointer to the world plugin
-  protected: gazebo::physics::WorldPtr world;
-
-  /// \brief Gazebo node
-  protected: gazebo::transport::NodePtr node;
-
-  /// \brief Subcriber to flow message
-  protected: gazebo::transport::SubscriberPtr flowSubscriber;
-
-  /// \brief Flow velocity vector read from topic
-  protected: ignition::math::Vector3d flowVelocity;
-
-  /// \brief Pointer to UmbilicalModel used in this plugin.
-  protected: std::shared_ptr<UmbilicalModel> umbilical;
+  std::shared_ptr<UmbilicalModel> umbilical;
 };
-}
+
+} // namespace uuv_gz_plugins
 
 #endif
