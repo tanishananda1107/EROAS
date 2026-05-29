@@ -1,174 +1,118 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #include <uuv_sensor_ros_plugins/DVLROSPlugin.hh>
+#include <gz/sim/components/WorldPose.hh>
+#include <gz/sim/components/LinearVelocity.hh>
+#include <gz/sim/Util.hh>
 
-namespace gazebo
-{
-/////////////////////////////////////////////////
+namespace gz { namespace sim {
+
 DVLROSPlugin::DVLROSPlugin() : ROSBaseModelPlugin()
 {
   this->beamTransformsInitialized = false;
 }
 
-/////////////////////////////////////////////////
-DVLROSPlugin::~DVLROSPlugin()
-{ }
+DVLROSPlugin::~DVLROSPlugin() {}
 
-/////////////////////////////////////////////////
-void DVLROSPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
+void DVLROSPlugin::Configure(
+  const Entity& _entity,
+  const std::shared_ptr<const sdf::Element>& _sdf,
+  EntityComponentManager& _ecm,
+  EventManager& _eventMgr)
 {
-  ROSBaseModelPlugin::Load(_model, _sdf);
+  ROSBaseModelPlugin::Configure(_entity, _sdf, _ecm, _eventMgr);
+  auto sdfPtr = std::const_pointer_cast<sdf::Element>(_sdf);
 
-  // Load the link names for all the beams
-  std::string beamLinkName;
-  GetSDFParam<std::string>(_sdf, "beam_link_name_0", beamLinkName, "");
-  GZ_ASSERT(!beamLinkName.empty(), "Beam 0 link name empty");
-  this->beamsLinkNames.push_back(beamLinkName);
-
-  GetSDFParam<std::string>(_sdf, "beam_link_name_1", beamLinkName, "");
-  GZ_ASSERT(!beamLinkName.empty(), "Beam 1 link name empty");
-  this->beamsLinkNames.push_back(beamLinkName);
-
-  GetSDFParam<std::string>(_sdf, "beam_link_name_2", beamLinkName, "");
-  GZ_ASSERT(!beamLinkName.empty(), "Beam 2 link name empty");
-  this->beamsLinkNames.push_back(beamLinkName);
-
-  GetSDFParam<std::string>(_sdf, "beam_link_name_3", beamLinkName, "");
-  GZ_ASSERT(!beamLinkName.empty(), "Beam 3 link name empty");
-  this->beamsLinkNames.push_back(beamLinkName);
-
-  // Load the beam output topic names
-  std::string beamTopic;
-  GetSDFParam<std::string>(_sdf, "beam_topic_0", beamTopic, "");
-  GZ_ASSERT(!beamTopic.empty(), "Beam 0 topic name empty");
-  this->beamTopics.push_back(beamTopic);
-
-  GetSDFParam<std::string>(_sdf, "beam_topic_1", beamTopic, "");
-  GZ_ASSERT(!beamTopic.empty(), "Beam 1 topic name empty");
-  this->beamTopics.push_back(beamTopic);
-
-  GetSDFParam<std::string>(_sdf, "beam_topic_2", beamTopic, "");
-  GZ_ASSERT(!beamTopic.empty(), "Beam 2 topic name empty");
-  this->beamTopics.push_back(beamTopic);
-
-  GetSDFParam<std::string>(_sdf, "beam_topic_3", beamTopic, "");
-  GZ_ASSERT(!beamTopic.empty(), "Beam 3 topic name empty");
-  this->beamTopics.push_back(beamTopic);
-
-  // Create beam subscribers
-  this->beamSub0.reset(new message_filters::Subscriber<sensor_msgs::Range>(
-    *this->rosNode.get(), this->beamTopics[0], 1));
-  this->beamSub1.reset(new message_filters::Subscriber<sensor_msgs::Range>(
-    *this->rosNode.get(), this->beamTopics[1], 1));
-  this->beamSub2.reset(new message_filters::Subscriber<sensor_msgs::Range>(
-    *this->rosNode.get(), this->beamTopics[2], 1));
-  this->beamSub3.reset(new message_filters::Subscriber<sensor_msgs::Range>(
-    *this->rosNode.get(), this->beamTopics[3], 1));
-
+  // Read beam link names and topics
   for (int i = 0; i < 4; i++)
-    this->dvlBeamMsgs.push_back(uuv_sensor_ros_plugins_msgs::DVLBeam());
+  {
+    std::string beamLinkName, beamTopic;
+    GetSDFParam<std::string>(sdfPtr, "beam_link_name_" + std::to_string(i), beamLinkName, "");
+    GZ_ASSERT(!beamLinkName.empty(), ("Beam " + std::to_string(i) + " link name empty").c_str());
+    this->beamsLinkNames.push_back(beamLinkName);
 
-  // Synchronize the beam topics
-  this->syncBeamMessages.reset(new message_filters::TimeSynchronizer<
-    sensor_msgs::Range, sensor_msgs::Range,
-    sensor_msgs::Range, sensor_msgs::Range>(
-      *this->beamSub0.get(), *this->beamSub1.get(), *this->beamSub2.get(),
-      *this->beamSub3.get(), 10));
+    GetSDFParam<std::string>(sdfPtr, "beam_topic_" + std::to_string(i), beamTopic, "");
+    GZ_ASSERT(!beamTopic.empty(), ("Beam " + std::to_string(i) + " topic empty").c_str());
+    this->beamTopics.push_back(beamTopic);
 
-  // Set synchronized callback function for the DVL beams
+    this->dvlBeamMsgs.push_back(uuv_sensor_ros_plugins_msgs::msg::DVLBeam());
+  }
+
+  // tf2 buffer + listener
+  this->tfBuffer = std::make_shared<tf2_ros::Buffer>(this->rosNode->get_clock());
+  this->tfListener = std::make_shared<tf2_ros::TransformListener>(*this->tfBuffer);
+
+  // message_filters subscribers (need rclcpp node)
+  this->beamSub0 = std::make_shared<RangeSub>(this->rosNode, this->beamTopics[0]);
+  this->beamSub1 = std::make_shared<RangeSub>(this->rosNode, this->beamTopics[1]);
+  this->beamSub2 = std::make_shared<RangeSub>(this->rosNode, this->beamTopics[2]);
+  this->beamSub3 = std::make_shared<RangeSub>(this->rosNode, this->beamTopics[3]);
+
+  this->syncBeamMessages = std::make_shared<Synchronizer>(
+    SyncPolicy(10),
+    *this->beamSub0, *this->beamSub1,
+    *this->beamSub2, *this->beamSub3);
+
   this->syncBeamMessages->registerCallback(
-    boost::bind(&DVLROSPlugin::OnBeamCallback, this, _1, _2, _3, _4));
+    std::bind(&DVLROSPlugin::OnBeamCallback, this,
+      std::placeholders::_1, std::placeholders::_2,
+      std::placeholders::_3, std::placeholders::_4));
 
-  // Initialize the default DVL output
+  // Publishers
   this->rosSensorOutputPub =
-    this->rosNode->advertise<uuv_sensor_ros_plugins_msgs::DVL>(
+    this->rosNode->create_publisher<uuv_sensor_ros_plugins_msgs::msg::DVL>(
       this->sensorOutputTopic, 1);
 
   this->twistPub =
-    this->rosNode->advertise<geometry_msgs::TwistWithCovarianceStamped>(
+    this->rosNode->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>(
       this->sensorOutputTopic + "_twist", 1);
 
-  // Initialize ROS messages headers
+  // Frame IDs
+  auto linkName = _ecm.ComponentData<components::Name>(this->linkEntity).value_or("dvl");
   if (this->enableLocalNEDFrame)
   {
-    // Use the local NED frame format
-    this->dvlROSMsg.header.frame_id = this->tfLocalNEDFrame.child_frame_id_;
-    this->twistROSMsg.header.frame_id = this->tfLocalNEDFrame.child_frame_id_;
+    this->dvlROSMsg.header.frame_id = linkName + "_ned";
+    this->twistROSMsg.header.frame_id = linkName + "_ned";
   }
   else
   {
-    // Use the link's frame ID
-    this->dvlROSMsg.header.frame_id = this->link->GetName();
-    this->twistROSMsg.header.frame_id = this->link->GetName();
+    this->dvlROSMsg.header.frame_id = linkName;
+    this->twistROSMsg.header.frame_id = linkName;
   }
 
   double variance = this->noiseSigma * this->noiseSigma;
-
-  // Set covariance
-  for (int i = 0; i < 9; i++)
-      this->dvlROSMsg.velocity_covariance[i] = 0.0;
-
+  this->dvlROSMsg.velocity_covariance.fill(0.0);
   this->dvlROSMsg.velocity_covariance[0] = variance;
   this->dvlROSMsg.velocity_covariance[4] = variance;
   this->dvlROSMsg.velocity_covariance[8] = variance;
 
-  for (int i = 0; i < 36; i++)
-    this->twistROSMsg.twist.covariance[i] = 0.0;
-
-  this->twistROSMsg.twist.covariance[0] = variance;
-  this->twistROSMsg.twist.covariance[7] = variance;
+  this->twistROSMsg.twist.covariance.fill(0.0);
+  this->twistROSMsg.twist.covariance[0]  = variance;
+  this->twistROSMsg.twist.covariance[7]  = variance;
   this->twistROSMsg.twist.covariance[14] = variance;
-  this->twistROSMsg.twist.covariance[21] = -1;  // not available
-  this->twistROSMsg.twist.covariance[28] = -1;  // not available
-  this->twistROSMsg.twist.covariance[35] = -1;  // not available
-
-  if (this->gazeboMsgEnabled)
-  {
-    this->gazeboSensorOutputPub =
-      this->gazeboNode->Advertise<sensor_msgs::msgs::Dvl>(
-        this->robotNamespace + "/" + this->sensorOutputTopic, 1);
-  }
+  this->twistROSMsg.twist.covariance[21] = -1;
+  this->twistROSMsg.twist.covariance[28] = -1;
+  this->twistROSMsg.twist.covariance[35] = -1;
 }
 
-/////////////////////////////////////////////////
-bool DVLROSPlugin::OnUpdate(const common::UpdateInfo& _info)
+bool DVLROSPlugin::OnUpdate(const UpdateInfo& _info, EntityComponentManager& _ecm)
 {
-  // Publish sensor state
   this->PublishState();
-
   if (!this->EnableMeasurement(_info))
     return false;
 
   if (this->enableLocalNEDFrame)
     this->SendLocalNEDTransform();
 
-  ignition::math::Vector3d bodyVel;
-
   if (!this->UpdateBeamTransforms())
     return false;
 
-  // Read true body velocity
-  // TODO Temporary solution to generate DVL message, use beams in the future
-  // instead
-#if GAZEBO_MAJOR_VERSION >= 8
-  bodyVel = this->link->RelativeLinearVel();
-#else
-  bodyVel = this->link->GetRelativeLinearVel().Ign();
-#endif
+  // Body-relative linear velocity
+  this->link.EnableVelocityChecks(_ecm, true);
+  auto vel = this->link.RelativeLinearVelocity(_ecm);
+  if (!vel.has_value())
+    return false;
 
+  math::Vector3d bodyVel = vel.value();
   bodyVel.X() += this->GetGaussianNoise(this->noiseAmp);
   bodyVel.Y() += this->GetGaussianNoise(this->noiseAmp);
   bodyVel.Z() += this->GetGaussianNoise(this->noiseAmp);
@@ -176,152 +120,95 @@ bool DVLROSPlugin::OnUpdate(const common::UpdateInfo& _info)
   if (this->enableLocalNEDFrame)
     bodyVel = this->localNEDFrame.Rot().RotateVector(bodyVel);
 
-  if (this->gazeboMsgEnabled)
-  {
-    sensor_msgs::msgs::Dvl dvlGazeboMsg;
-    double variance = this->noiseSigma * this->noiseSigma;
+  auto stamp = gz::sim::convert<rclcpp::Time>(_info.simTime);
 
-    for (int i = 0; i < 9; i++)
-    {
-      if (i == 0 || i == 4 || i == 8)
-        dvlGazeboMsg.add_linear_velocity_covariance(variance);
-      else
-        dvlGazeboMsg.add_linear_velocity_covariance(0.0);
-    }
-
-    // Publish simulated measurement
-    gazebo::msgs::Vector3d* v = new gazebo::msgs::Vector3d();
-    v->set_x(bodyVel.X());
-    v->set_y(bodyVel.Y());
-    v->set_z(bodyVel.Z());
-    dvlGazeboMsg.set_allocated_linear_velocity(v);
-    this->gazeboSensorOutputPub->Publish(dvlGazeboMsg);
-  }
-
-  // Publish ROS DVL message
-  this->dvlROSMsg.header.stamp.sec = _info.simTime.sec;
-  this->dvlROSMsg.header.stamp.nsec = _info.simTime.nsec;
-
+  this->dvlROSMsg.header.stamp = stamp;
   this->dvlROSMsg.altitude = this->altitude;
-
   this->dvlROSMsg.beams = this->dvlBeamMsgs;
-
   this->dvlROSMsg.velocity.x = bodyVel.X();
   this->dvlROSMsg.velocity.y = bodyVel.Y();
   this->dvlROSMsg.velocity.z = bodyVel.Z();
-  this->rosSensorOutputPub.publish(this->dvlROSMsg);
+  this->rosSensorOutputPub->publish(this->dvlROSMsg);
 
-  this->twistROSMsg.header.stamp = this->dvlROSMsg.header.stamp;
-
+  this->twistROSMsg.header.stamp = stamp;
   this->twistROSMsg.twist.twist.linear.x = bodyVel.X();
   this->twistROSMsg.twist.twist.linear.y = bodyVel.Y();
   this->twistROSMsg.twist.twist.linear.z = bodyVel.Z();
+  this->twistPub->publish(this->twistROSMsg);
 
-  this->twistPub.publish(this->twistROSMsg);
-
-  // Read the current simulation time
-  #if GAZEBO_MAJOR_VERSION >= 8
-    this->lastMeasurementTime = this->world->SimTime();
-  #else
-    this->lastMeasurementTime = this->world->GetSimTime();
-  #endif
+  this->lastMeasurementTime = _info.simTime;
   return true;
 }
 
-/////////////////////////////////////////////////
-void DVLROSPlugin::OnBeamCallback(const sensor_msgs::RangeConstPtr& _range0,
-  const sensor_msgs::RangeConstPtr& _range1,
-  const sensor_msgs::RangeConstPtr& _range2,
-  const sensor_msgs::RangeConstPtr& _range3)
+void DVLROSPlugin::OnBeamCallback(
+  const sensor_msgs::msg::Range::ConstSharedPtr& _r0,
+  const sensor_msgs::msg::Range::ConstSharedPtr& _r1,
+  const sensor_msgs::msg::Range::ConstSharedPtr& _r2,
+  const sensor_msgs::msg::Range::ConstSharedPtr& _r3)
 {
-  if (_range0->range == _range0->min_range &&
-      _range1->range == _range1->min_range &&
-      _range2->range == _range2->min_range &&
-      _range3->range == _range3->min_range)
+  if ((_r0->range == _r0->min_range && _r1->range == _r1->min_range &&
+       _r2->range == _r2->min_range && _r3->range == _r3->min_range) ||
+      (_r0->range == _r0->max_range && _r1->range == _r1->max_range &&
+       _r2->range == _r2->max_range && _r3->range == _r3->max_range))
   {
     this->altitude = ALTITUDE_OUT_OF_RANGE;
     return;
   }
 
-
-  if (_range0->range == _range0->max_range &&
-      _range1->range == _range1->max_range &&
-      _range2->range == _range2->max_range &&
-      _range3->range == _range3->max_range)
-  {
-    this->altitude = ALTITUDE_OUT_OF_RANGE;
-    return;
-  }
-
-  // TODO Compute the altitude taking into account the vehicle's orientation
-  this->altitude =
-    0.25 * (_range0->range + _range1->range + _range2->range + _range3->range);
-
-  this->dvlBeamMsgs[0].range = _range0->range;
-  this->dvlBeamMsgs[1].range = _range1->range;
-  this->dvlBeamMsgs[2].range = _range2->range;
-  this->dvlBeamMsgs[3].range = _range3->range;
+  this->altitude = 0.25 * (_r0->range + _r1->range + _r2->range + _r3->range);
+  this->dvlBeamMsgs[0].range = _r0->range;
+  this->dvlBeamMsgs[1].range = _r1->range;
+  this->dvlBeamMsgs[2].range = _r2->range;
+  this->dvlBeamMsgs[3].range = _r3->range;
 }
 
-/////////////////////////////////////////////////
 bool DVLROSPlugin::UpdateBeamTransforms()
 {
   if (this->beamPoses.size() == 4)
     return true;
 
-  tf::StampedTransform beamTransform;
-  std::string targetFrame, sourceFrame;
-  bool success = true;
-
-  for (int i = 0; i < this->beamsLinkNames.size(); i++)
+  for (size_t i = 0; i < this->beamsLinkNames.size(); i++)
   {
-    sourceFrame = this->beamsLinkNames[i];
-    if (!this->enableLocalNEDFrame)
-      targetFrame = this->link->GetName();
-    else
-      targetFrame = tfLocalNEDFrame.child_frame_id_;
+    const std::string& sourceFrame = this->beamsLinkNames[i];
+    const std::string targetFrame = this->enableLocalNEDFrame
+      ? this->tfLocalNEDFrame.child_frame_id
+      : this->tfLocalNEDFrame.header.frame_id;
+
+    geometry_msgs::msg::TransformStamped ts;
     try
     {
-      ros::Time now = ros::Time::now();
-      this->transformListener.lookupTransform(
-        targetFrame, sourceFrame, ros::Time(0),
-        beamTransform);
+      ts = this->tfBuffer->lookupTransform(targetFrame, sourceFrame, tf2::TimePointZero);
     }
-    catch(tf::TransformException &ex)
+    catch (const tf2::TransformException& ex)
     {
-      success = false;
-      break;
+      gzwarn << "DVL beam transform not yet available: " << ex.what() << std::endl;
+      return false;
     }
 
-    ignition::math::Pose3d pose;
-    pose.Pos() = ignition::math::Vector3d(
-      beamTransform.getOrigin().x(),
-      beamTransform.getOrigin().y(),
-      beamTransform.getOrigin().z());
-    pose.Rot() = ignition::math::Quaterniond(
-      beamTransform.getRotation().getW(),
-      beamTransform.getRotation().getAxis().x(),
-      beamTransform.getRotation().getAxis().y(),
-      beamTransform.getRotation().getAxis().z());
+    math::Pose3d pose;
+    pose.Pos() = math::Vector3d(
+      ts.transform.translation.x,
+      ts.transform.translation.y,
+      ts.transform.translation.z);
+    pose.Rot() = math::Quaterniond(
+      ts.transform.rotation.w,
+      ts.transform.rotation.x,
+      ts.transform.rotation.y,
+      ts.transform.rotation.z);
 
-    this->dvlBeamMsgs[i].pose = geometry_msgs::PoseStamped();
-    this->dvlBeamMsgs[i].pose.header.stamp = ros::Time::now();
+    this->dvlBeamMsgs[i].pose.header.stamp = this->rosNode->now();
     this->dvlBeamMsgs[i].pose.header.frame_id = sourceFrame;
-
-    this->dvlBeamMsgs[i].pose.pose.position.x = beamTransform.getOrigin().x();
-    this->dvlBeamMsgs[i].pose.pose.position.y = beamTransform.getOrigin().y();
-    this->dvlBeamMsgs[i].pose.pose.position.z = beamTransform.getOrigin().z();
-
-    this->dvlBeamMsgs[i].pose.pose.orientation.x = beamTransform.getRotation().getAxis().x();
-    this->dvlBeamMsgs[i].pose.pose.orientation.y = beamTransform.getRotation().getAxis().y();
-    this->dvlBeamMsgs[i].pose.pose.orientation.z = beamTransform.getRotation().getAxis().z();
-    this->dvlBeamMsgs[i].pose.pose.orientation.w = beamTransform.getRotation().getW();
+    this->dvlBeamMsgs[i].pose.pose.position.x = ts.transform.translation.x;
+    this->dvlBeamMsgs[i].pose.pose.position.y = ts.transform.translation.y;
+    this->dvlBeamMsgs[i].pose.pose.position.z = ts.transform.translation.z;
+    this->dvlBeamMsgs[i].pose.pose.orientation = ts.transform.rotation;
 
     this->beamPoses.push_back(pose);
   }
-  return success;
+  return true;
 }
 
-/////////////////////////////////////////////////
-GZ_REGISTER_MODEL_PLUGIN(DVLROSPlugin)
-}
+GZ_ADD_PLUGIN(DVLROSPlugin, gz::sim::System,
+  gz::sim::ISystemConfigure, gz::sim::ISystemUpdate)
+
+}} // namespace gz::sim

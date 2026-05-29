@@ -1,107 +1,64 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #ifndef __UUV_DVL_ROS_PLUGIN_HH__
 #define __UUV_DVL_ROS_PLUGIN_HH__
 
-#include <gazebo/gazebo.hh>
-#include <ros/ros.h>
-#include <boost/bind.hpp>
-#include <boost/shared_ptr.hpp>
-#include <geometry_msgs/TwistWithCovarianceStamped.h>
-#include <geometry_msgs/PoseStamped.h>
-#include <sensor_msgs/Range.h>
-#include <uuv_sensor_ros_plugins/ROSBaseModelPlugin.hh>
-#include <uuv_sensor_ros_plugins_msgs/DVL.h>
-#include <uuv_sensor_ros_plugins_msgs/DVLBeam.h>
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
+#include <sensor_msgs/msg/range.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
 #include <message_filters/subscriber.h>
-#include <message_filters/time_synchronizer.h>
-#include <tf/transform_listener.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/synchronizer.h>
+#include <uuv_sensor_ros_plugins/ROSBaseModelPlugin.hh>
+#include <uuv_sensor_ros_plugins_msgs/msg/dvl.hpp>
+#include <uuv_sensor_ros_plugins_msgs/msg/dvl_beam.hpp>
+#include <gz/math/Pose3.hh>
+#include <memory>
+#include <string>
 #include <vector>
-#include "SensorDvl.pb.h"
 
 #define ALTITUDE_OUT_OF_RANGE -1.0
-namespace gazebo
-{
-  /// TODO: Modify computation of velocity using the beams
-  class DVLROSPlugin : public ROSBaseModelPlugin
-  {
-    /// \brief Class constructor
-    public: DVLROSPlugin();
 
-    /// \brief Class destructor
-    public: virtual ~DVLROSPlugin();
+namespace gz { namespace sim {
 
-    /// \brief Load the plugin
-    public: virtual void Load(physics::ModelPtr _model, sdf::ElementPtr _sdf);
+class DVLROSPlugin : public ROSBaseModelPlugin {
+public:
+  DVLROSPlugin();
+  virtual ~DVLROSPlugin();
+  void Configure(const Entity& _entity,
+                 const std::shared_ptr<const sdf::Element>& _sdf,
+                 EntityComponentManager& _ecm, EventManager& _eventMgr) override;
 
-    /// \brief Update sensor measurement
-    protected: virtual bool OnUpdate(const common::UpdateInfo& _info);
+protected:
+  bool OnUpdate(const UpdateInfo& _info, EntityComponentManager& _ecm) override;
+  void OnBeamCallback(
+    const sensor_msgs::msg::Range::ConstSharedPtr& _range0,
+    const sensor_msgs::msg::Range::ConstSharedPtr& _range1,
+    const sensor_msgs::msg::Range::ConstSharedPtr& _range2,
+    const sensor_msgs::msg::Range::ConstSharedPtr& _range3);
+  bool UpdateBeamTransforms();
 
-    /// \brief Get beam Range message update
-    protected: void OnBeamCallback(const sensor_msgs::RangeConstPtr& _range0,
-      const sensor_msgs::RangeConstPtr& _range1,
-      const sensor_msgs::RangeConstPtr& _range2,
-      const sensor_msgs::RangeConstPtr& _range3);
+  bool beamTransformsInitialized{false};
+  double altitude{ALTITUDE_OUT_OF_RANGE};
+  uuv_sensor_ros_plugins_msgs::msg::DVL dvlROSMsg;
+  std::vector<uuv_sensor_ros_plugins_msgs::msg::DVLBeam> dvlBeamMsgs;
+  rclcpp::Publisher<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr twistPub;
+  geometry_msgs::msg::TwistWithCovarianceStamped twistROSMsg;
+  std::vector<std::string> beamsLinkNames, beamTopics;
+  std::vector<gz::math::Pose3d> beamPoses;
 
-    /// \brief Updates the poses of each beam wrt the DVL frame
-    protected: bool UpdateBeamTransforms();
+  using RangeSub = message_filters::Subscriber<sensor_msgs::msg::Range>;
+  using SyncPolicy = message_filters::sync_policies::ApproximateTime
+    sensor_msgs::msg::Range, sensor_msgs::msg::Range,
+    sensor_msgs::msg::Range, sensor_msgs::msg::Range>;
+  using Synchronizer = message_filters::Synchronizer<SyncPolicy>;
 
-    protected: bool beamTransformsInitialized;
+  std::shared_ptr<RangeSub> beamSub0, beamSub1, beamSub2, beamSub3;
+  std::shared_ptr<Synchronizer> syncBeamMessages;
+  std::shared_ptr<tf2_ros::Buffer> tfBuffer;
+  std::shared_ptr<tf2_ros::TransformListener> tfListener;
+};
 
-    /// \brief Measured altitude in meters
-    protected: double altitude;
-
-    /// \brief ROS DVL message
-    protected: uuv_sensor_ros_plugins_msgs::DVL dvlROSMsg;
-
-    protected: std::vector<uuv_sensor_ros_plugins_msgs::DVLBeam> dvlBeamMsgs;
-
-    /// \brief ROS publisher for twist data.
-    protected: ros::Publisher twistPub;
-
-    /// \brief Store pose message since many attributes do not change (cov.).
-    protected: geometry_msgs::TwistWithCovarianceStamped twistROSMsg;
-
-    /// \brief List of beam links
-    protected: std::vector<std::string> beamsLinkNames;
-
-    /// \brief List of beam topics
-    protected: std::vector<std::string> beamTopics;
-
-    /// \brief List of poses of each beam wrt to the DVL frame
-    protected: std::vector<ignition::math::Pose3d> beamPoses;
-
-    protected: boost::shared_ptr<message_filters::TimeSynchronizer<
-      sensor_msgs::Range, sensor_msgs::Range, sensor_msgs::Range, sensor_msgs::Range>>
-      syncBeamMessages;
-
-    protected: boost::shared_ptr<message_filters::Subscriber<
-      sensor_msgs::Range>> beamSub0;
-
-    protected: boost::shared_ptr<message_filters::Subscriber<
-      sensor_msgs::Range>> beamSub1;
-
-    protected: boost::shared_ptr<message_filters::Subscriber<
-      sensor_msgs::Range>> beamSub2;
-
-    protected: boost::shared_ptr<message_filters::Subscriber<
-      sensor_msgs::Range>> beamSub3;
-
-    protected: tf::TransformListener transformListener;
-  };
-}
-
-#endif // __UUV_DVL_ROS_PLUGIN_HH__
+}}  // namespace gz::sim
+#endif

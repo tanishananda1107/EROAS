@@ -1,214 +1,269 @@
-#!/usr/bin/env python
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from __future__ import print_function
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
 import os
-import time
 import sys
 import select
+import tty
 import termios
+import time
+
 import rclpy
+
 from rclpy.node import Node
-from std_msgs.msg import Bool
-from geometry_msgs.msg import Twist, Accel, Vector3
+
+from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Accel
+from geometry_msgs.msg import Vector3
 
 
 class KeyBoardVehicleTeleop(Node):
+
     def __init__(self):
+
         super().__init__('vehicle_keyboard_teleop')
 
-        # Class Variables
         self.settings = termios.tcgetattr(sys.stdin)
 
-        # Speed setting
-        self.speed = 1  # 1 = Slow, 2 = Fast
-        self.l = Vector3(x=0, y=0, z=0)  # Linear Velocity for Publish
-        self.a = Vector3(x=0, y=0, z=0)  # Angular Velocity for publishing
-        self.linear_increment = 0.05  # How much to increment linear velocities by, to avoid jerkyness
-        self.linear_limit = 1  # Linear velocity limit = self.linear_limit * self.speed
+        self.speed = 1
+
+        self.l = Vector3()
+        self.a = Vector3()
+
+        self.linear_increment = 0.05
+        self.linear_limit = 1.0
+
         self.angular_increment = 0.05
         self.angular_limit = 0.5
-        # User Interface
-        self.msg = """
-    Control Your Vehicle!
-    ---------------------------
-    Moving around:
-        W/S: X-Axis
-        A/D: Y-Axis
-        X/Z: Z-Axis
 
-        Q/E: Yaw
-        I/K: Pitch
-        J/L: Roll
-
-    Slow / Fast: 1 / 2
-
-    CTRL-C to quit
-            """
-
-        # Default message remains as twist
-        self._msg_type = 'twist'
         self.declare_parameter('type', 'twist')
-        self._msg_type = self.get_parameter('type').value
-        if self._msg_type not in ['twist', 'accel']:
-            raise RuntimeError('Teleoperation output must be either '
-                             'twist or accel')
 
-        # Name Publisher topics accordingly
+        self._msg_type = self.get_parameter(
+            'type').get_parameter_value().string_value
+
         if self._msg_type == 'twist':
-            self._output_pub = self.create_publisher(Twist, 'output', 10)
+            self._pub = self.create_publisher(
+                Twist,
+                'output',
+                10
+            )
         else:
-            self._output_pub = self.create_publisher(Accel, 'output', 10)
+            self._pub = self.create_publisher(
+                Accel,
+                'output',
+                10
+            )
 
-        print(self.msg)
+        self.timer = self.create_timer(
+            0.02,
+            self.loop
+        )
 
-        # Start publishing loop
-        self.timer = self.create_timer(0.02, self._spin_loop)  # 50Hz
+        print("""
+Control Your Vehicle!
 
-    def _spin_loop(self):
-        self._parse_keyboard()
+W/S : X
+A/D : Y
+X/Z : Z
 
-    # Every spin this function will return the key being pressed
-    # Only works for one key per spin currently, thus limited control exploring alternative methods
-    def _get_key(self):
-        tty = termios
+Q/E : Yaw
+I/K : Pitch
+J/L : Roll
+
+1/2 : Speed
+
+CTRL+C to quit
+""")
+
+    def get_key(self):
+
         tty.setraw(sys.stdin.fileno())
-        rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+
+        rlist, _, _ = select.select(
+            [sys.stdin],
+            [],
+            [],
+            0.1
+        )
+
         if rlist:
             key = sys.stdin.read(1)
         else:
             key = ''
-        tty.tcsetattr(sys.stdin, tty.TCSADRAIN, self.settings)
+
+        termios.tcsetattr(
+            sys.stdin,
+            termios.TCSADRAIN,
+            self.settings
+        )
 
         return key
 
-    # Function to gradually build up the speed and avoid jerkyness
-    def _speed_windup(self, speed, increment, limit, reverse):
+    def speed_windup(
+        self,
+        speed,
+        increment,
+        limit,
+        reverse
+    ):
+
         if reverse:
             speed -= increment * self.speed
+
             if speed < -limit * self.speed:
                 speed = -limit * self.speed
         else:
             speed += increment * self.speed
+
             if speed > limit * self.speed:
                 speed = limit * self.speed
 
         return speed
 
-    def _parse_keyboard(self):
-        # Save key being pressed
-        key_press = self._get_key()
+    def loop(self):
 
-        # Set Vehicle Speed
-        if key_press == "1":
+        key = self.get_key()
+
+        if key == '1':
             self.speed = 1
-        if key_press == "2":
+
+        if key == '2':
             self.speed = 2
 
-        # Choose ros message accordingly
         if self._msg_type == 'twist':
             cmd = Twist()
         else:
             cmd = Accel()
 
-        # If a key is pressed assign relevent linear / angular vel
-        if key_press != '':
-            # Linear velocities:
-            # Forward
-            if key_press == "w":
-                self.l.x = self._speed_windup(self.l.x, self.linear_increment, self.linear_limit, False)
-            # Backwards
-            if key_press == "s":
-                self.l.x = self._speed_windup(self.l.x, self.linear_increment, self.linear_limit, True)
-            # Left
-            if key_press == "a":
-                self.l.y = self._speed_windup(self.l.y, self.linear_increment, self.linear_limit, False)
-            # Right
-            if key_press == "d":
-                self.l.y = self._speed_windup(self.l.y, self.linear_increment, self.linear_limit, True)
-            # Up
-            if key_press == "x":
-                self.l.z = self._speed_windup(self.l.z, self.linear_increment, self.linear_limit * 0.5, False)
-            # Down
-            if key_press == "z":
-                self.l.z = self._speed_windup(self.l.z, self.linear_increment, self.linear_limit * 0.5, True)
+        if key != '':
 
-            # Angular Velocities
-            # Roll Left
-            if key_press == "j":
-                self.a.x = self._speed_windup(self.a.x, self.linear_increment, self.angular_limit, True)
-            # Roll Right
-            if key_press == "l":
-                self.a.x = self._speed_windup(self.a.x, self.linear_increment, self.angular_limit, False)
-            # Pitch Down
-            if key_press == "i":
-                self.a.y = self._speed_windup(self.a.y, self.linear_increment, self.angular_limit, False)
-            # Pitch Up
-            if key_press == "k":
-                self.a.y = self._speed_windup(self.a.y, self.linear_increment, self.angular_limit, True)
-            # Yaw Left
-            if key_press == "q":
-                self.a.z = self._speed_windup(self.a.z, self.angular_increment, self.angular_limit, False)
-            # Yaw Right
-            if key_press == "e":
-                self.a.z = self._speed_windup(self.a.z, self.angular_increment, self.angular_limit, True)
+            if key == 'w':
+                self.l.x = self.speed_windup(
+                    self.l.x,
+                    self.linear_increment,
+                    self.linear_limit,
+                    False
+                )
+
+            if key == 's':
+                self.l.x = self.speed_windup(
+                    self.l.x,
+                    self.linear_increment,
+                    self.linear_limit,
+                    True
+                )
+
+            if key == 'a':
+                self.l.y = self.speed_windup(
+                    self.l.y,
+                    self.linear_increment,
+                    self.linear_limit,
+                    False
+                )
+
+            if key == 'd':
+                self.l.y = self.speed_windup(
+                    self.l.y,
+                    self.linear_increment,
+                    self.linear_limit,
+                    True
+                )
+
+            if key == 'x':
+                self.l.z = self.speed_windup(
+                    self.l.z,
+                    self.linear_increment,
+                    self.linear_limit * 0.5,
+                    False
+                )
+
+            if key == 'z':
+                self.l.z = self.speed_windup(
+                    self.l.z,
+                    self.linear_increment,
+                    self.linear_limit * 0.5,
+                    True
+                )
+
+            if key == 'j':
+                self.a.x = self.speed_windup(
+                    self.a.x,
+                    self.angular_increment,
+                    self.angular_limit,
+                    True
+                )
+
+            if key == 'l':
+                self.a.x = self.speed_windup(
+                    self.a.x,
+                    self.angular_increment,
+                    self.angular_limit,
+                    False
+                )
+
+            if key == 'i':
+                self.a.y = self.speed_windup(
+                    self.a.y,
+                    self.angular_increment,
+                    self.angular_limit,
+                    False
+                )
+
+            if key == 'k':
+                self.a.y = self.speed_windup(
+                    self.a.y,
+                    self.angular_increment,
+                    self.angular_limit,
+                    True
+                )
+
+            if key == 'q':
+                self.a.z = self.speed_windup(
+                    self.a.z,
+                    self.angular_increment,
+                    self.angular_limit,
+                    False
+                )
+
+            if key == 'e':
+                self.a.z = self.speed_windup(
+                    self.a.z,
+                    self.angular_increment,
+                    self.angular_limit,
+                    True
+                )
 
         else:
-            # If no button is pressed reset velocities to 0
-            self.l = Vector3(x=0, y=0, z=0)
-            self.a = Vector3(x=0, y=0, z=0)
+            self.l = Vector3()
+            self.a = Vector3()
 
-        # Store velocity message into Twist format
-        cmd.angular = self.a
         cmd.linear = self.l
+        cmd.angular = self.a
 
-        # If ctrl+c kill node
-        if key_press == '\x03':
-            self.get_logger().info('Keyboard Interrupt Pressed')
-            self.get_logger().info('Shutting down [%s] node' % 'vehicle_keyboard_teleop')
-
-            # Set twists to 0
-            cmd.angular = Vector3(x=0, y=0, z=0)
-            cmd.linear = Vector3(x=0, y=0, z=0)
-            self._output_pub.publish(cmd)
-
-            self.destroy_node()
-            sys.exit(-1)
-
-        # Publish message
-        self._output_pub.publish(cmd)
+        self._pub.publish(cmd)
 
 
 def main(args=None):
+
+    time.sleep(2)
+
     rclpy.init(args=args)
 
-    # Wait for 5 seconds, so the instructions are the last thing to print in terminal
-    time.sleep(5)
-
     node = KeyBoardVehicleTeleop()
-    print('Starting [vehicle_keyboard_teleop] node')
 
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    finally:
-        node.destroy_node()
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, node.settings)
-        print('Shutting down [vehicle_keyboard_teleop] node')
 
+    termios.tcsetattr(
+        sys.stdin,
+        termios.TCSADRAIN,
+        node.settings
+    )
+
+    node.destroy_node()
     rclpy.shutdown()
 
 

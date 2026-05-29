@@ -1,72 +1,51 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #ifndef __ROS_BASE_MODEL_PLUGIN_HH__
 #define __ROS_BASE_MODEL_PLUGIN_HH__
 
-#include <gazebo/common/Plugin.hh>
-#include <gazebo/gazebo.hh>
-#include <gazebo/physics/physics.hh>
+#include <gz/sim/System.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/Entity.hh>
+#include <gz/sim/EntityComponentManager.hh>
+#include <gz/sim/EventManager.hh>
+#include <gz/math/Pose3.hh>
+#include <tf2_ros/transform_broadcaster.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <uuv_sensor_ros_plugins/ROSBasePlugin.hh>
-#include <functional>
 #include <memory>
 #include <string>
-#include <tf/transform_datatypes.h>
-#include <tf/tfMessage.h>
-#include <tf/transform_listener.h>
-#include <tf/tf.h>
-#include <tf/transform_broadcaster.h>
 
-namespace gazebo
+namespace gz { namespace sim {
+
+class ROSBaseModelPlugin
+  : public ROSBasePlugin, public System,
+    public ISystemConfigure, public ISystemUpdate
 {
-  class ROSBaseModelPlugin : public ROSBasePlugin, public ModelPlugin
-  {
-    /// \brief Class constructor
-    public: ROSBaseModelPlugin();
+public:
+  ROSBaseModelPlugin();
+  virtual ~ROSBaseModelPlugin();
 
-    /// \brief Class destructor
-    public: virtual ~ROSBaseModelPlugin();
+  void Configure(const Entity& _entity,
+                 const std::shared_ptr<const sdf::Element>& _sdf,
+                 EntityComponentManager& _ecm, EventManager& _eventMgr) override;
+  void Update(const UpdateInfo& _info, EntityComponentManager& _ecm) override;
 
-    /// \brief Load plugin and its configuration from sdf,
-    protected: virtual void Load(physics::ModelPtr _model,
-      sdf::ElementPtr _sdf);
+protected:
+  virtual bool OnUpdate(const UpdateInfo& _info, EntityComponentManager& _ecm);
 
-    /// \brief Update callback from simulation.
-    protected: virtual bool OnUpdate(const common::UpdateInfo&);
+  Entity modelEntity{kNullEntity}, linkEntity{kNullEntity};
+  Model model;
+  Link link;
+  bool enableLocalNEDFrame{false};
+  std::shared_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster;
+  math::Pose3d localNEDFrame;
+  geometry_msgs::msg::TransformStamped tfLocalNEDFrame;
+  void SendLocalNEDTransform();
 
-    /// \brief Pointer to the model.
-    protected: physics::ModelPtr model;
+private:
+  EventManager* eventMgr_{nullptr};
+};
 
-    /// \brief Pointer to the link.
-    protected: physics::LinkPtr link;
-
-    /// \brief True if a the local NED frame needs to be broadcasted
-    protected: bool enableLocalNEDFrame;
-
-    /// \brief TF broadcaster for the local NED frame
-    protected: tf::TransformBroadcaster * tfBroadcaster;
-
-    /// \brief Pose of the local NED frame wrt link frame
-    protected: ignition::math::Pose3d localNEDFrame;
-
-    /// \brief Local NED TF frame
-    protected: tf::StampedTransform tfLocalNEDFrame;
-
-    /// \brief Returns true if the base_link_ned frame exists
-    protected: void SendLocalNEDTransform();
-  };
-}
-
-#endif // __ROS_BASE_MODEL_PLUGIN_HH__
+}}  // namespace gz::sim
+#endif  // __ROS_BASE_MODEL_PLUGIN_HH__

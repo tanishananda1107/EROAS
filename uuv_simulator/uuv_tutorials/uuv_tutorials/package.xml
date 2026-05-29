@@ -2,26 +2,35 @@
 <package format="3">
   <name>uuv_tutorials</name>
   <version>0.6.13</version>
-  <description>Meta package for all templates and tutorials.</description>
 
-  <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
-  <maintainer email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</maintainer>
-  <maintainer email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</maintainer>
+  <description>
+    Meta package for all UUV tutorials and templates for
+    ROS 2 and Gazebo Harmonic.
+  </description>
 
-  <author email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</author>
-  <author email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</author>
-  <author email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</author>
+  <maintainer email="musa.marcusso@de.bosch.com">
+    Musa Morena Marcusso Manhaes
+  </maintainer>
+
+  <maintainer email="sebastian.scherer2@de.bosch.com">
+    Sebastian Scherer
+  </maintainer>
+
+  <maintainer email="luizricardo.douat@de.bosch.com">
+    Luiz Ricardo Douat
+  </maintainer>
 
   <license>Apache-2.0</license>
 
+  <!-- Build system -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <!-- Tutorial packages -->
   <exec_depend>uuv_tutorial_disturbances</exec_depend>
   <exec_depend>uuv_tutorial_dp_controller</exec_depend>
   <exec_depend>uuv_tutorial_seabed_world</exec_depend>
 
   <export>
-    <metapackage />
     <build_type>ament_cmake</build_type>
   </export>
 </package>

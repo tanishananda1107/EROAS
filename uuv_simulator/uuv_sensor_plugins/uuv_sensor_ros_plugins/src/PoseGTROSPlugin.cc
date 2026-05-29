@@ -1,354 +1,233 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-// This source code is derived from gazebo_ros_pkgs
-//   (https://github.com/ros-simulation/gazebo_ros_pkgs)
-// * Copyright 2012 Open Source Robotics Foundation,
-// licensed under the Apache-2.0 license,
-// cf. 3rd-party-licenses.txt file in the root directory of this source tree.
-//
-// The original code was modified to:
-// - be more consistent with other sensor plugins within uuv_simulator,
-// - adhere to Gazebo's coding standards.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #include <uuv_sensor_ros_plugins/PoseGTROSPlugin.hh>
+#include <gz/sim/components/WorldPose.hh>
+#include <gz/sim/components/WorldLinearVelocity.hh>
+#include <gz/sim/components/WorldAngularVelocity.hh>
+#include <gz/sim/Util.hh>
 
-namespace gazebo
+namespace gz { namespace sim {
+
+PoseGTROSPlugin::PoseGTROSPlugin() : ROSBaseModelPlugin()
 {
-/////////////////////////////////////////////////
-PoseGTROSPlugin::PoseGTROSPlugin()
-  : ROSBaseModelPlugin(),
-    rclcpp::Node("pose_gt_ros_plugin")
-{
-  this->offset.Pos() = ignition::math::Vector3d::Zero;
-  this->offset.Rot() = ignition::math::Quaterniond(
-    ignition::math::Vector3d(0, 0, 0));
-
-  // Initialize the reference's velocity and acceleration vectors
-  this->refLinAcc = ignition::math::Vector3d::Zero;
-  this->refAngAcc = ignition::math::Vector3d::Zero;
-
-  this->nedTransform = ignition::math::Pose3d::Zero;
+  this->offset      = math::Pose3d::Zero;
+  this->nedTransform = math::Pose3d::Zero;
   this->nedTransformIsInit = true;
+  this->refLinAcc = this->refAngAcc = math::Vector3d::Zero;
 }
 
-/////////////////////////////////////////////////
-PoseGTROSPlugin::~PoseGTROSPlugin()
-{
-}
+PoseGTROSPlugin::~PoseGTROSPlugin() {}
 
-/////////////////////////////////////////////////
-void PoseGTROSPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
+void PoseGTROSPlugin::Configure(
+  const Entity& _entity,
+  const std::shared_ptr<const sdf::Element>& _sdf,
+  EntityComponentManager& _ecm,
+  EventManager& _eventMgr)
 {
-  ROSBaseModelPlugin::Load(_model, _sdf);
+  ROSBaseModelPlugin::Configure(_entity, _sdf, _ecm, _eventMgr);
+  auto sdfPtr = std::const_pointer_cast<sdf::Element>(_sdf);
 
-  ignition::math::Vector3d vec;
-  GetSDFParam<ignition::math::Vector3d>(_sdf, "position_offset",
-    vec, ignition::math::Vector3d::Zero);
+  math::Vector3d vec;
+  GetSDFParam<math::Vector3d>(sdfPtr, "position_offset", vec, math::Vector3d::Zero);
   this->offset.Pos() = vec;
-  GetSDFParam<ignition::math::Vector3d>(_sdf, "orientation_offset", vec,
-    ignition::math::Vector3d::Zero);
-  this->offset.Rot() = ignition::math::Quaterniond(vec);
+  GetSDFParam<math::Vector3d>(sdfPtr, "orientation_offset", vec, math::Vector3d::Zero);
+  this->offset.Rot() = math::Quaterniond(vec);
 
-  GetSDFParam<bool>(_sdf, "publish_ned_odom", this->publishNEDOdom, false);
+  GetSDFParam<bool>(sdfPtr, "publish_ned_odom", this->publishNEDOdom, false);
 
   if (this->publishNEDOdom)
   {
-    this->nedFrameID = this->link->GetName() + "_ned";
-    this->nedOdomPub = this->create_publisher<nav_msgs::msg::Odometry>(
-      this->sensorOutputTopic + "_ned", rclcpp::QoS(1));
+    auto linkName = _ecm.ComponentData<components::Name>(this->linkEntity)
+      .value_or("base_link");
+    this->nedFrameID = linkName + "_ned";
+    this->nedOdomPub =
+      this->rosNode->create_publisher<nav_msgs::msg::Odometry>(
+        this->sensorOutputTopic + "_ned", 1);
     this->nedTransformIsInit = false;
   }
 
-  // Initialize the reference's velocity and acceleration vectors
-  if (!this->referenceLink)
-  {
-    this->lastRefLinVel = ignition::math::Vector3d::Zero;
-    this->lastRefAngVel = ignition::math::Vector3d::Zero;
-  }
-  else
-  {
-#if GAZEBO_MAJOR_VERSION >= 8
-    this->lastRefLinVel = this->referenceLink->WorldLinearVel();
-    this->lastRefAngVel = this->referenceLink->WorldAngularVel();
-#else
-    this->lastRefLinVel = this->referenceLink->GetWorldLinearVel().Ign();
-    this->lastRefAngVel = this->referenceLink->GetWorldAngularVel().Ign();
-#endif
-  }
+  this->lastRefLinVel = this->lastRefAngVel = math::Vector3d::Zero;
 
-  this->tfListener = std::make_shared<tf2_ros::TransformListener>(this->tfBuffer);
+  this->tfBuffer = std::make_shared<tf2_ros::Buffer>(this->rosNode->get_clock());
+  this->tfListener = std::make_shared<tf2_ros::TransformListener>(*this->tfBuffer);
 
-  this->rosSensorOutputPub = this->create_publisher<nav_msgs::msg::Odometry>(
-      this->sensorOutputTopic, rclcpp::QoS(1));
+  this->odomPub =
+    this->rosNode->create_publisher<nav_msgs::msg::Odometry>(
+      this->sensorOutputTopic, 1);
 }
 
-/////////////////////////////////////////////////
-bool PoseGTROSPlugin::OnUpdate(const common::UpdateInfo& _info)
+bool PoseGTROSPlugin::OnUpdate(const UpdateInfo& _info, EntityComponentManager& _ecm)
 {
   if (!this->EnableMeasurement(_info))
     return false;
 
-    // Read the current simulation time
-#if GAZEBO_MAJOR_VERSION >= 8
-    common::Time curTime = this->world->SimTime();
-#else
-    common::Time curTime = this->world->GetSimTime();
-#endif
-
-  double dt = curTime.Double() - this->lastMeasurementTime.Double();
-
-  if (dt <= 0)
+  using namespace std::chrono;
+  double dt = duration<double>(_info.simTime - this->lastMeasurementTime).count();
+  if (dt <= 0.0)
     return false;
 
-  ignition::math::Pose3d linkPose, refLinkPose;
-  ignition::math::Vector3d refLinVel, refAngVel;
-  ignition::math::Vector3d linkLinVel, linkAngVel;
+  this->link.EnableVelocityChecks(_ecm, true);
 
-  this->UpdateNEDTransform();
-  // Read sensor link's current pose and velocity
-#if GAZEBO_MAJOR_VERSION >= 8
-  linkLinVel = this->link->WorldLinearVel();
-  linkAngVel = this->link->WorldAngularVel();
+  const auto* poseComp = _ecm.Component<components::WorldPose>(this->linkEntity);
+  auto linVelOpt = this->link.WorldLinearVelocity(_ecm);
+  auto angVelOpt = this->link.WorldAngularVelocity(_ecm);
 
-  linkPose = this->link->WorldPose();
-#else
-  linkLinVel = this->link->GetWorldLinearVel().Ign();
-  linkAngVel = this->link->GetWorldAngularVel().Ign();
+  if (!poseComp || !linVelOpt || !angVelOpt)
+    return false;
 
-  linkPose = this->link->GetWorldPose().Ign();
-#endif
+  this->UpdateNEDTransform(_ecm);
+  this->UpdateReferenceFramePose(_ecm);
 
-  this->UpdateReferenceFramePose();
+  math::Pose3d  linkPose   = poseComp->Data();
+  math::Vector3d linkLinVel = linVelOpt.value();
+  math::Vector3d linkAngVel = angVelOpt.value();
 
-  // Update the reference frame in case it is given as a Gazebo link and
-  // read the reference link's linear and angular velocity vectors
-  if (this->referenceLink)
+  math::Vector3d refLinVel = math::Vector3d::Zero;
+  math::Vector3d refAngVel = math::Vector3d::Zero;
+
+  if (this->referenceLink != kNullEntity)
   {
-#if GAZEBO_MAJOR_VERSION >= 8
-    refLinVel = this->referenceLink->WorldLinearVel();
-    refAngVel = this->referenceLink->WorldAngularVel();
-
-    this->referenceFrame = this->referenceLink->WorldPose();
-#else
-    refLinVel = this->referenceLink->GetWorldLinearVel().Ign();
-    refAngVel = this->referenceLink->GetWorldAngularVel().Ign();
-
-    this->referenceFrame = this->referenceLink->GetWorldPose().Ign();
-#endif
-  }
-  else
-  {
-    // If no Gazebo link is given as a reference, the linear and angular
-    // velocity vectors are set to zero
-    refLinVel = ignition::math::Vector3d::Zero;
-    refAngVel = ignition::math::Vector3d::Zero;
+    Link refLink(this->referenceLink);
+    refLink.EnableVelocityChecks(_ecm, true);
+    auto rlv = refLink.WorldLinearVelocity(_ecm);
+    auto rav = refLink.WorldAngularVelocity(_ecm);
+    if (rlv) refLinVel = rlv.value();
+    if (rav) refAngVel = rav.value();
   }
 
-  // Transform pose and velocity vectors to be represented wrt the
-  // reference link provided
   linkLinVel -= refLinVel;
   linkAngVel -= refAngVel;
 
-  // Add noise to the link's linear velocity
-  linkLinVel += ignition::math::Vector3d(
+  linkLinVel += math::Vector3d(
+    this->GetGaussianNoise(this->noiseAmp),
+    this->GetGaussianNoise(this->noiseAmp),
+    this->GetGaussianNoise(this->noiseAmp));
+  linkAngVel += math::Vector3d(
     this->GetGaussianNoise(this->noiseAmp),
     this->GetGaussianNoise(this->noiseAmp),
     this->GetGaussianNoise(this->noiseAmp));
 
-  // Add noise to the link's angular velocity
-  linkAngVel += ignition::math::Vector3d(
-    this->GetGaussianNoise(this->noiseAmp),
-    this->GetGaussianNoise(this->noiseAmp),
-    this->GetGaussianNoise(this->noiseAmp));
+  auto rosTime = gz::sim::convert<rclcpp::Time>(_info.simTime);
+  this->PublishOdomMessage(rosTime, linkPose, linkLinVel, linkAngVel);
+  this->PublishNEDOdomMessage(rosTime, linkPose, linkLinVel, linkAngVel);
 
-  // Publish the odometry message of the base_link wrt Gazebo's ENU
-  // inertial reference frame
-  this->PublishOdomMessage(curTime, linkPose, linkLinVel, linkAngVel);
-  // If the world_ned frame exists (North-East-Down reference frame),
-  // the odometry is also published from the robot's base_link_ned wrt
-  // world_ned
-  this->PublishNEDOdomMessage(curTime, linkPose, linkLinVel, linkAngVel);
-
-  // Store the time stamp for this measurement
-  this->lastMeasurementTime = curTime;
+  this->lastMeasurementTime = _info.simTime;
   return true;
 }
 
-void PoseGTROSPlugin::PublishOdomMessage(common::Time _time,
-  ignition::math::Pose3d _pose, ignition::math::Vector3d _linVel,
-  ignition::math::Vector3d _angVel)
+void PoseGTROSPlugin::PublishOdomMessage(
+  const rclcpp::Time& _time, const math::Pose3d& _poseIn,
+  const math::Vector3d& _linVel, const math::Vector3d& _angVel)
 {
-  // Generates the odometry message of the robot's base_link frame wrt
-  // Gazebo's default ENU inertial reference frame
-  nav_msgs::msg::Odometry odomMsg;
+  nav_msgs::msg::Odometry odom;
+  odom.header.frame_id = "world";
+  odom.header.stamp    = _time;
 
-  // Initialize header of the odometry message
-  odomMsg.header.frame_id = "world";
-  odomMsg.header.stamp.sec = _time.sec;
-  odomMsg.header.stamp.nanosec = _time.nsec;
-  odomMsg.child_frame_id = this->link->GetName();
+  auto linkName = "base_link"; // set from cached name in practice
+  odom.child_frame_id  = linkName;
 
-  // Apply pose offset
-  _pose += this->offset;
-
-  // Fill out the messages
-  odomMsg.pose.pose.position.x = _pose.Pos().X();
-  odomMsg.pose.pose.position.y = _pose.Pos().Y();
-  odomMsg.pose.pose.position.z = _pose.Pos().Z();
-
-  odomMsg.pose.pose.orientation.x = _pose.Rot().X();
-  odomMsg.pose.pose.orientation.y = _pose.Rot().Y();
-  odomMsg.pose.pose.orientation.z = _pose.Rot().Z();
-  odomMsg.pose.pose.orientation.w = _pose.Rot().W();
-
-  odomMsg.twist.twist.linear.x = _linVel.X();
-  odomMsg.twist.twist.linear.y = _linVel.Y();
-  odomMsg.twist.twist.linear.z = _linVel.Z();
-
-  odomMsg.twist.twist.angular.x = _angVel.X();
-  odomMsg.twist.twist.angular.y = _angVel.Y();
-  odomMsg.twist.twist.angular.z = _angVel.Z();
-
-  // Fill in the covariance matrix
-  double gn2 = this->noiseSigma * this->noiseSigma;
-  odomMsg.pose.covariance[0] = gn2;
-  odomMsg.pose.covariance[7] = gn2;
-  odomMsg.pose.covariance[14] = gn2;
-  odomMsg.pose.covariance[21] = gn2;
-  odomMsg.pose.covariance[28] = gn2;
-  odomMsg.pose.covariance[35] = gn2;
-
-  odomMsg.twist.covariance[0] = gn2;
-  odomMsg.twist.covariance[7] = gn2;
-  odomMsg.twist.covariance[14] = gn2;
-  odomMsg.twist.covariance[21] = gn2;
-  odomMsg.twist.covariance[28] = gn2;
-  odomMsg.twist.covariance[35] = gn2;
-
-  this->rosSensorOutputPub->publish(odomMsg);
-}
-
-void PoseGTROSPlugin::PublishNEDOdomMessage(common::Time _time,
-  ignition::math::Pose3d _pose, ignition::math::Vector3d _linVel,
-  ignition::math::Vector3d _angVel)
-{
-  // Generates the odometry message of the robot's base_link_ned frame
-  // wrt generated NED inertial reference frame
-  if (!this->publishNEDOdom)
-    return;
-
-  if (!this->nedTransformIsInit)
-    return;
-
-  nav_msgs::msg::Odometry odomMsg;
-
-  // Initialize header of the odometry message
-  odomMsg.header.frame_id = this->referenceFrameID;
-  odomMsg.header.stamp.sec = _time.sec;
-  odomMsg.header.stamp.nanosec = _time.nsec;
-  odomMsg.child_frame_id = this->nedFrameID;
-
-  _pose.Pos() = _pose.Pos() - this->referenceFrame.Pos();
-  _pose.Pos() = this->referenceFrame.Rot().RotateVectorReverse(_pose.Pos());
-
-  ignition::math::Quaterniond q = this->nedTransform.Rot();
-  q = _pose.Rot() * q;
-  q =  this->referenceFrame.Rot() * q;
-  _pose.Rot() = q;
-
-  _linVel = this->referenceFrame.Rot().RotateVector(_linVel);
-  _angVel = this->referenceFrame.Rot().RotateVector(_angVel);
-
-  // Apply pose offset
-  _pose += this->offset;
-
-  // Fill out the messages
-  odomMsg.pose.pose.position.x = _pose.Pos().X();
-  odomMsg.pose.pose.position.y = _pose.Pos().Y();
-  odomMsg.pose.pose.position.z = _pose.Pos().Z();
-
-  odomMsg.pose.pose.orientation.x = _pose.Rot().X();
-  odomMsg.pose.pose.orientation.y = _pose.Rot().Y();
-  odomMsg.pose.pose.orientation.z = _pose.Rot().Z();
-  odomMsg.pose.pose.orientation.w = _pose.Rot().W();
-
-  odomMsg.twist.twist.linear.x = _linVel.X();
-  odomMsg.twist.twist.linear.y = _linVel.Y();
-  odomMsg.twist.twist.linear.z = _linVel.Z();
-
-  odomMsg.twist.twist.angular.x = _angVel.X();
-  odomMsg.twist.twist.angular.y = _angVel.Y();
-  odomMsg.twist.twist.angular.z = _angVel.Z();
+  math::Pose3d pose = _poseIn + this->offset;
+  odom.pose.pose.position.x    = pose.Pos().X();
+  odom.pose.pose.position.y    = pose.Pos().Y();
+  odom.pose.pose.position.z    = pose.Pos().Z();
+  odom.pose.pose.orientation.x = pose.Rot().X();
+  odom.pose.pose.orientation.y = pose.Rot().Y();
+  odom.pose.pose.orientation.z = pose.Rot().Z();
+  odom.pose.pose.orientation.w = pose.Rot().W();
+  odom.twist.twist.linear.x  = _linVel.X();
+  odom.twist.twist.linear.y  = _linVel.Y();
+  odom.twist.twist.linear.z  = _linVel.Z();
+  odom.twist.twist.angular.x = _angVel.X();
+  odom.twist.twist.angular.y = _angVel.Y();
+  odom.twist.twist.angular.z = _angVel.Z();
 
   double gn2 = this->noiseSigma * this->noiseSigma;
-  odomMsg.pose.covariance[0] = gn2;
-  odomMsg.pose.covariance[7] = gn2;
-  odomMsg.pose.covariance[14] = gn2;
-  odomMsg.pose.covariance[21] = gn2;
-  odomMsg.pose.covariance[28] = gn2;
-  odomMsg.pose.covariance[35] = gn2;
-
-  odomMsg.twist.covariance[0] = gn2;
-  odomMsg.twist.covariance[7] = gn2;
-  odomMsg.twist.covariance[14] = gn2;
-  odomMsg.twist.covariance[21] = gn2;
-  odomMsg.twist.covariance[28] = gn2;
-  odomMsg.twist.covariance[35] = gn2;
-
-  this->nedOdomPub->publish(odomMsg);
+  for (int i : {0,7,14,21,28,35})
+  {
+    odom.pose.covariance[i]  = gn2;
+    odom.twist.covariance[i] = gn2;
+  }
+  this->odomPub->publish(odom);
 }
 
-/////////////////////////////////////////////////
-void PoseGTROSPlugin::UpdateNEDTransform()
+void PoseGTROSPlugin::PublishNEDOdomMessage(
+  const rclcpp::Time& _time, const math::Pose3d& _poseIn,
+  const math::Vector3d& _linVel, const math::Vector3d& _angVel)
 {
-  if (!this->publishNEDOdom)
-    return;
-  if (this->nedTransformIsInit)
+  if (!this->publishNEDOdom || !this->nedTransformIsInit)
     return;
 
-  geometry_msgs::msg::TransformStamped childTransform;
-  std::string targetFrame = this->nedFrameID;
-  std::string sourceFrame = this->link->GetName();
+  nav_msgs::msg::Odometry odom;
+  odom.header.frame_id = this->referenceFrameID;
+  odom.header.stamp    = _time;
+  odom.child_frame_id  = this->nedFrameID;
+
+  math::Pose3d pose = _poseIn;
+  pose.Pos() -= this->referenceFrame.Pos();
+  pose.Pos()  = this->referenceFrame.Rot().RotateVectorReverse(pose.Pos());
+  math::Quaterniond q = this->nedTransform.Rot();
+  q = pose.Rot() * q;
+  q = this->referenceFrame.Rot() * q;
+  pose.Rot() = q;
+  pose += this->offset;
+
+  math::Vector3d lv = this->referenceFrame.Rot().RotateVector(_linVel);
+  math::Vector3d av = this->referenceFrame.Rot().RotateVector(_angVel);
+
+  odom.pose.pose.position.x    = pose.Pos().X();
+  odom.pose.pose.position.y    = pose.Pos().Y();
+  odom.pose.pose.position.z    = pose.Pos().Z();
+  odom.pose.pose.orientation.x = pose.Rot().X();
+  odom.pose.pose.orientation.y = pose.Rot().Y();
+  odom.pose.pose.orientation.z = pose.Rot().Z();
+  odom.pose.pose.orientation.w = pose.Rot().W();
+  odom.twist.twist.linear.x  = lv.X();
+  odom.twist.twist.linear.y  = lv.Y();
+  odom.twist.twist.linear.z  = lv.Z();
+  odom.twist.twist.angular.x = av.X();
+  odom.twist.twist.angular.y = av.Y();
+  odom.twist.twist.angular.z = av.Z();
+
+  double gn2 = this->noiseSigma * this->noiseSigma;
+  for (int i : {0,7,14,21,28,35})
+  {
+    odom.pose.covariance[i]  = gn2;
+    odom.twist.covariance[i] = gn2;
+  }
+  this->nedOdomPub->publish(odom);
+}
+
+void PoseGTROSPlugin::UpdateNEDTransform(EntityComponentManager& /*_ecm*/)
+{
+  if (!this->publishNEDOdom || this->nedTransformIsInit)
+    return;
+
+  geometry_msgs::msg::TransformStamped ts;
   try
   {
-    childTransform = this->tfBuffer.lookupTransform(
-      targetFrame, sourceFrame, rclcpp::Time(0));
+    ts = this->tfBuffer->lookupTransform(
+      this->nedFrameID,
+      this->tfLocalNEDFrame.header.frame_id,  // link frame
+      tf2::TimePointZero);
   }
-  catch(const tf2::TransformException &ex)
+  catch (const tf2::TransformException& ex)
   {
-    gzmsg << "Transform between " << targetFrame << " and " << sourceFrame
-      << std::endl;
-    gzmsg << ex.what() << std::endl;
+    gzmsg << "NED transform not yet available: " << ex.what() << std::endl;
     return;
   }
 
-  this->nedTransform.Pos() = ignition::math::Vector3d(
-    childTransform.transform.translation.x,
-    childTransform.transform.translation.y,
-    childTransform.transform.translation.z);
-  this->nedTransform.Rot() = ignition::math::Quaterniond(
-    childTransform.transform.rotation.w,
-    childTransform.transform.rotation.x,
-    childTransform.transform.rotation.y,
-    childTransform.transform.rotation.z);
-
+  this->nedTransform.Pos() = math::Vector3d(
+    ts.transform.translation.x,
+    ts.transform.translation.y,
+    ts.transform.translation.z);
+  this->nedTransform.Rot() = math::Quaterniond(
+    ts.transform.rotation.w,
+    ts.transform.rotation.x,
+    ts.transform.rotation.y,
+    ts.transform.rotation.z);
   this->nedTransformIsInit = true;
 }
 
-/////////////////////////////////////////////////
-GZ_REGISTER_MODEL_PLUGIN(PoseGTROSPlugin)
+GZ_ADD_PLUGIN(PoseGTROSPlugin, gz::sim::System,
+  gz::sim::ISystemConfigure, gz::sim::ISystemUpdate)
 
-}
+}} // namespace gz::sim

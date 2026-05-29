@@ -1,160 +1,206 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
 # Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from __future__ import print_function
-import numpy
+# ROS2 + Gazebo Harmonic migration
+
+from __future__ import annotations
+
+import numpy as np
+
 import rclpy
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from rclpy.node import Node
+
 from sensor_msgs.msg import Joy
-from uuv_gazebo_ros_plugins_msgs.msg import FloatStamped
-from uuv_thrusters.models import Thruster
+from std_msgs.msg import Float64
 
 
 class FinnedUUVControllerNode(Node):
+
     def __init__(self):
         super().__init__('finned_uuv_teleop')
 
-        self._ready = False
+        self.get_logger().info('Initializing FinnedUUVControllerNode')
 
-        # Test if any of the needed parameters are missing
-        param_labels = ['n_fins', 'gain_roll', 'gain_pitch', 'gain_yaw',
-                        'thruster_model', 'fin_topic_prefix',
-                        'fin_topic_suffix', 'thruster_topic',
-                        'axis_thruster', 'axis_roll', 'axis_pitch', 'axis_yaw']
+        # -----------------------------
+        # Parameters
+        # -----------------------------
+        self.declare_parameter('n_fins', 4)
 
-        for label in param_labels:
-            if not self.has_parameter('~%s' % label):
-                raise RuntimeError('Parameter missing, label=%s' % label)
+        self.declare_parameter('gain_roll', [1.0, 1.0, 1.0, 1.0])
+        self.declare_parameter('gain_pitch', [1.0, 1.0, -1.0, -1.0])
+        self.declare_parameter('gain_yaw', [-1.0, 1.0, 1.0, -1.0])
 
-        # Number of fins
-        self._n_fins = self.get_parameter('~n_fins').value
+        self.declare_parameter('axis_thruster', 1)
+        self.declare_parameter('axis_roll', 0)
+        self.declare_parameter('axis_pitch', 4)
+        self.declare_parameter('axis_yaw', 3)
 
-        # Thruster joy axis gain
-        self._thruster_joy_gain = 1
-        if self.has_parameter('~thruster_joy_gain'):
-            self._thruster_joy_gain = self.get_parameter('~thruster_joy_gain').value
+        self.declare_parameter('thruster_joy_gain', 1.0)
+        self.declare_parameter('max_thrust', 200.0)
 
-        # Read the vector for contribution of each fin on the change on
-        # orientation
-        gain_roll = self.get_parameter('~gain_roll').value
-        gain_pitch = self.get_parameter('~gain_pitch').value
-        gain_yaw = self.get_parameter('~gain_yaw').value
+        self.declare_parameter('thruster_topic', 'thrusters/0/input')
 
-        if len(gain_roll) != self._n_fins or len(gain_pitch) != self._n_fins \
-            or len(gain_yaw) != self._n_fins:
-            raise RuntimeError('Input gain vectors must have length '
-                             'equal to the number of fins')
+        self.declare_parameter('fin_topic_prefix', 'fins/')
+        self.declare_parameter('fin_topic_suffix', '/input')
 
-        # Create the command angle to fin angle mapping
-        self._rpy_to_fins = numpy.vstack((gain_roll, gain_pitch, gain_yaw)).T
+        # -----------------------------
+        # Read parameters
+        # -----------------------------
+        self._n_fins = self.get_parameter(
+            'n_fins').get_parameter_value().integer_value
 
-        # Read the joystick mapping
-        self._joy_axis = {'axis_thruster': self.get_parameter('~axis_thruster').value,
-                          'axis_roll': self.get_parameter('~axis_roll').value,
-                          'axis_pitch': self.get_parameter('~axis_pitch').value,
-                          'axis_yaw': self.get_parameter('~axis_yaw').value}
+        gain_roll = self.get_parameter(
+            'gain_roll').get_parameter_value().double_array_value
 
-        # Subscribe to the fin angle topics
-        self._pub_cmd = list()
-        self._fin_topic_prefix = self.get_parameter('~fin_topic_prefix').value
-        self._fin_topic_suffix = self.get_parameter('~fin_topic_suffix').value
+        gain_pitch = self.get_parameter(
+            'gain_pitch').get_parameter_value().double_array_value
 
-        # Create QoS profile for reliable communication
-        qos_profile = QoSProfile(depth=10, reliability=QoSReliabilityPolicy.RELIABLE)
+        gain_yaw = self.get_parameter(
+            'gain_yaw').get_parameter_value().double_array_value
+
+        self._thruster_joy_gain = self.get_parameter(
+            'thruster_joy_gain').get_parameter_value().double_value
+
+        self._max_thrust = self.get_parameter(
+            'max_thrust').get_parameter_value().double_value
+
+        self._joy_axis = {
+            'axis_thruster':
+                self.get_parameter('axis_thruster')
+                .get_parameter_value().integer_value,
+
+            'axis_roll':
+                self.get_parameter('axis_roll')
+                .get_parameter_value().integer_value,
+
+            'axis_pitch':
+                self.get_parameter('axis_pitch')
+                .get_parameter_value().integer_value,
+
+            'axis_yaw':
+                self.get_parameter('axis_yaw')
+                .get_parameter_value().integer_value
+        }
+
+        if (
+            len(gain_roll) != self._n_fins or
+            len(gain_pitch) != self._n_fins or
+            len(gain_yaw) != self._n_fins
+        ):
+            raise RuntimeError(
+                'Gain vector sizes must match n_fins'
+            )
+
+        self._rpy_to_fins = np.vstack(
+            (gain_roll, gain_pitch, gain_yaw)
+        ).T
+
+        # -----------------------------
+        # Publishers
+        # -----------------------------
+        self._pub_cmd = []
+
+        fin_topic_prefix = self.get_parameter(
+            'fin_topic_prefix').get_parameter_value().string_value
+
+        fin_topic_suffix = self.get_parameter(
+            'fin_topic_suffix').get_parameter_value().string_value
 
         for i in range(self._n_fins):
-            topic = self._fin_topic_prefix + str(i) + self._fin_topic_suffix
-            pub = self.create_publisher(FloatStamped, topic, qos_profile)
+            topic = f'{fin_topic_prefix}{i}{fin_topic_suffix}'
+
+            pub = self.create_publisher(
+                Float64,
+                topic,
+                10
+            )
+
             self._pub_cmd.append(pub)
 
-        # Create the thruster model object
-        try:
-            self._thruster_topic = self.get_parameter('~thruster_topic').value
-            self._thruster_params = self.get_parameter('~thruster_model').value
-            if 'max_thrust' not in self._thruster_params:
-                raise RuntimeError('No limit to thruster output was given')
-            self._thruster_model = Thruster.create_thruster(
-                        self._thruster_params['name'], 0,
-                        self._thruster_topic, None, None,
-                        **self._thruster_params['params'])
-        except Exception as e:
-            raise RuntimeError('Thruster model could not be initialized: %s' % str(e))
+        thruster_topic = self.get_parameter(
+            'thruster_topic').get_parameter_value().string_value
 
-        # Subscribe to the joystick topic
-        qos_joy = QoSProfile(depth=10, reliability=QoSReliabilityPolicy.RELIABLE)
-        self.sub_joy = self.create_subscription(
-            Joy, 'joy', self.joy_callback, qos_joy)
+        self._thruster_pub = self.create_publisher(
+            Float64,
+            thruster_topic,
+            10
+        )
 
-        self._ready = True
+        # -----------------------------
+        # Subscriber
+        # -----------------------------
+        self.create_subscription(
+            Joy,
+            'joy',
+            self.joy_callback,
+            10
+        )
 
-    def joy_callback(self, msg):
-        """Handle callbacks with joystick state."""
+        self.get_logger().info('Finned teleop node started')
 
-        if not self._ready:
-            return
+    def joy_callback(self, msg: Joy):
 
         try:
-            thrust = max(0, msg.axes[self._joy_axis['axis_thruster']]) * \
-                self._thruster_params['max_thrust'] * \
+            thrust_axis = msg.axes[self._joy_axis['axis_thruster']]
+
+            thrust = max(0.0, thrust_axis) * \
+                self._max_thrust * \
                 self._thruster_joy_gain
 
             cmd_roll = msg.axes[self._joy_axis['axis_roll']]
-            if abs(cmd_roll) < 0.2:
+            cmd_pitch = msg.axes[self._joy_axis['axis_pitch']]
+            cmd_yaw = msg.axes[self._joy_axis['axis_yaw']]
+
+            deadzone = 0.2
+
+            if abs(cmd_roll) < deadzone:
                 cmd_roll = 0.0
 
-            cmd_pitch = msg.axes[self._joy_axis['axis_pitch']]
-            if abs(cmd_pitch) < 0.2:
+            if abs(cmd_pitch) < deadzone:
                 cmd_pitch = 0.0
 
-            cmd_yaw = msg.axes[self._joy_axis['axis_yaw']]
-            if abs(cmd_yaw) < 0.2:
+            if abs(cmd_yaw) < deadzone:
                 cmd_yaw = 0.0
 
-            rpy = numpy.array([cmd_roll, cmd_pitch, cmd_yaw])
+            rpy = np.array([
+                cmd_roll,
+                cmd_pitch,
+                cmd_yaw
+            ])
+
             fins = self._rpy_to_fins.dot(rpy)
 
-            self._thruster_model.publish_command(thrust)
+            # Publish thruster
+            thrust_msg = Float64()
+            thrust_msg.data = thrust
 
+            self._thruster_pub.publish(thrust_msg)
+
+            # Publish fins
             for i in range(self._n_fins):
-                cmd = FloatStamped()
-                cmd.data = fins[i]
-                self._pub_cmd[i].publish(cmd)
+                fin_msg = Float64()
+                fin_msg.data = float(fins[i])
 
-            if not self._ready:
-                return
+                self._pub_cmd[i].publish(fin_msg)
+
         except Exception as e:
             self.get_logger().error(
-                'Error occurred while parsing joystick input, check '
-                'if the joy_id corresponds to the joystick '
-                'being used. message={}'.format(e))
+                f'Joystick parsing error: {e}'
+            )
 
 
 def main(args=None):
+
     rclpy.init(args=args)
-    print('starting FinnedUUVControllerNode.py')
+
+    node = FinnedUUVControllerNode()
 
     try:
-        node = FinnedUUVControllerNode()
         rclpy.spin(node)
-    except Exception as e:
-        print('caught exception: %s' % str(e))
-    finally:
-        node.destroy_node()
-        print('exiting')
+    except KeyboardInterrupt:
+        pass
 
+    node.destroy_node()
     rclpy.shutdown()
 
 

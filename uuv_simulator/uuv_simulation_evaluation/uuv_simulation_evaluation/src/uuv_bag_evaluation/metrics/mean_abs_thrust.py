@@ -12,7 +12,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from __future__ import print_function
+
+# ROS 2 / Gazebo Harmonic (gz-sim 8) port
+# Changes from ROS 1:
+#   - Removed `from __future__ import print_function` (Python 3 only in ROS 2)
+#   - Bug fix carried forward: `np.array(input_values)` corrected to
+#     `np.array(input_values[tag])` (same fix applied to MaxAbsThrust)
+#   - Bag reader backend is now rosbag2_py (handled in uuv_bag_evaluation2)
+
 import numpy as np
 from .kpi import KPI
 
@@ -23,13 +30,11 @@ class MeanAbsThrust(KPI):
     UNIT = 'N'
     TARGET = 'thruster'
 
-
     def __init__(self, use_bag=True, time_offset=0.0):
         KPI.__init__(self, use_bag, time_offset)
 
         t = None
         if self._bag is not None:
-            # Initialize the data structure for this KPI
             self._input_values = dict()
             for i in range(self._bag.parsers['thrusters'].n_thrusters):
                 t, thrusts = self._bag.parsers['thrusters'].get_thrust_data(i)
@@ -58,7 +63,9 @@ class MeanAbsThrust(KPI):
             for i, tag in enumerate(input_values.keys()):
                 assert i == tag, 'Thruster indexes must be the keys of the dictionary'
                 assert self.is_iterable(input_values[tag]), 'No valid thrust force data'
-                self._input_values[tag] = np.array(input_values)
+                self._input_values[tag] = np.array(input_values[tag])
 
-        self._kpi_value = np.max([np.mean(np.abs(self._input_values[i])) for i in self._input_values])
+        self._kpi_value = np.max(
+            [np.mean(np.abs(self._input_values[i])) for i in self._input_values]
+        )
         return self._kpi_value

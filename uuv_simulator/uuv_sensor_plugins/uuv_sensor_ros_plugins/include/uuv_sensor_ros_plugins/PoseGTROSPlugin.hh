@@ -1,92 +1,46 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-// This source code is derived from gazebo_ros_pkgs
-//   (https://github.com/ros-simulation/gazebo_ros_pkgs)
-// * Copyright 2012 Open Source Robotics Foundation,
-// licensed under the Apache-2.0 license,
-// cf. 3rd-party-licenses.txt file in the root directory of this source tree.
-//
-// The original code was modified to:
-// - be more consistent with other sensor plugins within uuv_simulator,
-// - adhere to Gazebo's coding standards.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #ifndef __UUV_POSE_GT_SENSOR_ROS_PLUGIN_HH__
 #define __UUV_POSE_GT_SENSOR_ROS_PLUGIN_HH__
 
-#include <gazebo/gazebo.hh>
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
-#include <gazebo/physics/physics.hh>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2_ros/transform_listener.h>
-#include <memory>
+#include <tf2_ros/buffer.h>
+#include <gz/math/Pose3.hh>
+#include <gz/math/Vector3.hh>
+#include <gz/sim/EntityComponentManager.hh>
 #include <uuv_sensor_ros_plugins/ROSBaseModelPlugin.hh>
+#include <memory>
+#include <string>
 
-namespace gazebo
-{
-  class PoseGTROSPlugin : public ROSBaseModelPlugin, public rclcpp::Node
-  {
-    /// \brief Class constructor
-    public: PoseGTROSPlugin();
+namespace gz { namespace sim {
 
-    /// \brief Class destructor
-    public: ~PoseGTROSPlugin();
+class PoseGTROSPlugin : public ROSBaseModelPlugin {
+public:
+  PoseGTROSPlugin();
+  virtual ~PoseGTROSPlugin();
+  void Configure(const Entity& _entity,
+                 const std::shared_ptr<const sdf::Element>& _sdf,
+                 EntityComponentManager& _ecm, EventManager& _eventMgr) override;
 
-    /// \brief Load the plugin
-    public: virtual void Load(physics::ModelPtr _model, sdf::ElementPtr _sdf);
+protected:
+  bool OnUpdate(const UpdateInfo& _info, EntityComponentManager& _ecm) override;
+  void PublishNEDOdomMessage(const rclcpp::Time& _time, const gz::math::Pose3d& _pose,
+    const gz::math::Vector3d& _linVel, const gz::math::Vector3d& _angVel);
+  void PublishOdomMessage(const rclcpp::Time& _time, const gz::math::Pose3d& _pose,
+    const gz::math::Vector3d& _linVel, const gz::math::Vector3d& _angVel);
+  void UpdateNEDTransform(EntityComponentManager& _ecm);
 
-    /// \brief Update sensor measurement
-    protected: virtual bool OnUpdate(const common::UpdateInfo& _info);
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr nedOdomPub, odomPub;
+  gz::math::Pose3d offset, nedTransform;
+  std::string nedFrameID;
+  bool nedTransformIsInit{false}, publishNEDOdom{false};
+  std::shared_ptr<tf2_ros::Buffer> tfBuffer;
+  std::shared_ptr<tf2_ros::TransformListener> tfListener;
+  gz::math::Vector3d lastLinVel, lastAngVel, linAcc, angAcc,
+                     lastRefLinVel, lastRefAngVel, refLinAcc, refAngAcc;
+};
 
-    protected: void PublishNEDOdomMessage(common::Time _time,
-      ignition::math::Pose3d _pose, ignition::math::Vector3d _linVel,
-      ignition::math::Vector3d _angVel);
-
-    protected: void PublishOdomMessage(common::Time _time,
-      ignition::math::Pose3d _pose, ignition::math::Vector3d _linVel,
-      ignition::math::Vector3d _angVel);
-
-    protected: void UpdateNEDTransform();
-
-    protected: ros::Publisher nedOdomPub;
-
-    /// \brief Pose offset
-    protected: ignition::math::Pose3d offset;
-
-    protected: std::string nedFrameID;
-
-    protected: ignition::math::Pose3d nedTransform;
-
-    protected: bool nedTransformIsInit;
-
-    protected: bool publishNEDOdom;
-
-    protected: tf2_ros::Buffer tfBuffer;
-
-    protected: boost::shared_ptr<tf2_ros::TransformListener> tfListener;
-
-    protected: ignition::math::Vector3d lastLinVel;
-    protected: ignition::math::Vector3d lastAngVel;
-    protected: ignition::math::Vector3d linAcc;
-    protected: ignition::math::Vector3d angAcc;
-    protected: ignition::math::Vector3d lastRefLinVel;
-    protected: ignition::math::Vector3d lastRefAngVel;
-    protected: ignition::math::Vector3d refLinAcc;
-    protected: ignition::math::Vector3d refAngAcc;
-  };
-}
-
-#endif // __UUV_POSE_GT_SENSOR_ROS_PLUGIN_HH__
+}}  // namespace gz::sim
+#endif

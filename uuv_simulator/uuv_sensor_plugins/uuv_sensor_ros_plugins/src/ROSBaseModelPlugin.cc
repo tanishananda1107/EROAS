@@ -1,103 +1,98 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #include <uuv_sensor_ros_plugins/ROSBaseModelPlugin.hh>
+#include <gz/sim/components/Name.hh>
+#include <gz/sim/components/ParentEntity.hh>
+#include <gz/sim/components/WorldPose.hh>
+#include <gz/sim/components/Link.hh>
 
-namespace gazebo
-{
+namespace gz { namespace sim {
 
-/////////////////////////////////////////////////
 ROSBaseModelPlugin::ROSBaseModelPlugin()
 {
-  // Initialize local NED frame
-  this->localNEDFrame = ignition::math::Pose3d::Zero;
-  this->localNEDFrame.Rot() = ignition::math::Quaterniond(
-    ignition::math::Vector3d(M_PI, 0, 0));
-  // Initialize the local NED frame
-  this->tfLocalNEDFrame.setOrigin(tf::Vector3(0.0, 0.0, 0.0));
-  this->tfLocalNEDFrame.setRotation(
-    tf::createQuaternionFromRPY(M_PI, 0.0, 0.0));
-  // Initialize TF broadcaster
-  this->tfBroadcaster = new tf::TransformBroadcaster();
+  this->localNEDFrame = math::Pose3d::Zero;
+  this->localNEDFrame.Rot() = math::Quaterniond(math::Vector3d(M_PI, 0, 0));
+
+  this->tfLocalNEDFrame.transform.translation.x = 0;
+  this->tfLocalNEDFrame.transform.translation.y = 0;
+  this->tfLocalNEDFrame.transform.translation.z = 0;
+  // Roll PI rotation (ENU -> NED)
+  tf2::Quaternion q;
+  q.setRPY(M_PI, 0.0, 0.0);
+  this->tfLocalNEDFrame.transform.rotation.x = q.x();
+  this->tfLocalNEDFrame.transform.rotation.y = q.y();
+  this->tfLocalNEDFrame.transform.rotation.z = q.z();
+  this->tfLocalNEDFrame.transform.rotation.w = q.w();
 }
 
-/////////////////////////////////////////////////
-ROSBaseModelPlugin::~ROSBaseModelPlugin()
-{
-  if (this->tfBroadcaster)
-    delete this->tfBroadcaster;
-}
+ROSBaseModelPlugin::~ROSBaseModelPlugin() {}
 
-/////////////////////////////////////////////////
-void ROSBaseModelPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
+void ROSBaseModelPlugin::Configure(
+  const Entity& _entity,
+  const std::shared_ptr<const sdf::Element>& _sdf,
+  EntityComponentManager& _ecm,
+  EventManager& _eventMgr)
 {
-  // Initialize model pointer
-  this->model = _model;
+  this->modelEntity = _entity;
+  this->model = Model(_entity);
+  this->eventMgr_ = &_eventMgr;
 
-  // Store world pointer
-  this->world = this->model->GetWorld();
+  auto sdfPtr = std::const_pointer_cast<sdf::Element>(_sdf);
 
   std::string linkName;
-  GZ_ASSERT(_sdf->HasElement("link_name"), "No link name provided");
-  GetSDFParam<std::string>(_sdf, "link_name", linkName, "");
-  GZ_ASSERT(!linkName.empty(), "Link name string is empty");
+  GZ_ASSERT(sdfPtr->HasElement("link_name"), "No link_name provided in SDF");
+  GetSDFParam<std::string>(sdfPtr, "link_name", linkName, "");
+  GZ_ASSERT(!linkName.empty(), "link_name is empty");
 
-  // Get flag to enable generation of Gazebo messages
-  GetSDFParam<bool>(_sdf, "enable_local_ned_frame", this->enableLocalNEDFrame,
-    true);
+  GetSDFParam<bool>(sdfPtr, "enable_local_ned_frame",
+    this->enableLocalNEDFrame, true);
 
-  if (_sdf->HasElement("reference_link_name"))
+  // Resolve link entity
+  this->linkEntity = this->model.LinkByName(_ecm, linkName);
+  GZ_ASSERT(this->linkEntity != kNullEntity, "Link not found");
+  this->link = Link(this->linkEntity);
+
+  // Optional reference link
+  if (sdfPtr->HasElement("reference_link_name"))
   {
     std::string refLinkName;
-    GetSDFParam<std::string>(_sdf, "reference_link_name", refLinkName, "");
+    GetSDFParam<std::string>(sdfPtr, "reference_link_name", refLinkName, "");
     if (!refLinkName.empty())
     {
-      this->referenceLink = this->model->GetLink(refLinkName);
-      GZ_ASSERT(this->referenceLink != NULL, "Invalid reference link");
+      this->referenceLink = this->model.LinkByName(_ecm, refLinkName);
+      GZ_ASSERT(this->referenceLink != kNullEntity, "Reference link not found");
       this->referenceFrameID = refLinkName;
     }
   }
 
-  // Get sensor link
-  this->link = this->model->GetLink(linkName);
-  GZ_ASSERT(this->link != NULL, "Invalid link pointer");
+  // Set NED frame header IDs
+  this->tfLocalNEDFrame.header.frame_id = linkName;
+  this->tfLocalNEDFrame.child_frame_id  = linkName + "_ned";
 
-  // Set the frame IDs for the local NED frame
-  this->tfLocalNEDFrame.frame_id_ = this->link->GetName();
-  this->tfLocalNEDFrame.child_frame_id_ = this->link->GetName() + "_ned";
+  this->InitBasePlugin(sdfPtr);
 
-  this->InitBasePlugin(_sdf);
-
-  // Bind the sensor update callback function to the world update event
-  this->updateConnection = event::Events::ConnectWorldUpdateBegin(
-      boost::bind(&ROSBasePlugin::OnUpdate, this, _1));
+  // TF broadcaster
+  this->tfBroadcaster =
+    std::make_shared<tf2_ros::TransformBroadcaster>(this->rosNode);
 }
 
-/////////////////////////////////////////////////
-bool ROSBaseModelPlugin::OnUpdate(const common::UpdateInfo&)
+void ROSBaseModelPlugin::Update(
+  const UpdateInfo& _info,
+  EntityComponentManager& _ecm)
+{
+  this->OnUpdate(_info, _ecm);
+}
+
+bool ROSBaseModelPlugin::OnUpdate(
+  const UpdateInfo& /*_info*/,
+  EntityComponentManager& /*_ecm*/)
 {
   return true;
 }
 
-/////////////////////////////////////////////////
 void ROSBaseModelPlugin::SendLocalNEDTransform()
 {
-  geometry_msgs::TransformStamped msg;
-  this->tfLocalNEDFrame.stamp_ = ros::Time::now();
-  tf::transformStampedTFToMsg(this->tfLocalNEDFrame, msg);
-  this->tfBroadcaster->sendTransform(msg);  
+  this->tfLocalNEDFrame.header.stamp = this->rosNode->now();
+  this->tfBroadcaster->sendTransform(this->tfLocalNEDFrame);
 }
 
-}
+}} // namespace gz::sim

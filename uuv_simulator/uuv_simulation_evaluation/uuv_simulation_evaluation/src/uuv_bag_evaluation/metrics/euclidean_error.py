@@ -13,6 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ROS 2 / Gazebo Harmonic (gz-sim 8) port
+# No ROS-specific API used directly in this file; changes are inherited
+# from kpi.py (uuv_bag_evaluation2 import, Python 3 only).
+
 import numpy as np
 from .kpi import KPI
 
@@ -28,17 +32,22 @@ class EuclideanError(KPI):
         self._kpi_arg = error_elem
 
         if self._error_set is not None:
-            assert error_elem in self._error_set.get_tags(), 'Error element given does not exist'
-            # Initialize the data structure for this KPI
-            self._input_values = dict(error=self._error_set.get_data(error_elem, self._time_offset))
+            assert error_elem in self._error_set.get_tags(), \
+                'Error element given does not exist'
+            self._input_values = dict(
+                error=self._error_set.get_data(error_elem, self._time_offset)
+            )
         else:
             self._input_values = None
 
     def compute(self, input_values=None):
-        assert input_values is not None or self._input_values is not None, 'No input data to process'
+        assert input_values is not None or self._input_values is not None, \
+            'No input data to process'
         if self._input_values is None:
             assert self.is_iterable(input_values), 'Invalid input data'
             self._input_values = dict(error=np.array(input_values))
 
-        self._kpi_value = np.sqrt(np.sum(self.get_squared(self._input_values['error'])))
+        self._kpi_value = np.sqrt(
+            np.sum(self.get_squared(self._input_values['error']))
+        )
         return self._kpi_value

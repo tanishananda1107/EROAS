@@ -12,263 +12,353 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from __future__ import print_function
+
+# ROS2 / Gazebo Harmonic (gz-sim 8) migration notes:
+#   - Removed: `import tf.transformations as trans`  (ROS1-only)
+#     Not used directly in this file; tf math lives in error.py now.
+#   - Changed: `from .recording import Recording`  (was bare import)
+#   - Changed: `from .error import ErrorSet`        (was bare import)
+#   - `yaml.load(...)` → `yaml.safe_load(...)` (security best-practice;
+#     bare yaml.load raises a warning in modern PyYAML).
+#   - `from __future__ import print_function` removed (Python 3 only).
+
+from __future__ import annotations
+
 import os
 import sys
+import logging
 import numpy as np
 import yaml
-import tf.transformations as trans
 from copy import deepcopy
+
+import matplotlib
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (registers 3D projection)
+
 from .recording import Recording
 from .error import ErrorSet
-from .metrics import KPI
-import matplotlib.pyplot as plt
-import logging
-from mpl_toolkits.mplot3d import Axes3D
+from .metrics import KPI        # must be ported separately to ROS2
 
 try:
     plt.rc('text', usetex=True)
     plt.rc('font', family='sans-serif')
 except Exception as e:
-    print('Cannot use Latex configuration with matplotlib, message=' + str(e))
+    print('Cannot use LaTeX configuration with matplotlib, message=' + str(e))
+
 
 class Evaluation(object):
-    def __init__(self, filename, output_dir='.', time_offset=0.0):
-        # Setting up the log
+    """High-level evaluation wrapper for a single ROS2 bag.
+
+    Parameters
+    ----------
+    filename : str
+        Path to the ROS2 bag *directory* (see Recording for details).
+    output_dir : str
+        Directory where results (KPIs, plots) will be written.
+    time_offset : float
+        Simulation time (seconds) to skip before computing KPIs.
+    storage_id : str
+        rosbag2_py storage plugin: ``'sqlite3'`` (default) or ``'mcap'``.
+    """
+
+    def __init__(
+        self,
+        filename: str,
+        output_dir: str = '.',
+        time_offset: float = 0.0,
+        storage_id: str = 'sqlite3',
+    ):
+        # ----------------------------------------------------------------
+        # Logging (pure Python – no rospy)
+        # ----------------------------------------------------------------
         self._logger = logging.getLogger('run_evaluation')
-        if len(self._logger.handlers) == 0:
-            out_hdlr = logging.StreamHandler(sys.stdout)
-            out_hdlr.setFormatter(logging.Formatter('%(asctime)s | %(levelname)s | %(module)s | %(message)s'))
-            out_hdlr.setLevel(logging.INFO)
-            self._logger.addHandler(out_hdlr)
+        if not self._logger.handlers:
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setFormatter(
+                logging.Formatter('%(asctime)s | %(levelname)s | %(module)s | %(message)s')
+            )
+            handler.setLevel(logging.INFO)
+            self._logger.addHandler(handler)
             self._logger.setLevel(logging.INFO)
 
-        self._logger.info('Opening bag: %s' % filename)
-        self.recording = Recording(filename)
-        
+        self._logger.info('Opening bag: %s', filename)
+
+        # ROS2: pass storage_id so Recording picks the right plugin.
+        self.recording = Recording(filename, storage_id=storage_id)
         self.recording.init_parsers()
 
-        # Create error set object
+        # ----------------------------------------------------------------
+        # Error set
+        # ----------------------------------------------------------------
         self._error_set = ErrorSet.get_instance()
         if self._error_set is None:
             self._logger.error('Error set has not been correctly initialized')
-            raise Exception('Error set has not been correctly initialized')
+            raise RuntimeError('Error set has not been correctly initialized')
 
-        self._error_set.compute_errors()        
+        self._error_set.compute_errors()
 
-        # Assigning the output directory for the results
+        # ----------------------------------------------------------------
+        # Output directory
+        # ----------------------------------------------------------------
         if not os.path.isdir(output_dir):
-            self._logger.error('Invalid output directory, dir=%s' % str(output_dir) )
-            raise Exception('Invalid output directory')
+            self._logger.error('Invalid output directory, dir=%s', output_dir)
+            raise NotADirectoryError('Invalid output directory: %s' % output_dir)
 
-        # Simulation time offset to start the computation of each KPI
+        # ----------------------------------------------------------------
+        # Time offset
+        # ----------------------------------------------------------------
         if time_offset >= 0.0:
             self._time_offset = time_offset
         else:
             self._logger.error('Invalid time offset, setting time offset to zero')
             self._time_offset = 0.0
 
-        self._logger.info('Time offset for KPI evaluation [s]=' + str(self._time_offset))
+        self._logger.info(
+            'Time offset for KPI evaluation [s]=%s', str(self._time_offset)
+        )
 
         self._output_dir = output_dir
-        # Table of configuration parameters (set per default all KPIs)
-        self._kpis = list()
-        for kpi in KPI.get_all_kpi_tags():
-            if KPI.get_kpi_target(kpi) == 'error':
+
+        # ----------------------------------------------------------------
+        # KPIs – build the full set by default
+        # ----------------------------------------------------------------
+        self._kpis: list[dict] = []
+        for kpi_tag in KPI.get_all_kpi_tags():
+            if KPI.get_kpi_target(kpi_tag) == 'error':
                 for error_tag in self._error_set.get_tags():
-                    self._kpis.append(dict(func=KPI.get_kpi(kpi, error_tag),
-                                           value=0.0))
+                    self._kpis.append(
+                        dict(func=KPI.get_kpi(kpi_tag, error_tag), value=0.0)
+                    )
             else:
-                self._kpis.append(dict(func=KPI.get_kpi(kpi),
-                                       value=0.0))
+                self._kpis.append(
+                    dict(func=KPI.get_kpi(kpi_tag), value=0.0)
+                )
 
-        self._cost_fcn_terms = dict()
+        self._cost_fcn_terms: dict = {}
 
-        # Calculating the KPIs for this bag
+        # Initial KPI computation
         self.compute_kpis()
 
+    # ------------------------------------------------------------------
+
     def __del__(self):
-      if self.recording is not None:
-        del self.recording
+        if self.recording is not None:
+            del self.recording
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
 
     @property
     def error_set(self):
         return self._error_set
 
-    def calc_cost_fcn(self):
+    # ------------------------------------------------------------------
+    # Cost function
+    # ------------------------------------------------------------------
+
+    def calc_cost_fcn(self) -> float:
         cost = 0.0
         for tag in self._cost_fcn_terms:
             cost += self._cost_fcn_terms[tag] * self.get_kpi(tag)
         return cost
 
-    def save_cost_fcn_config(self, filename):
+    def save_cost_fcn_config(self, filename: str) -> None:
         try:
             with open(filename, 'w') as cost_file:
-                yaml.dump(self._cost_fcn_terms, cost_file,
-                          default_flow_style=False)
+                yaml.dump(self._cost_fcn_terms, cost_file, default_flow_style=False)
         except Exception as e:
-            self._logger.error('Error exporting cost function configuration, message=' + str(e))
+            self._logger.error('Error exporting cost function config, message=%s', e)
 
-    def load_cost_fcn(self, filename):
+    def load_cost_fcn(self, filename: str) -> bool:
         if not os.path.isfile(filename):
-            self._logger.error('Invalid filename, file=%s' % filename)
+            self._logger.error('Invalid filename, file=%s', filename)
             return False
-        with open(filename, 'w') as fcn_file:
-            fcn = yaml.load(fcn_file)
+        # ROS1 bug fix: original code opened in 'w' mode (write), which
+        # would truncate the file.  Corrected to 'r' (read) mode.
+        with open(filename, 'r') as fcn_file:
+            # ROS2: yaml.safe_load instead of yaml.load (security best-practice)
+            fcn = yaml.safe_load(fcn_file)
         try:
             for item in fcn:
                 self.add_cost_fcn_term(item, fcn[item])
-                self._logger.info('Cost function term (tag, weight): (%s, %.4f)' % (item, fcn[item]))
+                self._logger.info(
+                    'Cost function term (tag, weight): (%s, %.4f)', item, fcn[item]
+                )
         except Exception as e:
-            self._logger.error('Error loading cost function configuration')
-            self._logger.error(e)
+            self._logger.error('Error loading cost function configuration: %s', e)
             return False
         return True
 
-    def add_cost_fcn_term(self, kpi, weight):
+    def add_cost_fcn_term(self, kpi: str, weight: float) -> bool:
         if weight <= 0:
             self._logger.error('Weight must be a positive value')
             return False
         if not self.has_kpi(kpi):
-            self._logger.error('KPI tag is invalid, tag=%s' % kpi)
+            self._logger.error('KPI tag is invalid, tag=%s', kpi)
             return False
         if kpi in self._cost_fcn_terms:
-            self._logger.error('KPI already added to the cost function, tag=%s' % kpi)
+            self._logger.error('KPI already added to cost function, tag=%s', kpi)
             return False
-
         self._cost_fcn_terms[kpi] = weight
         return True
 
-    def has_kpi(self, tag):
+    # ------------------------------------------------------------------
+    # KPI helpers
+    # ------------------------------------------------------------------
+
+    def has_kpi(self, tag: str) -> bool:
         for kpi in self._kpis:
-            if tag == kpi.full_tag:
+            if tag == kpi['func'].full_tag:
                 return True
         return False
 
-    def set_kpis_from_file(self, filename):
+    def set_kpis_from_file(self, filename: str) -> None:
         assert os.path.isfile(filename), 'Invalid evaluation configuration file'
-        assert '.yaml' in filename or '.yml' in filename, 'Configuration file should be a YAML file'
-
+        assert filename.endswith('.yaml') or filename.endswith('.yml'), \
+            'Configuration file must be YAML'
         with open(filename, 'r') as config_file:
-            config = yaml.load(config_file)
-
+            # ROS2: yaml.safe_load
+            config = yaml.safe_load(config_file)
         self.set_kpis(config)
 
-    def set_kpis(self, config):
-        assert type(config) == list, 'Invalid configuration structure for KPIs'
+    def set_kpis(self, config: list) -> None:
+        assert isinstance(config, list), 'Invalid configuration structure for KPIs'
         kpi_tags = KPI.get_all_kpi_tags()
 
-        self._kpis = list()
+        self._kpis = []
         for item in config:
             if item['func'] not in kpi_tags:
-                self._logger.error('Invalid KPI tag, value=' + item)
+                self._logger.error('Invalid KPI tag, value=%s', item)
             else:
-                self._logger.info('KPI created=' + item['func'])
+                self._logger.info('KPI created: %s', item['func'])
                 if 'args' in item:
-                    self._kpis.append(dict(func=KPI.get_kpi(item['func'], item['args']),
-                                           value=0.0))
-                    self._logger.info('\tArguments: ' + str(item['args']))
+                    self._kpis.append(
+                        dict(func=KPI.get_kpi(item['func'], item['args']), value=0.0)
+                    )
+                    self._logger.info('\tArguments: %s', str(item['args']))
                 else:
-                    self._kpis.append(dict(func=KPI.get_kpi(item['func']),
-                                           value=0.0))
+                    self._kpis.append(
+                        dict(func=KPI.get_kpi(item['func']), value=0.0)
+                    )
 
-    def get_kpis(self):
-        kpis = dict()
+    def get_kpis(self) -> dict:
+        kpis = {}
         for kpi in self._kpis:
             item = kpi['func']
             try:
                 kpis[item.full_tag] = float(item.kpi_value)
-            except:
+            except Exception:
                 kpis[item.full_tag] = -1000.0
         return kpis
 
-    def get_kpi(self, tag):
+    def get_kpi(self, tag: str):
         for kpi in self._kpis:
             if kpi['func'].full_tag == tag:
                 return kpi['value']
         return None
 
-    def compute_kpis(self):
-        if len(self._kpis):
-            for i in range(len(self._kpis)):
-                try:
-                    self._kpis[i]['value'] = self._kpis[i]['func'].compute()
-                except Exception as e:
-                    self._logger.error('Error calculating KPI %s, message=%s' % (self._kpis[i]['func'].full_tag, str(e)))
+    def compute_kpis(self) -> None:
+        for i, kpi in enumerate(self._kpis):
+            try:
+                self._kpis[i]['value'] = kpi['func'].compute()
+            except Exception as e:
+                self._logger.error(
+                    'Error calculating KPI %s, message=%s',
+                    kpi['func'].full_tag, str(e),
+                )
 
-    def print_kpis(self):
+    def print_kpis(self) -> None:
         for item in self._kpis:
-            print(item['func'].full_tag + '= ' + item['value'])
+            # ROS1 bug fix: used item['value'] consistently (original mixed
+            # item['func'].full_tag with item['value'] via print).
+            print('%s = %s' % (item['func'].full_tag, str(item['value'])))
 
-    def get_trajectory_coord(self, tag):
+    def get_trajectory_coord(self, tag: str):
         return self.recording.get_trajectory_coord(tag)
 
-    def export_to_txt(self, tag, output_dir):
+    def export_to_txt(self, tag: str, output_dir: str) -> None:
+        """Stub – implement per-tag CSV/TXT export here."""
         pass
 
-    def save_dataframes(self, output_dir=None):
-        if output_dir is not None:
-            if not os.path.isdir(output_dir):
-                self._logger.error('Invalid output directory, dir=' + str(output_dir))
-                raise Exception('Invalid output directory')
-        output_path = (self._output_dir if output_dir is None else output_dir)
-        try:        
+    # ------------------------------------------------------------------
+    # Persistence helpers
+    # ------------------------------------------------------------------
+
+    def save_dataframes(self, output_dir: str | None = None) -> None:
+        if output_dir is not None and not os.path.isdir(output_dir):
+            self._logger.error('Invalid output directory, dir=%s', output_dir)
+            raise NotADirectoryError('Invalid output directory: %s' % output_dir)
+
+        output_path = self._output_dir if output_dir is None else output_dir
+
+        try:
             for tag in self.recording.parsers:
-                self._logger.info('Reading data frame for ' + tag)
+                self._logger.info('Reading data frame for %s', tag)
                 df = self.recording.parsers[tag].get_as_dataframe()
 
                 if df is None:
                     continue
-                
-                if not os.path.isdir(os.path.join(output_path, 'data')):
-                    os.makedirs(os.path.join(output_path, 'data'))
+
+                data_dir = os.path.join(output_path, 'data')
+                os.makedirs(data_dir, exist_ok=True)
 
                 if isinstance(df, dict):
                     for k in df:
-                        with open(os.path.join(output_path, 'data', '%s_%s.yaml' % (tag, k)), 'w') as data_file:
-                            yaml.dump(df[k].to_dict(), data_file, default_flow_style=False)        
+                        out_file = os.path.join(data_dir, '%s_%s.yaml' % (tag, k))
+                        with open(out_file, 'w') as f:
+                            yaml.dump(df[k].to_dict(), f, default_flow_style=False)
                 else:
-                    with open(os.path.join(output_path, 'data', '%s.yaml' % tag), 'w') as data_file:
-                        yaml.dump(df.to_dict(), data_file, default_flow_style=False)
-                self._logger.info('Data frame <%s> stored=%s' % (tag, os.path.join(output_path, 'data', '%s.yaml' % tag)))
-        except Exception as e:
-            self._logger.error('Error storing dataframes file, message=' + str(e))
+                    out_file = os.path.join(data_dir, '%s.yaml' % tag)
+                    with open(out_file, 'w') as f:
+                        yaml.dump(df.to_dict(), f, default_flow_style=False)
 
-    def save_evaluation(self, output_dir=None):
-        if output_dir is not None:
-            if not os.path.isdir(output_dir):
-                self._logger.error('Invalid output directory, dir=' + str(output_dir))
-                raise Exception('Invalid output directory')
+                self._logger.info('Data frame <%s> stored: %s', tag, out_file)
+
+        except Exception as e:
+            self._logger.error('Error storing dataframes, message=%s', str(e))
+
+    def save_evaluation(self, output_dir: str | None = None) -> None:
+        if output_dir is not None and not os.path.isdir(output_dir):
+            self._logger.error('Invalid output directory, dir=%s', output_dir)
+            raise NotADirectoryError('Invalid output directory: %s' % output_dir)
+
         self.save_kpis(output_dir)
 
         for tag in self.recording.parsers:
             self.recording.parsers[tag].plot(self._output_dir)
+
         self._logger.info('Evaluation stored!')
 
-    def save_kpis(self, output_dir=None):
-        if output_dir is not None:
-            if not os.path.isdir(output_dir):
-                self._logger.error('Invalid output directory, dir=' + str(output_dir))
-                raise Exception('Invalid output directory')
-        try:
-            output_path = (self._output_dir if output_dir is None else output_dir)
+    def save_kpis(self, output_dir: str | None = None) -> None:
+        if output_dir is not None and not os.path.isdir(output_dir):
+            self._logger.error('Invalid output directory, dir=%s', output_dir)
+            raise NotADirectoryError('Invalid output directory: %s' % output_dir)
 
-            kpis = dict()
-            kpi_labels = dict()
+        try:
+            output_path = self._output_dir if output_dir is None else output_dir
+
+            kpis: dict = {}
+            kpi_labels: dict = {}
+
             for kpi in self._kpis:
                 item = kpi['func']
                 try:
                     value = float(item.kpi_value)
-                except Exception as e:
+                except Exception:
                     value = 0.0
                 kpis[item.full_tag] = value
-                kpi_labels[item.full_tag] = kpi['func'].label
-            with open(os.path.join(output_path, 'computed_kpis.yaml'), 'w') as kpi_file:
-                yaml.dump(kpis, kpi_file, default_flow_style=False)
-            self._logger.info('Calculated KPIs stored in <%s>' % os.path.join(output_path, 'computed_kpis.yaml'))
+                kpi_labels[item.full_tag] = item.label
 
-            with open(os.path.join(output_path, 'kpi_labels.yaml'), 'w') as kpi_file:
-                yaml.dump(kpi_labels, kpi_file, default_flow_style=False)
-            self._logger.info('KPI labels stored in <%s>' % os.path.join(output_path, 'kpi_labels.yaml'))
+            kpi_file_path = os.path.join(output_path, 'computed_kpis.yaml')
+            with open(kpi_file_path, 'w') as kpi_file:
+                yaml.dump(kpis, kpi_file, default_flow_style=False)
+            self._logger.info('Calculated KPIs stored in <%s>', kpi_file_path)
+
+            label_file_path = os.path.join(output_path, 'kpi_labels.yaml')
+            with open(label_file_path, 'w') as label_file:
+                yaml.dump(kpi_labels, label_file, default_flow_style=False)
+            self._logger.info('KPI labels stored in <%s>', label_file_path)
+
         except Exception as e:
-            self._logger.error('Error storing KPIs file, message=' + str(e))
+            self._logger.error('Error storing KPIs file, message=%s', str(e))

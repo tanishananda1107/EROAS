@@ -12,9 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from __future__ import print_function
+
+# ROS 2 / Gazebo Harmonic (gz-sim 8) port
+# Changes from ROS 1:
+#   - Removed `from __future__ import print_function` (Python 3 only in ROS 2)
+#   - Updated import: uuv_bag_evaluation -> uuv_bag_evaluation2
+#     (the ROS 2 version of this package uses rosbag2_py instead of rosbag)
+
 import numpy as np
-from uuv_bag_evaluation import Recording, ErrorSet
+from uuv_bag_evaluation2 import Recording, ErrorSet
 
 
 class KPI(object):
@@ -51,7 +57,6 @@ class KPI(object):
 
     @property
     def full_tag(self):
-        output = dict()
         key = self.TAG
         if len(self._kpi_arg):
             key += '_' + self._kpi_arg
@@ -149,7 +154,7 @@ class KPI(object):
 
     def is_iterable(self, input_values):
         try:
-            it = iter(input_values)
+            iter(input_values)
         except TypeError:
             print('Input values are not iterable')
             return False

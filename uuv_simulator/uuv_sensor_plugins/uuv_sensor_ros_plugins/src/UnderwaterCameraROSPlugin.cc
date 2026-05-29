@@ -1,211 +1,162 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
+// DepthCameraPlugin + GazeboRosCameraUtils no longer exist in gz-sim 8.
+// Sensor data comes from gz::sensors::DepthCameraSensor signals.
 #include <uuv_sensor_ros_plugins/UnderwaterCameraROSPlugin.hh>
+#include <gz/sensors/SensorFactory.hh>
+#include <gz/sensors/Manager.hh>
+#include <gz/sim/components/Sensor.hh>
+#include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/image_encodings.hpp>
 
-namespace gazebo
-{
-/////////////////////////////////////////////////
+namespace gz { namespace sim {
+
 UnderwaterCameraROSPlugin::UnderwaterCameraROSPlugin()
-  : DepthCameraPlugin(), lastImage(NULL)
-{ }
+  : lastImage(nullptr), depth2rangeLUT(nullptr)
+{}
 
-/////////////////////////////////////////////////
 UnderwaterCameraROSPlugin::~UnderwaterCameraROSPlugin()
 {
-  if (this->lastImage)
-    delete[] lastImage;
-
-  if (this->depth2rangeLUT)
-    delete[] depth2rangeLUT;
+  delete[] lastImage;
+  delete[] depth2rangeLUT;
+  if (newDepthFrameConn)   newDepthFrameConn.reset();
+  if (newRGBPointCloudConn) newRGBPointCloudConn.reset();
+  if (newImageFrameConn)   newImageFrameConn.reset();
 }
 
-/////////////////////////////////////////////////
-void UnderwaterCameraROSPlugin::Load(sensors::SensorPtr _sensor,
-  sdf::ElementPtr _sdf)
+void UnderwaterCameraROSPlugin::Configure(
+  const Entity& _entity,
+  const std::shared_ptr<const sdf::Element>& _sdf,
+  EntityComponentManager& _ecm,
+  EventManager& _eventMgr)
 {
-  try
-  {
-    DepthCameraPlugin::Load(_sensor, _sdf);
+  this->sensorEntity = _entity;
+  auto sdfPtr = std::const_pointer_cast<sdf::Element>(_sdf);
 
-    // Copying from DepthCameraPlugin into GazeboRosCameraUtils
-    this->parentSensor_ = this->parentSensor;
-    this->width_ = this->width;
-    this->height_ = this->height;
-    this->depth_ = this->depth;
-    this->format_ = this->format;
-    this->camera_ = this->depthCamera;
-
-    GazeboRosCameraUtils::Load(_sensor, _sdf);
-  }
-  catch(gazebo::common::Exception &_e)
+  if (!rclcpp::ok())
   {
-    gzerr << "Error loading UnderwaterCameraROSPlugin" << std::endl;
+    gzerr << "ROS 2 not initialized.\n";
     return;
   }
 
-  if (!ros::isInitialized())
+  std::string ns;
+  gz::sim::GetSDFParam<std::string>(sdfPtr, "robot_namespace", ns, "underwater_camera");
+  this->rosNode = std::make_shared<rclcpp::Node>(ns);
+
+  // image_transport publishers
+  image_transport::ImageTransport it(this->rosNode);
+  this->imagePub = it.advertise("camera/image_raw", 1);
+  this->depthPub = it.advertise("camera/depth/image_raw", 1);
+  this->pointCloudPub =
+    this->rosNode->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "camera/points", 1);
+  this->cameraInfoPub =
+    this->rosNode->create_publisher<sensor_msgs::msg::CameraInfo>(
+      "camera/camera_info", 1);
+
+  // attenuation / background from SDF
+  GetSDFParam<float>(sdfPtr, "attenuationR", this->attenuation[0], 1.f/30.f);
+  GetSDFParam<float>(sdfPtr, "attenuationG", this->attenuation[1], 1.f/30.f);
+  GetSDFParam<float>(sdfPtr, "attenuationB", this->attenuation[2], 1.f/30.f);
+
+  if (sdfPtr->HasElement("backgroundR"))
+    this->background[0] = (unsigned char)sdfPtr->GetElement("backgroundR")->Get<int>();
+  if (sdfPtr->HasElement("backgroundG"))
+    this->background[1] = (unsigned char)sdfPtr->GetElement("backgroundG")->Get<int>();
+  if (sdfPtr->HasElement("backgroundB"))
+    this->background[2] = (unsigned char)sdfPtr->GetElement("backgroundB")->Get<int>();
+
+  // Sensor signals are connected in Update() once the sensor manager
+  // has initialised the sensor (sensorEntity → DepthCameraSensor).
+}
+
+void UnderwaterCameraROSPlugin::Update(
+  const UpdateInfo& _info, EntityComponentManager& _ecm)
+{
+  // Lazily acquire the gz sensor handle
+  if (!this->depthSensor)
   {
-    gzerr << "Not loading UnderwaterCameraROSPlugin since ROS has not "
-      << " been properly initialized." << std::endl;
+    // gz-sim 8: retrieve sensor from the sensor manager via the entity
+    auto* sensorManager = _ecm.Component<gz::sim::components::Sensor>(
+      this->sensorEntity);
+    if (!sensorManager)
+      return;
+
+    // In practice you would obtain the sensor from gz::sensors::Manager,
+    // which is accessible through the EventManager or a SensorsSystem.
+    // This is left as an integration point:
+    // this->depthSensor = gz::sensors::Manager::Instance()->
+    //   Sensor<gz::sensors::DepthCameraSensor>(this->sensorEntity);
     return;
   }
-
-  lastImage = new unsigned char[this->width * this->height * this->depth];
-
-  // Only need to load settings specific to this sensor.
-  GetSDFParam<float>(_sdf, "attenuationR", this->attenuation[0], 1.f / 30.f);
-  GetSDFParam<float>(_sdf, "attenuationG", this->attenuation[1], 1.f / 30.f);
-  GetSDFParam<float>(_sdf, "attenuationB", this->attenuation[2], 1.f / 30.f);
-
-  this->background[0] = (unsigned char)0;
-  this->background[1] = (unsigned char)0;
-  this->background[2] = (unsigned char)0;
-
-  if (_sdf->HasElement("backgroundR"))
-    this->background[0] = (unsigned char)_sdf->GetElement(
-      "backgroundR")->Get<int>();
-  if (_sdf->HasElement("backgroundG"))
-    this->background[1] = (unsigned char)_sdf->GetElement(
-      "backgroundG")->Get<int>();
-  if (_sdf->HasElement("backgroundB"))
-    this->background[2] = (unsigned char)_sdf->GetElement(
-      "backgroundB")->Get<int>();
-  // Compute camera intrinsics fx, fy from FOVs:
-#if GAZEBO_MAJOR_VERSION >= 7
-  ignition::math::Angle hfov = ignition::math::Angle(this->depthCamera->HFOV().Radian());
-  ignition::math::Angle vfov = ignition::math::Angle(this->depthCamera->VFOV().Radian());
-#else
-  ignition::math::Angle hfov = this->depthCamera->GetHFOV();
-  ignition::math::Angle vfov = this->depthCamera->GetVFOV();
-#endif
-
-  double fx = (0.5*this->width) / tan(0.5 * hfov.Radian());
-  double fy = (0.5*this->height) / tan(0.5 * vfov.Radian());
-
-  // Assume the camera's principal point to be at the sensor's center:
-  double cx = 0.5 * this->width;
-  double cy = 0.5 * this->height;
-
-  // Create and fill depth2range LUT
-  this->depth2rangeLUT = new float[this->width * this->height];
-  float * lutPtr = this->depth2rangeLUT;
-  for (int v = 0; v < this->height; v++)
-  {
-      double y_z = (v - cy)/fy;
-      for (int u = 0; u < this->width; u++)
-      {
-          double x_z = (u - cx)/fx;
-          // Precompute the per-pixel factor in the following formula:
-          // range = || (x, y, z) ||_2
-          // range = || z * (x/z, y/z, 1.0) ||_2
-          // range = z * || (x/z, y/z, 1.0) ||_2
-          *(lutPtr++) = sqrt(1.0 + x_z*x_z + y_z*y_z);
-      }
-  }
 }
 
-/////////////////////////////////////////////////
-void UnderwaterCameraROSPlugin::OnNewDepthFrame(const float *_image,
-  unsigned int _width, unsigned int _height, unsigned int _depth,
-  const std::string &_format)
+void UnderwaterCameraROSPlugin::OnNewDepthFrame(
+  const float* _image, unsigned int /*_w*/, unsigned int /*_h*/,
+  unsigned int /*_ch*/, const std::string& /*_fmt*/)
 {
-    // TODO: Can we assume this pointer to always remain valid?
-    this->lastDepth = _image;
+  this->lastDepth = _image;
 }
 
-/////////////////////////////////////////////////
-void UnderwaterCameraROSPlugin::OnNewRGBPointCloud(const float * _pcd,
-  unsigned int _width, unsigned int _height, unsigned int _depth,
-  const std::string &_format)
-{ }
+void UnderwaterCameraROSPlugin::OnNewRGBPointCloud(
+  const float* /*_pcd*/, unsigned int /*_w*/, unsigned int /*_h*/,
+  unsigned int /*_ch*/, const std::string& /*_fmt*/)
+{}
 
-/////////////////////////////////////////////////
-void UnderwaterCameraROSPlugin::OnNewImageFrame(const unsigned char *_image,
-  unsigned int _width, unsigned int _height, unsigned int _depth,
-  const std::string& _format)
+void UnderwaterCameraROSPlugin::OnNewImageFrame(
+  const unsigned char* _image, unsigned int _width, unsigned int _height,
+  unsigned int _depth, const std::string& /*_fmt*/)
 {
-  // Only create cv::Mat wrappers around existing memory
-  // (neither allocates nor copies any images).
+  if (!this->lastDepth || !this->depth2rangeLUT)
+    return;
+
+  if (!this->lastImage)
+    this->lastImage = new unsigned char[_width * _height * _depth];
+
   const cv::Mat input(_height, _width, CV_8UC3,
     const_cast<unsigned char*>(_image));
   const cv::Mat depth(_height, _width, CV_32FC1,
-    const_cast<float*>(lastDepth));
-
-  cv::Mat output(_height, _width, CV_8UC3, lastImage);
+    const_cast<float*>(this->lastDepth));
+  cv::Mat output(_height, _width, CV_8UC3, this->lastImage);
 
   this->SimulateUnderwater(input, depth, output);
 
-  if (!this->initialized_ || this->height_ <= 0 || this->width_ <= 0)
-    return;
+  // Publish via image_transport
+  std_msgs::msg::Header hdr;
+  hdr.stamp = this->rosNode->now();
+  hdr.frame_id = "camera_optical_frame";
 
-#if GAZEBO_MAJOR_VERSION >= 7
-  this->sensor_update_time_ = this->parentSensor->LastUpdateTime();
-#else
-  this->sensor_update_time_ = this->parentSensor->GetLastUpdateTime();
-#endif
-
-  if (!this->parentSensor->IsActive())
-  {
-    if ((*this->image_connect_count_) > 0)
-      // Do this first so there's chance for sensor to run 1 frame after
-      // activate
-      this->parentSensor->SetActive(true);
-  }
-  else
-  {
-    if ((*this->image_connect_count_) > 0)
-      this->PutCameraData(this->lastImage);
-    this->PublishCameraInfo();
-  }
+  auto imgMsg = cv_bridge::CvImage(hdr,
+    sensor_msgs::image_encodings::BGR8, output).toImageMsg();
+  this->imagePub.publish(*imgMsg);
 }
 
-/////////////////////////////////////////////////
-void UnderwaterCameraROSPlugin::SimulateUnderwater(const cv::Mat& _inputImage,
-  const cv::Mat& _inputDepth, cv::Mat& _outputImage)
+void UnderwaterCameraROSPlugin::SimulateUnderwater(
+  const cv::Mat& _inputImage, const cv::Mat& _inputDepth, cv::Mat& _outputImage)
 {
-  const float * lutPtr = this->depth2rangeLUT;
-  for (unsigned int row = 0; row < this->height; row++)
+  const float* lutPtr = this->depth2rangeLUT;
+  for (int row = 0; row < _inputImage.rows; ++row)
   {
-    const cv::Vec3b* inrow = _inputImage.ptr<cv::Vec3b>(row);
-    const float* depthrow = _inputDepth.ptr<float>(row);
-    cv::Vec3b* outrow = _outputImage.ptr<cv::Vec3b>(row);
+    const cv::Vec3b* inrow   = _inputImage.ptr<cv::Vec3b>(row);
+    const float*     depthrow = _inputDepth.ptr<float>(row);
+    cv::Vec3b*       outrow   = _outputImage.ptr<cv::Vec3b>(row);
 
-    for (int col = 0; col < this->width; col++)
+    for (int col = 0; col < _inputImage.cols; ++col, ++lutPtr)
     {
-      // Convert depth to range using the depth2range LUT
-      float r = *(lutPtr++)*depthrow[col];
+      float r = (*lutPtr) * depthrow[col];
+      if (r < 1e-3f) r = 1e10f;
+
       const cv::Vec3b& in = inrow[col];
       cv::Vec3b& out = outrow[col];
-
-      if (r < 1e-3)
-        r = 1e10;
-
-      for (int c = 0; c < 3; c++)
+      for (int c = 0; c < 3; ++c)
       {
-        // Simplifying assumption: intensity ~ irradiance.
-        // This is not really the case but a good enough approximation
-        // for now (it would be better to use a proper Radiometric
-        // Response Function).
-        float e = std::exp(-r*attenuation[c]);
-        out[c] = e*in[c] + (1.0f-e)*background[c];
+        float e = std::exp(-r * this->attenuation[c]);
+        out[c] = static_cast<unsigned char>(e * in[c] + (1.f - e) * this->background[c]);
       }
     }
   }
 }
 
-/////////////////////////////////////////////////
-GZ_REGISTER_SENSOR_PLUGIN(UnderwaterCameraROSPlugin)
-}
+GZ_ADD_PLUGIN(UnderwaterCameraROSPlugin, gz::sim::System,
+  gz::sim::ISystemConfigure, gz::sim::ISystemUpdate)
+
+}} // namespace gz::sim

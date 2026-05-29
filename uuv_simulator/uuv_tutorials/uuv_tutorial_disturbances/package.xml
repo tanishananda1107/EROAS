@@ -1,28 +1,48 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
+
   <name>uuv_tutorial_disturbances</name>
   <version>0.6.13</version>
+
   <description>
-      Tutorial that shows how to use the uuv_control_utils tools to schedule disturbances to be applied during
-      the simulation
+    Tutorial that shows how to use the uuv_control_utils tools
+    to schedule disturbances during simulation using ROS 2
+    and Gazebo Harmonic (gz sim 8).
   </description>
 
-  <maintainer email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</maintainer>
-  <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
-  <maintainer email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</maintainer>
+  <maintainer email="luizricardo.douat@de.bosch.com">
+    Luiz Ricardo Douat
+  </maintainer>
+
+  <maintainer email="musa.marcusso@de.bosch.com">
+    Musa Morena Marcusso Manhaes
+  </maintainer>
+
+  <maintainer email="sebastian.scherer2@de.bosch.com">
+    Sebastian Scherer
+  </maintainer>
 
   <license>Apache-2.0</license>
 
+  <!-- Build tool -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <!-- Runtime dependencies -->
   <exec_depend>uuv_control_utils</exec_depend>
   <exec_depend>uuv_trajectory_control</exec_depend>
   <exec_depend>uuv_descriptions</exec_depend>
   <exec_depend>uuv_thruster_manager</exec_depend>
   <exec_depend>uuv_gazebo</exec_depend>
 
+  <!-- ROS2 launch system -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <!-- RViz2 -->
+  <exec_depend>rviz2</exec_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>
+
 </package>

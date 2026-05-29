@@ -1,13 +1,31 @@
 <?xml version="1.0"?>
-<package format="2">
+<package format="3">
   <name>uuv_smac_example</name>
   <version>0.5.0</version>
-  <description>The uuv_batch_run_example package</description>
 
-  <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
+  <description>
+    SMAC optimization example for ROS 2 and Gazebo Harmonic / GZ Sim 8.
+  </description>
+
+  <maintainer email="musa.marcusso@de.bosch.com">
+    Musa Morena Marcusso Manhaes
+  </maintainer>
 
   <license>Apache-2.0</license>
 
-  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
-  </package>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>rosbag2_cpp</exec_depend>
+  <exec_depend>rosbag2_transport</exec_depend>
+
+  <exec_depend>uuv_control_utils</exec_depend>
+  <exec_depend>uuv_simulation_wrapper</exec_depend>
+  <exec_depend>rexrov2_description</exec_depend>
+  <exec_depend>rexrov2_control</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

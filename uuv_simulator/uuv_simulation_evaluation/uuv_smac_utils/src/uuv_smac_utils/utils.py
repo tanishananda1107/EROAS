@@ -12,6 +12,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+# ROS 2 / Gazebo Harmonic (gz-sim 8) port
+# No ROS API used directly in this file; no functional changes required.
+# File is unchanged from ROS 1 except for this header.
+
 import sys
 import os
 import logging
@@ -22,6 +27,7 @@ SIMULATION_LOGGER = logging.getLogger('smac_utils')
 # Initialize useful labels
 SIM_SUCCESS = 'SUCCESS'
 SIM_CRASHED = 'CRASHED'
+
 
 def parse_param_input(args, input_map):
     if isinstance(args, dict):

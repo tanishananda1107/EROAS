@@ -13,8 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from opt_configuration import OptConfiguration
-from simulation_pool import N_SIMULATION_RUNS, N_CRASHES, N_SUCCESS, \
-    run_simulation, start_simulation_pool, stop_simulation_pool
-from utils import SIMULATION_LOGGER, init_logger, parse_param_input, \
-    SIM_SUCCESS, SIM_CRASHED
+# ROS 2 / Gazebo Harmonic (gz-sim 8) port
+# Change: bare module imports → explicit relative imports (required in Python 3 / ROS 2).
+# In ROS 1 with Python 2, `from opt_configuration import ...` worked because
+# the package directory was implicitly on sys.path. In ROS 2 (Python 3),
+# intra-package imports must be explicit relative imports.
+
+from .opt_configuration import OptConfiguration
+from .simulation_pool import (
+    N_SIMULATION_RUNS,
+    N_CRASHES,
+    N_SUCCESS,
+    run_simulation,
+    start_simulation_pool,
+    stop_simulation_pool,
+)
+from .utils import SIMULATION_LOGGER, init_logger, parse_param_input, SIM_SUCCESS, SIM_CRASHED

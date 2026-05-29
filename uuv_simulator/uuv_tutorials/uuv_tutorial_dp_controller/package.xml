@@ -1,19 +1,34 @@
 <?xml version="1.0"?>
 <package format="3">
+
   <name>uuv_tutorial_dp_controller</name>
   <version>0.6.13</version>
+
   <description>
-    Tutorial that shows how to inherit the controller interface modules from the uuv_trajectory_control package to
-    develop a custom controlller.
+    Tutorial showing how to inherit controller interface modules from
+    uuv_trajectory_control to develop a custom controller for
+    ROS 2 and Gazebo Harmonic / GZ Sim 8.
   </description>
 
-  <maintainer email="luizricardo.douat@de.bosch.com">Luiz Ricardo Douat</maintainer>
-  <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
-  <maintainer email="sebastian.scherer2@de.bosch.com">Sebastian Scherer</maintainer>
+  <maintainer email="luizricardo.douat@de.bosch.com">
+    Luiz Ricardo Douat
+  </maintainer>
+
+  <maintainer email="musa.marcusso@de.bosch.com">
+    Musa Morena Marcusso Manhaes
+  </maintainer>
+
+  <maintainer email="sebastian.scherer2@de.bosch.com">
+    Sebastian Scherer
+  </maintainer>
 
   <license>Apache-2.0</license>
 
+  <!-- Build system -->
   <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Runtime dependencies -->
+  <depend>rclpy</depend>
 
   <exec_depend>uuv_trajectory_control</exec_depend>
   <exec_depend>uuv_control_utils</exec_depend>
@@ -21,7 +36,16 @@
   <exec_depend>uuv_thruster_manager</exec_depend>
   <exec_depend>uuv_gazebo</exec_depend>
 
+  <!-- Launch support -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <!-- Testing -->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>
+
 </package>

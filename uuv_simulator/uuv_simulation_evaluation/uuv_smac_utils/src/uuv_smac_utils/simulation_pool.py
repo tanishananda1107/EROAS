@@ -13,6 +13,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ROS 2 / Gazebo Harmonic (gz-sim 8) port
+# Changes from ROS 1:
+#
+#   1. uuv_bag_evaluation  → uuv_bag_evaluation2
+#      The Evaluation class now wraps rosbag2_py instead of rosbag.
+#
+#   2. uuv_simulation_runner → uuv_simulation_runner2
+#      SimulationRunner2 must use `ros2 launch` instead of `roslaunch`,
+#      and its recording_filename attribute now points to a rosbag2
+#      *directory* (not a single .bag file).
+#
+#   3. rosbag2 recording detection: bag files are no longer single .bag files.
+#      rosbag2 writes a directory containing metadata.yaml + data files
+#      (*.db3 for SQLite3 storage, *.mcap for MCAP storage).
+#      Detection logic updated:
+#        ROS 1:  look for items ending with '.bag' or '.bag.active'
+#        ROS 2:  look for 'metadata.yaml' inside the recording directory,
+#                OR for any '.db3' / '.mcap' data file.
+#      The `.bag.active` → active-write sentinel is replaced by checking
+#      for the absence of metadata.yaml (rosbag2 writes it only on close).
+
 import os
 import yaml
 import logging
@@ -24,8 +45,9 @@ from time import sleep
 import random
 import shutil
 from .utils import *
-from uuv_simulation_runner import SimulationRunner
-from uuv_bag_evaluation import Evaluation
+# ROS 2: updated package names
+from uuv_simulation_runner2 import SimulationRunner
+from uuv_bag_evaluation2 import Evaluation
 from multiprocessing import Pool, Lock, Value
 from .opt_configuration import OptConfiguration
 
@@ -42,8 +64,7 @@ THREAD_POOL = None
 def signal_handler(signal, frame):
     SIMULATION_LOGGER.warning('SIGNAL RECEIVED=%d', int(signal))
     if THREAD_POOL is not None:
-        SIMULATION_LOGGER.warning('Finishing all processes in the '
-                                  'simulation pool')
+        SIMULATION_LOGGER.warning('Finishing all processes in the simulation pool')
         with TERMINATE_ALL_PROCESSES.get_lock():
             TERMINATE_ALL_PROCESSES.value = 1
         THREAD_POOL.terminate()
@@ -89,6 +110,35 @@ def add_to_run_log(data):
     SIMULATION_LOGGER.info('\tCRASHED=%d' % N_CRASHES.value)
 
 
+def _recording_is_complete(recording_dir):
+    """Return True when a rosbag2 recording directory is fully written.
+
+    rosbag2 writes metadata.yaml only after the recorder is cleanly stopped.
+    Polling for metadata.yaml is therefore the rosbag2 equivalent of waiting
+    for the '.bag.active' sentinel to disappear in ROS 1.
+
+    Supported storage plugins: sqlite3 (*.db3) and MCAP (*.mcap).
+    """
+    if not os.path.isdir(recording_dir):
+        return False
+    metadata_path = os.path.join(recording_dir, 'metadata.yaml')
+    return os.path.isfile(metadata_path)
+
+
+def _recording_exists(recording_dir):
+    """Return True as soon as a rosbag2 directory contains at least one data file.
+
+    This replaces the ROS 1 check for '.bag' or '.bag.active' files.
+    A data file appearing before metadata.yaml means recording is in progress.
+    """
+    if not os.path.isdir(recording_dir):
+        return False
+    for item in os.listdir(recording_dir):
+        if item.endswith('.db3') or item.endswith('.mcap') or item == 'metadata.yaml':
+            return True
+    return False
+
+
 def run_simulation(task):
     if TERMINATE_ALL_PROCESSES.value == 1:
         SIMULATION_LOGGER.warning('Process pool has been terminated, '
@@ -114,39 +164,40 @@ def run_simulation(task):
         runner.run(opt_config.params)
         sleep(random.random() * 5)
 
-        recording_dirname = os.path.dirname(runner.recording_filename)
+        # ROS 2: recording_dirname is the rosbag2 output directory itself.
+        # SimulationRunner2.recording_filename holds the path to that directory.
+        recording_dirname = runner.recording_filename
 
-        has_recording = False
-        for item in os.listdir(recording_dirname):
-            if item.endswith('.bag') or item.endswith('.bag.active'):
-                has_recording = True
-                break
-
-        if has_recording is False:
-            SIMULATION_LOGGER.error('No recording generated for task <%s>' % task)
-        else:
-            has_recording = False
-            for _ in range(30):
-                for item in os.listdir(recording_dirname):
-                    if item.endswith('.bag'):
-                        has_recording = True
-                        break
-                    else:
-                        sleep(0.1)
+        # Check whether rosbag2 has started writing data files.
+        has_recording = _recording_exists(recording_dirname)
 
         if not has_recording:
-            raise Exception('No recording generated for task <%s>, file=%s' % (task, runner.recording_filename))
+            SIMULATION_LOGGER.error('No recording generated for task <%s>' % task)
+        else:
+            # Wait for rosbag2 to finish writing (metadata.yaml appears on close).
+            has_recording = False
+            for _ in range(30):
+                if _recording_is_complete(recording_dirname):
+                    has_recording = True
+                    break
+                sleep(0.1)
+
+        if not has_recording:
+            raise Exception(
+                'No complete recording generated for task <%s>, dir=%s'
+                % (task, recording_dirname))
+
     except Exception as e:
-        SIMULATION_LOGGER.error('Error occurred in this iteration, '
-                                'setting simulation status to CRASHED for '
-                                'task <%s>, message=%s' % (task, str(e)))
+        SIMULATION_LOGGER.error(
+            'Error occurred in this iteration, setting simulation status to '
+            'CRASHED for task <%s>, message=%s' % (task, str(e)))
         status = SIM_CRASHED
         partial_cost = 1e7
 
         add_to_crash_log(dict(
             status=status,
             timestamp=str(datetime.datetime.now().isoformat()),
-            results_dir=runner.current_sim_results_dir,
+            results_dir=runner.current_sim_results_dir if runner else 'N/A',
             message=str(e),
             task=str(task)))
 
@@ -156,7 +207,7 @@ def run_simulation(task):
             cost=partial_cost,
             sim_time=None,
             message=str(e),
-            results_dir=runner.current_sim_results_dir)
+            results_dir=runner.current_sim_results_dir if runner else 'N/A')
 
         if runner is not None:
             if not runner.record_all_results:
@@ -176,10 +227,12 @@ def run_simulation(task):
         SIMULATION_LOGGER.info('Start evaluation of the results')
         SIMULATION_LOGGER.info('\tTime offset for KPI evaluation[s]=' + str(time_offset))
         SIMULATION_LOGGER.info('\tResults files directory=' + runner.current_sim_results_dir)
-        SIMULATION_LOGGER.info('\tROS bag file=' + runner.recording_filename)
-        sim_eval = Evaluation(runner.recording_filename,
-                              runner.current_sim_results_dir,
-                              time_offset=time_offset)
+        # ROS 2: recording_filename is a directory path, not a .bag file path.
+        SIMULATION_LOGGER.info('\tROS 2 bag directory=' + runner.recording_filename)
+        sim_eval = Evaluation(
+            runner.recording_filename,
+            runner.current_sim_results_dir,
+            time_offset=time_offset)
 
         SIMULATION_LOGGER.info('Evaluation finished')
 
@@ -198,9 +251,11 @@ def run_simulation(task):
 
         for tag in kpis:
             if kpis[tag] < 0:
-                SIMULATION_LOGGER.info('KPI <%s> returned an invalid value=%.3f' % (tag, kpis[tag]))
-                raise Exception('KPI <%s> returned an invalid value=%.3f' % (tag, kpis[tag]))
-                
+                SIMULATION_LOGGER.info(
+                    'KPI <%s> returned an invalid value=%.3f' % (tag, kpis[tag]))
+                raise Exception(
+                    'KPI <%s> returned an invalid value=%.3f' % (tag, kpis[tag]))
+
         partial_cost = opt_config.compute_cost_fcn(sim_eval.get_kpis())
 
         if partial_cost < 0:
@@ -230,11 +285,11 @@ def run_simulation(task):
             yaml.dump(output, smac_file, default_flow_style=False)
 
         sleep(random.random())
+
     except Exception as e:
         SIMULATION_LOGGER.error(
-            'Error occurred in this simulation evaluation, '
-            'setting simulation status to CRASHED for task '
-            '<%s>, message=%s' % (task, str(e)))
+            'Error occurred in this simulation evaluation, setting simulation '
+            'status to CRASHED for task <%s>, message=%s' % (task, str(e)))
         status = SIM_CRASHED
         partial_cost = 1e7
 
@@ -265,10 +320,12 @@ def run_simulation(task):
 
     if runner is not None:
         if not runner.record_all_results:
-            SIMULATION_LOGGER.warning('Removing recording directory, dir=' + runner.current_sim_results_dir)
+            SIMULATION_LOGGER.warning(
+                'Removing recording directory, dir=' + runner.current_sim_results_dir)
             runner.remove_recording_dir()
         else:
-            SIMULATION_LOGGER.warning('Keeping recording directory, dir=' + runner.current_sim_results_dir)
+            SIMULATION_LOGGER.warning(
+                'Keeping recording directory, dir=' + runner.current_sim_results_dir)
         del runner
     if sim_eval is not None:
         del sim_eval
@@ -278,7 +335,12 @@ def run_simulation(task):
     return output
 
 
-def start_simulation_pool(max_num_processes=None, tasks=None, log_filename=None, output_dir=None, del_failed_tasks=False):
+def start_simulation_pool(
+        max_num_processes=None,
+        tasks=None,
+        log_filename=None,
+        output_dir=None,
+        del_failed_tasks=False):
     global THREAD_POOL
     init_logger(log_filename)
 
@@ -300,9 +362,7 @@ def start_simulation_pool(max_num_processes=None, tasks=None, log_filename=None,
     try:
         THREAD_POOL = Pool(processes=num_processes)
 
-        task_list = tasks
-        if tasks is None:
-            task_list = opt_config.tasks
+        task_list = tasks if tasks is not None else opt_config.tasks
         output = THREAD_POOL.map(run_simulation, task_list)
     except Exception as e:
         SIMULATION_LOGGER.error('Error! Killing all processes, message=' + str(e))
@@ -342,27 +402,30 @@ def start_simulation_pool(max_num_processes=None, tasks=None, log_filename=None,
             failed_path, failed_dir = os.path.split(output[i]['results_dir'])
             SIMULATION_LOGGER.warning('Renaming folder from failed task:')
             SIMULATION_LOGGER.warning('\t From: ' + output[i]['results_dir'])
-            SIMULATION_LOGGER.warning('\t To: ' + os.path.join(failed_path, 'failed_' + failed_dir))
+            SIMULATION_LOGGER.warning(
+                '\t To: ' + os.path.join(failed_path, 'failed_' + failed_dir))
 
             if os.path.isdir(output[i]['results_dir']):
                 if not del_failed_tasks:
-                    os.rename(output[i]['results_dir'], os.path.join(failed_path, 'failed_' + failed_dir))
-                    SIMULATION_LOGGER.warning('Failed task directory renamed=' + os.path.join(failed_path, 'failed_' + failed_dir))
+                    os.rename(
+                        output[i]['results_dir'],
+                        os.path.join(failed_path, 'failed_' + failed_dir))
+                    SIMULATION_LOGGER.warning(
+                        'Failed task directory renamed='
+                        + os.path.join(failed_path, 'failed_' + failed_dir))
                 else:
                     shutil.rmtree(output[i]['results_dir'])
-                    SIMULATION_LOGGER.warning('Failed task directory deleted=' + output[i]['results_dir'])
+                    SIMULATION_LOGGER.warning(
+                        'Failed task directory deleted=' + output[i]['results_dir'])
 
             SIMULATION_LOGGER.info('Running task %d <%s>' % (i, output[i]['task']))
 
             try:
                 THREAD_POOL = Pool(processes=1)
-
-                task_list = tasks
-                if tasks is None:
-                    task_list = opt_config.tasks
                 output[i] = THREAD_POOL.map(run_simulation, [output[i]['task']])[0]
             except Exception as e:
-                SIMULATION_LOGGER.error('Error! Killing all processes, message=' + str(e))
+                SIMULATION_LOGGER.error(
+                    'Error! Killing all processes, message=' + str(e))
                 if THREAD_POOL is not None:
                     THREAD_POOL.terminate()
                     THREAD_POOL.join()
@@ -387,8 +450,8 @@ def start_simulation_pool(max_num_processes=None, tasks=None, log_filename=None,
     if original_results_path is not None:
         opt_config.results_dir = original_results_path
 
-    SIMULATION_LOGGER.info('Ending simulation pool, '
-                           '# failed tasks=%d' % len(failed_tasks))
+    SIMULATION_LOGGER.info(
+        'Ending simulation pool, # failed tasks=%d' % len(failed_tasks))
 
     return output, failed_tasks
 

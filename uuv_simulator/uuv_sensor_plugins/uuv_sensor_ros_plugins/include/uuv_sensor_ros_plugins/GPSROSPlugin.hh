@@ -1,50 +1,27 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #ifndef __GPS_SENSOR_ROS_PLUGIN_HH__
 #define __GPS_SENSOR_ROS_PLUGIN_HH__
 
-#include <gazebo/gazebo.hh>
-#include <gazebo/sensors/sensors.hh>
-#include <sensor_msgs/NavSatFix.h>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <uuv_sensor_ros_plugins/ROSBaseSensorPlugin.hh>
-#include <ros/ros.h>
 
-namespace gazebo
-{
-  class GPSROSPlugin : public ROSBaseSensorPlugin
-  {
-    /// \brief Class constructor
-    public: GPSROSPlugin();
+namespace gz { namespace sim {
 
-    /// \brief Class destructor
-    public: virtual ~GPSROSPlugin();
+class GPSROSPlugin : public ROSBaseSensorPlugin {
+public:
+  GPSROSPlugin();
+  virtual ~GPSROSPlugin();
+  void Configure(const Entity& _entity,
+                 const std::shared_ptr<const sdf::Element>& _sdf,
+                 EntityComponentManager& _ecm, EventManager& _eventMgr) override;
+  bool OnUpdateGPS(const UpdateInfo& _info, EntityComponentManager& _ecm);
 
-    /// \brief Load module and read parameters from SDF.
-    public: virtual void Load(sensors::SensorPtr _parent,
-      sdf::ElementPtr _sdf);
+protected:
+  bool OnUpdate(const UpdateInfo& _info, EntityComponentManager& _ecm) override;
+  sensor_msgs::msg::NavSatFix gpsMessage;
+  rclcpp::Publisher<sensor_msgs::msg::NavSatFix>::SharedPtr gpsPub;
+};
 
-    /// \brief Update GPS ROS message
-    public: bool OnUpdateGPS();
-
-    /// \brief Pointer to the parent sensor
-    protected: sensors::GpsSensorPtr gazeboGPSSensor;
-
-    /// \brief Output GPS ROS message
-    protected: sensor_msgs::NavSatFix gpsMessage;
-  };
-}
-
-#endif // __GPS_SENSOR_ROS_PLUGIN_HH__
+}}  // namespace gz::sim
+#endif

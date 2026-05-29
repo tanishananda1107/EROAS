@@ -1,49 +1,35 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #ifndef __ROS_BASE_SENSOR_PLUGIN_HH__
 #define __ROS_BASE_SENSOR_PLUGIN_HH__
 
-#include <gazebo/common/Plugin.hh>
-#include <gazebo/gazebo.hh>
-#include <gazebo/physics/physics.hh>
-#include <gazebo/sensors/sensors.hh>
+#include <gz/sim/System.hh>
+#include <gz/sim/Entity.hh>
+#include <gz/sim/EntityComponentManager.hh>
+#include <gz/sim/EventManager.hh>
+#include <gz/sensors/Sensor.hh>
 #include <uuv_sensor_ros_plugins/ROSBasePlugin.hh>
-#include <boost/bind.hpp>
-#include <string>
+#include <memory>
 
-namespace gazebo
+namespace gz { namespace sim {
+
+class ROSBaseSensorPlugin
+  : public ROSBasePlugin, public System,
+    public ISystemConfigure, public ISystemUpdate
 {
-  class ROSBaseSensorPlugin : public ROSBasePlugin, public SensorPlugin
-  {
-    /// \brief Class constructor
-    public: ROSBaseSensorPlugin();
+public:
+  ROSBaseSensorPlugin();
+  virtual ~ROSBaseSensorPlugin();
 
-    /// \brief Class destructor
-    public: virtual ~ROSBaseSensorPlugin();
+  void Configure(const Entity& _entity,
+                 const std::shared_ptr<const sdf::Element>& _sdf,
+                 EntityComponentManager& _ecm, EventManager& _eventMgr) override;
+  void Update(const UpdateInfo& _info, EntityComponentManager& _ecm) override;
 
-    /// \brief Load plugin and its configuration from sdf,
-    protected: virtual void Load(sensors::SensorPtr _model,
-      sdf::ElementPtr _sdf);
+protected:
+  virtual bool OnUpdate(const UpdateInfo& _info, EntityComponentManager& _ecm);
+  Entity sensorEntity{kNullEntity};
+  std::shared_ptr<gz::sensors::Sensor> parentSensor;
+};
 
-    /// \brief Update callback from simulation.
-    protected: virtual bool OnUpdate(const common::UpdateInfo&);
-
-    /// \brief Pointer to the parent sensor
-    protected: sensors::SensorPtr parentSensor;
-  };
-}
-
-#endif // __ROS_BASE_SENSOR_PLUGIN_HH__
+}}  // namespace gz::sim
+#endif  // __ROS_BASE_SENSOR_PLUGIN_HH__

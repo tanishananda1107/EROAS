@@ -21,8 +21,10 @@ for f in glob.glob(os.path.dirname(__file__) + '/*.py'):
     if os.path.isfile(f) and not os.path.basename(f).startswith('_'):
         all_list.append(os.path.basename(f)[:-3])
 
-__all__ = all_list  
+__all__ = all_list
 
+# ROS2 note: All imports below use relative package imports (dot-prefixed).
+# This is required in ROS2 ament_python packages.
 from .error import ErrorSet, TrajectoryError
 from .recording import Recording
 from .evaluation import Evaluation

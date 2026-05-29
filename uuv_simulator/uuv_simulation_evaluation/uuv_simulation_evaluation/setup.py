@@ -1,28 +1,33 @@
-# Copyright (c) 2016 The UUV Simulator Authors.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+from setuptools import setup, find_packages
 
-from distutils.core import setup
-from catkin_pkg.python_setup import generate_distutils_setup
+package_name = 'uuv_simulation_evaluation'
 
-setup_args = generate_distutils_setup(
-    packages=['uuv_cost_function',
-              'uuv_bag_evaluation',
-              'uuv_bag_evaluation.metrics',
-              'uuv_bag_evaluation.data_parsers'],
+setup(
+    name=package_name,
+    version='0.5.0',
+    packages=find_packages(where='src'),
     package_dir={'': 'src'},
-    requires=['rospy']
-)
 
-setup(**setup_args)
+    install_requires=[
+        'setuptools',
+        'numpy',
+        'matplotlib',
+        'pyyaml'
+    ],
+
+    zip_safe=True,
+
+    maintainer='Musa Morena Marcusso Manhaes',
+    maintainer_email='musa.marcusso@de.bosch.com',
+
+    description='ROS2 bag evaluation and cost function computation tools',
+
+    license='Apache-2.0',
+
+    entry_points={
+        'console_scripts': [
+            'evaluate_bag = uuv_bag_evaluation.evaluate_bag:main',
+            'run_best_worst_comparison = uuv_bag_evaluation.run_best_worst_comparison:main',
+        ],
+    },
+)

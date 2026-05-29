@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ROS 2 / Gazebo Harmonic (gz-sim 8) port
+# No changes needed in this file beyond what is inherited from updated modules.
+
 import os
 import glob
 
@@ -21,7 +24,7 @@ for f in glob.glob(os.path.dirname(__file__) + '/*.py'):
     if os.path.isfile(f) and not os.path.basename(f).startswith('_'):
         all_list.append(os.path.basename(f)[:-3])
 
-__all__ = all_list  
+__all__ = all_list
 
 from .kpi import KPI
 from .max_abs_thrust import MaxAbsThrust

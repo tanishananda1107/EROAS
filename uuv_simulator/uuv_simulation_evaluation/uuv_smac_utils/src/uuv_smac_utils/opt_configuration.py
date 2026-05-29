@@ -12,6 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+# ROS 2 / Gazebo Harmonic (gz-sim 8) port
+# Changes from ROS 1:
+#   - All yaml.load() calls replaced with yaml.safe_load() to avoid the
+#     PyYAML deprecation warning and security issue present since PyYAML 5.1.
+#     yaml.load() without a Loader argument raises a warning in newer PyYAML
+#     and is a known security risk; yaml.safe_load() is the correct replacement
+#     for plain data files (no Python object tags required here).
+
 import os
 import yaml
 import re
@@ -23,19 +32,19 @@ from .utils import init_logger, parse_param_input, SIMULATION_LOGGER
 class OptConfiguration(object):
     CONFIG = None
 
-
     def __init__(self, input_data):
         if isinstance(input_data, str):
             assert os.path.isfile(input_data)
 
             self.opt_config_filename = input_data
             with open(self.opt_config_filename, 'r') as opt_config_file:
-                self._opt_config = yaml.load(opt_config_file)
+                # ROS 2: yaml.load() → yaml.safe_load()
+                self._opt_config = yaml.safe_load(opt_config_file)
         elif isinstance(input_data, dict):
             self._opt_config = input_data
 
         assert 'cost_fcn' in self._opt_config, 'Cost function configuration available'
-        
+
         if 'parameters' in self._opt_config:
             self.parameters = self._opt_config['parameters']
         else:
@@ -66,8 +75,8 @@ class OptConfiguration(object):
             for t in task:
                 SIMULATION_LOGGER.info('\t - %s' % t)
 
-            self.tasks = task        
-        else:            
+            self.tasks = task
+        else:
             if os.path.isfile(task):
                 SIMULATION_LOGGER.info('Retrieving filename for task function=' + task)
                 self.tasks = [task]
@@ -78,7 +87,7 @@ class OptConfiguration(object):
                         self.tasks.append(os.path.join(task, f))
 
         atoi = lambda a: int(a) if a.isdigit() else a
-        natural_keys = lambda text: [atoi(c) for c in re.split('(\d+)', text)]
+        natural_keys = lambda text: [atoi(c) for c in re.split(r'(\d+)', text)]
 
         self.tasks.sort(key=natural_keys)
         SIMULATION_LOGGER.info('Task files=')
@@ -121,19 +130,22 @@ class OptConfiguration(object):
         if 'cost_fcn' in self._opt_config:
             SIMULATION_LOGGER.info('Initializing cost function')
             self.cost_fcn = CostFunction()
-            if isinstance(self._opt_config['cost_fcn'], dict):                
+            if isinstance(self._opt_config['cost_fcn'], dict):
                 cf = self._opt_config['cost_fcn']
                 SIMULATION_LOGGER.info('Cost function imported from list')
             elif isinstance(self._opt_config['cost_fcn'], str):
-                assert os.path.isfile(self._opt_config['cost_fcn']), 'Cost function file is invalid'
-                assert '.yml' in self._opt_config['cost_fcn'] or '.yaml' in self._opt_config['cost_fcn']
+                assert os.path.isfile(self._opt_config['cost_fcn']), \
+                    'Cost function file is invalid'
+                assert ('.yml' in self._opt_config['cost_fcn']
+                        or '.yaml' in self._opt_config['cost_fcn'])
 
                 with open(self._opt_config['cost_fcn']) as cf_file:
-                    cf = yaml.load(cf_file)
+                    # ROS 2: yaml.load() → yaml.safe_load()
+                    cf = yaml.safe_load(cf_file)
 
                 SIMULATION_LOGGER.info(cf)
-
-                SIMULATION_LOGGER.info('Cost function loaded from file, filename=' + self._opt_config['cost_fcn'])
+                SIMULATION_LOGGER.info(
+                    'Cost function loaded from file, filename=' + self._opt_config['cost_fcn'])
             else:
                 SIMULATION_LOGGER.error('Invalid input cost function')
                 SIMULATION_LOGGER.error(self._opt_config['cost_fcn'])
@@ -143,27 +155,30 @@ class OptConfiguration(object):
 
         if 'cost_fcn_norm' in self._opt_config:
             self.cost_fcn.set_norm(self._opt_config['cost_fcn_norm'])
-            
+
         SIMULATION_LOGGER.info('Cost function norm=' + str(self.cost_fcn.norm))
 
         if 'constraints' in self._opt_config:
             self.constraints = self._opt_config['constraints']
-            if isinstance(self.constraints, list):                
+            if isinstance(self.constraints, list):
                 self.cost_fcn.add_constraints(self._opt_config['constraints'])
                 SIMULATION_LOGGER.info('Constraints imported from list')
-            elif isinstance(self._opt_config['constraints'], str):                
-                assert os.path.isfile(self._opt_config['constraints']), 'Constraint file is invalid'
-                assert '.yml' in self._opt_config['constraints'] or '.yaml' in self._opt_config['constraints']
-    
+            elif isinstance(self._opt_config['constraints'], str):
+                assert os.path.isfile(self._opt_config['constraints']), \
+                    'Constraint file is invalid'
+                assert ('.yml' in self._opt_config['constraints']
+                        or '.yaml' in self._opt_config['constraints'])
+
                 with open(self._opt_config['constraints']) as c_file:
-                    constraints = yaml.load(c_file)
+                    # ROS 2: yaml.load() → yaml.safe_load()
+                    constraints = yaml.safe_load(c_file)
 
                 self.cost_fcn.add_constraints(constraints)
-                SIMULATION_LOGGER.info('Constraints loaded from file, filename=' + self._opt_config['constraints'])
+                SIMULATION_LOGGER.info(
+                    'Constraints loaded from file, filename=' + self._opt_config['constraints'])
             else:
                 SIMULATION_LOGGER.error('Invalid input constraints list')
                 raise Exception('Invalid input constraints list')
-                
 
     @staticmethod
     def get_instance(input_data=None):
@@ -177,7 +192,7 @@ class OptConfiguration(object):
     def get_constraint_tags(self):
         if self.cost_fcn is None:
             return None
-        return self.cost_fcn.get_constraint_tags()        
+        return self.cost_fcn.get_constraint_tags()
 
     def parse_input(self, args):
         assert 'input_map' in self._opt_config, 'Input parameter map is not available'

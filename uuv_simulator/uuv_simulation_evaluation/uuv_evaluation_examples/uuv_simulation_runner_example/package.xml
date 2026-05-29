@@ -1,19 +1,39 @@
 <?xml version="1.0"?>
-<package>
+<package format="3">
+
   <name>uuv_simulation_runner_example</name>
-  <version>0.5.0</version>
-  <description>Source code the simulation runner tutorial</description>
+  <version>1.0.0</version>
 
-  <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
+  <description>
+    ROS 2 simulation runner example for Gazebo Harmonic / GZ Sim 8.
+  </description>
 
-  <author email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</author>
+  <maintainer email="musa.marcusso@de.bosch.com">
+    Musa Morena Marcusso Manhaes
+  </maintainer>
+
+  <author email="musa.marcusso@de.bosch.com">
+    Musa Morena Marcusso Manhaes
+  </author>
 
   <license>Apache-2.0</license>
 
-  <run_depend>uuv_simulation_evaluation</run_depend>
-  <run_depend>uuv_simulation_wrapper</run_depend>
-  <run_depend>uuv_descriptions</run_depend>
+  <!-- Build tool -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <buildtool_depend>catkin</buildtool_depend>
+  <!-- Runtime dependencies -->
+  <exec_depend>rclpy</exec_depend>
+
+  <exec_depend>uuv_simulation_evaluation</exec_depend>
+  <exec_depend>uuv_simulation_wrapper</exec_depend>
+  <exec_depend>uuv_descriptions</exec_depend>
+
+  <!-- Gazebo Harmonic -->
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 
 </package>

@@ -1,194 +1,216 @@
 // Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Converted to ROS2 + Gazebo Harmonic (gz-sim8)
 
-/// \file SphericalCoordinatesROSInterfacePlugin.cc
+#include <memory>
+#include <string>
 
-#include <uuv_world_ros_plugins/SphericalCoordinatesROSInterfacePlugin.hh>
+#include <rclcpp/rclcpp.hpp>
+
+#include <gz/plugin/Register.hh>
+#include <gz/sim/System.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/Util.hh>
+#include <gz/sim/EntityComponentManager.hh>
+#include <gz/sim/components/World.hh>
+
+#include <gz/math/SphericalCoordinates.hh>
+#include <gz/math/Vector3.hh>
+
+#include <uuv_world_ros_plugins_msgs/srv/get_origin_spherical_coord.hpp>
+#include <uuv_world_ros_plugins_msgs/srv/set_origin_spherical_coord.hpp>
+#include <uuv_world_ros_plugins_msgs/srv/transform_to_spherical_coord.hpp>
+#include <uuv_world_ros_plugins_msgs/srv/transform_from_spherical_coord.hpp>
 
 namespace gazebo
 {
-
-/////////////////////////////////////////////////
-SphericalCoordinatesROSInterfacePlugin::SphericalCoordinatesROSInterfacePlugin()
-{ }
-
-/////////////////////////////////////////////////
-SphericalCoordinatesROSInterfacePlugin::~SphericalCoordinatesROSInterfacePlugin()
+class SphericalCoordinatesROSInterfacePlugin:
+  public gz::sim::System,
+  public gz::sim::ISystemConfigure
 {
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->rosPublishConnection.reset();
-#else
-  event::Events::DisconnectWorldUpdateBegin(this->rosPublishConnection);
-#endif
-  this->rosNode->shutdown();
-}
-
-/////////////////////////////////////////////////
-void SphericalCoordinatesROSInterfacePlugin::Load(
-  physics::WorldPtr _world, sdf::ElementPtr _sdf)
-{
-  if (!ros::isInitialized())
+public:
+  SphericalCoordinatesROSInterfacePlugin()
   {
-    gzerr << "Not loading plugin since ROS has not been "
-          << "properly initialized.  Try starting gazebo with ros plugin:\n"
-          << "  gazebo -s libgazebo_ros_api_plugin.so\n";
-    return;
+    if (!rclcpp::ok())
+    {
+      rclcpp::init(0, nullptr);
+    }
+
+    this->rosNode =
+      std::make_shared<rclcpp::Node>(
+        "spherical_coordinates_ros_interface");
   }
 
-  GZ_ASSERT(_world != NULL, "World pointer is invalid");
-  GZ_ASSERT(_sdf != NULL, "SDF pointer is invalid");
+  ~SphericalCoordinatesROSInterfacePlugin() override = default;
 
-  this->world = _world;
-  this->rosNode.reset(new ros::NodeHandle(""));
+  void Configure(
+      const gz::sim::Entity &_entity,
+      const std::shared_ptr<const sdf::Element> &_sdf,
+      gz::sim::EntityComponentManager &_ecm,
+      gz::sim::EventManager &/*_eventMgr*/) override
+  {
+    (void)_entity;
+    (void)_sdf;
+    (void)_ecm;
 
-  // Advertise the service to get origin of the world in spherical coordinates
-  this->worldServices["get_origin_spherical_coordinates"] =
-    this->rosNode->advertiseService(
-      "/gazebo/get_origin_spherical_coordinates",
-      &SphericalCoordinatesROSInterfacePlugin::GetOriginSphericalCoord, this);
+    this->getOriginSrv =
+      this->rosNode->create_service<
+        uuv_world_ros_plugins_msgs::srv::GetOriginSphericalCoord>(
+        "/gazebo/get_origin_spherical_coordinates",
+        std::bind(
+          &SphericalCoordinatesROSInterfacePlugin::
+            GetOriginSphericalCoord,
+          this,
+          std::placeholders::_1,
+          std::placeholders::_2));
 
-  // Advertise the service to get origin of the world in spherical coordinates
-  this->worldServices["set_origin_spherical_coordinates"] =
-    this->rosNode->advertiseService(
-      "/gazebo/set_origin_spherical_coordinates",
-      &SphericalCoordinatesROSInterfacePlugin::SetOriginSphericalCoord, this);
+    this->setOriginSrv =
+      this->rosNode->create_service<
+        uuv_world_ros_plugins_msgs::srv::SetOriginSphericalCoord>(
+        "/gazebo/set_origin_spherical_coordinates",
+        std::bind(
+          &SphericalCoordinatesROSInterfacePlugin::
+            SetOriginSphericalCoord,
+          this,
+          std::placeholders::_1,
+          std::placeholders::_2));
 
-  this->worldServices["transform_to_spherical_coord"] =
-    this->rosNode->advertiseService(
-      "/gazebo/transform_to_spherical_coordinates",
-      &SphericalCoordinatesROSInterfacePlugin::TransformToSphericalCoord, this);
+    this->toSphericalSrv =
+      this->rosNode->create_service<
+        uuv_world_ros_plugins_msgs::srv::TransformToSphericalCoord>(
+        "/gazebo/transform_to_spherical_coordinates",
+        std::bind(
+          &SphericalCoordinatesROSInterfacePlugin::
+            TransformToSphericalCoord,
+          this,
+          std::placeholders::_1,
+          std::placeholders::_2));
 
-  this->worldServices["transform_from_spherical_coord"] =
-    this->rosNode->advertiseService(
-      "/gazebo/transform_from_spherical_coordinates",
-      &SphericalCoordinatesROSInterfacePlugin::TransformFromSphericalCoord, this);
+    this->fromSphericalSrv =
+      this->rosNode->create_service<
+        uuv_world_ros_plugins_msgs::srv::TransformFromSphericalCoord>(
+        "/gazebo/transform_from_spherical_coordinates",
+        std::bind(
+          &SphericalCoordinatesROSInterfacePlugin::
+            TransformFromSphericalCoord,
+          this,
+          std::placeholders::_1,
+          std::placeholders::_2));
 
-#if GAZEBO_MAJOR_VERSION >= 8
-  gzmsg << "Spherical coordinates reference=" << std::endl
-    << "\t- Latitude [degrees]="
-    << this->world->SphericalCoords()->LatitudeReference().Degree()
-    << std::endl
-    << "\t- Longitude [degrees]="
-    << this->world->SphericalCoords()->LongitudeReference().Degree()
-    << std::endl
-    << "\t- Altitude [m]="
-    << this->world->SphericalCoords()->GetElevationReference()
-    << std::endl;
-#else
-  gzmsg << "Spherical coordinates reference=" << std::endl
-    << "\t- Latitude [degrees]="
-    << this->world->GetSphericalCoordinates()->LatitudeReference().Degree()
-    << std::endl
-    << "\t- Longitude [degrees]="
-    << this->world->GetSphericalCoordinates()->LongitudeReference().Degree()
-    << std::endl
-    << "\t- Altitude [m]="
-    << this->world->GetSphericalCoordinates()->GetElevationReference()
-    << std::endl;
-#endif
-}
+    RCLCPP_INFO(
+      this->rosNode->get_logger(),
+      "SphericalCoordinatesROSInterfacePlugin loaded");
+  }
 
-/////////////////////////////////////////////////
-bool SphericalCoordinatesROSInterfacePlugin::TransformToSphericalCoord(
-    uuv_world_ros_plugins_msgs::TransformToSphericalCoord::Request& _req,
-    uuv_world_ros_plugins_msgs::TransformToSphericalCoord::Response& _res)
-{
-  ignition::math::Vector3d cartVec = ignition::math::Vector3d(
-    _req.input.x, _req.input.y, _req.input.z);
+private:
+  std::shared_ptr<rclcpp::Node> rosNode;
 
-#if GAZEBO_MAJOR_VERSION >= 8
-  ignition::math::Vector3d scVec =
-    this->world->SphericalCoords()->SphericalFromLocal(cartVec);
-#else
-  ignition::math::Vector3d scVec =
-    this->world->GetSphericalCoordinates()->SphericalFromLocal(cartVec);
-#endif
-  _res.latitude_deg = scVec.X();
-  _res.longitude_deg = scVec.Y();
-  _res.altitude = scVec.Z();
-  return true;
-}
+  gz::math::SphericalCoordinates sphericalCoords;
 
-/////////////////////////////////////////////////
-bool SphericalCoordinatesROSInterfacePlugin::TransformFromSphericalCoord(
-    uuv_world_ros_plugins_msgs::TransformFromSphericalCoord::Request& _req,
-    uuv_world_ros_plugins_msgs::TransformFromSphericalCoord::Response& _res)
-{
-  ignition::math::Vector3d scVec = ignition::math::Vector3d(
-    _req.latitude_deg, _req.longitude_deg, _req.altitude);
-#if GAZEBO_MAJOR_VERSION >= 8
-  ignition::math::Vector3d cartVec =
-    this->world->SphericalCoords()->LocalFromSpherical(scVec);
-#else
-  ignition::math::Vector3d cartVec =
-    this->world->GetSphericalCoordinates()->LocalFromSpherical(scVec);
-#endif
-  _res.output.x = cartVec.X();
-  _res.output.y = cartVec.Y();
-  _res.output.z = cartVec.Z();
-  return true;
-}
+  rclcpp::Service<
+    uuv_world_ros_plugins_msgs::srv::GetOriginSphericalCoord>::SharedPtr
+      getOriginSrv;
 
-/////////////////////////////////////////////////
-bool SphericalCoordinatesROSInterfacePlugin::GetOriginSphericalCoord(
-    uuv_world_ros_plugins_msgs::GetOriginSphericalCoord::Request& _req,
-    uuv_world_ros_plugins_msgs::GetOriginSphericalCoord::Response& _res)
-{
-#if GAZEBO_MAJOR_VERSION >= 8
-  _res.latitude_deg =
-    this->world->SphericalCoords()->LatitudeReference().Degree();
-  _res.longitude_deg =
-    this->world->SphericalCoords()->LongitudeReference().Degree();
-  _res.altitude =
-    this->world->SphericalCoords()->GetElevationReference();
-#else
-  _res.latitude_deg =
-    this->world->GetSphericalCoordinates()->LatitudeReference().Degree();
-  _res.longitude_deg =
-    this->world->GetSphericalCoordinates()->LongitudeReference().Degree();
-  _res.altitude =
-    this->world->GetSphericalCoordinates()->GetElevationReference();
-#endif
-  return true;
-}
+  rclcpp::Service<
+    uuv_world_ros_plugins_msgs::srv::SetOriginSphericalCoord>::SharedPtr
+      setOriginSrv;
 
-/////////////////////////////////////////////////
-bool SphericalCoordinatesROSInterfacePlugin::SetOriginSphericalCoord(
-    uuv_world_ros_plugins_msgs::SetOriginSphericalCoord::Request& _req,
-    uuv_world_ros_plugins_msgs::SetOriginSphericalCoord::Response& _res)
-{
-  ignition::math::Angle angle;
-  angle.Degree(_req.latitude_deg);
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->world->SphericalCoords()->SetLatitudeReference(angle);
-#else
-  this->world->GetSphericalCoordinates()->SetLatitudeReference(angle);
-#endif
+  rclcpp::Service<
+    uuv_world_ros_plugins_msgs::srv::TransformToSphericalCoord>::SharedPtr
+      toSphericalSrv;
 
-  angle.Degree(_req.longitude_deg);
-#if GAZEBO_MAJOR_VERSION >= 8
-  this->world->SphericalCoords()->SetLongitudeReference(angle);
-  this->world->SphericalCoords()->SetElevationReference(_req.altitude);
-#else
-  this->world->GetSphericalCoordinates()->SetLongitudeReference(angle);
-  this->world->GetSphericalCoordinates()->SetElevationReference(_req.altitude);
-#endif
-  _res.success = true;
-  return true;
-}
+  rclcpp::Service<
+    uuv_world_ros_plugins_msgs::srv::TransformFromSphericalCoord>::SharedPtr
+      fromSphericalSrv;
 
-/////////////////////////////////////////////////
-GZ_REGISTER_WORLD_PLUGIN(SphericalCoordinatesROSInterfacePlugin)
-}
+  void TransformToSphericalCoord(
+      const std::shared_ptr<
+        uuv_world_ros_plugins_msgs::srv::
+          TransformToSphericalCoord::Request> req,
+      std::shared_ptr<
+        uuv_world_ros_plugins_msgs::srv::
+          TransformToSphericalCoord::Response> res)
+  {
+    gz::math::Vector3d local(
+      req->input.x,
+      req->input.y,
+      req->input.z);
+
+    auto spherical =
+      this->sphericalCoords.SphericalFromLocalPosition(local);
+
+    res->latitude_deg = spherical.X();
+    res->longitude_deg = spherical.Y();
+    res->altitude = spherical.Z();
+  }
+
+  void TransformFromSphericalCoord(
+      const std::shared_ptr<
+        uuv_world_ros_plugins_msgs::srv::
+          TransformFromSphericalCoord::Request> req,
+      std::shared_ptr<
+        uuv_world_ros_plugins_msgs::srv::
+          TransformFromSphericalCoord::Response> res)
+  {
+    gz::math::Vector3d spherical(
+      req->latitude_deg,
+      req->longitude_deg,
+      req->altitude);
+
+    auto local =
+      this->sphericalCoords.LocalFromSphericalPosition(spherical);
+
+    res->output.x = local.X();
+    res->output.y = local.Y();
+    res->output.z = local.Z();
+  }
+
+  void GetOriginSphericalCoord(
+      const std::shared_ptr<
+        uuv_world_ros_plugins_msgs::srv::
+          GetOriginSphericalCoord::Request> /*req*/,
+      std::shared_ptr<
+        uuv_world_ros_plugins_msgs::srv::
+          GetOriginSphericalCoord::Response> res)
+  {
+    res->latitude_deg =
+      this->sphericalCoords.LatitudeReference().Degree();
+
+    res->longitude_deg =
+      this->sphericalCoords.LongitudeReference().Degree();
+
+    res->altitude =
+      this->sphericalCoords.ElevationReference();
+  }
+
+  void SetOriginSphericalCoord(
+      const std::shared_ptr<
+        uuv_world_ros_plugins_msgs::srv::
+          SetOriginSphericalCoord::Request> req,
+      std::shared_ptr<
+        uuv_world_ros_plugins_msgs::srv::
+          SetOriginSphericalCoord::Response> res)
+  {
+    gz::math::Angle lat;
+    lat.Degree(req->latitude_deg);
+
+    gz::math::Angle lon;
+    lon.Degree(req->longitude_deg);
+
+    this->sphericalCoords.SetLatitudeReference(lat);
+    this->sphericalCoords.SetLongitudeReference(lon);
+    this->sphericalCoords.SetElevationReference(req->altitude);
+
+    res->success = true;
+  }
+};
+
+GZ_ADD_PLUGIN(
+  SphericalCoordinatesROSInterfacePlugin,
+  gz::sim::System,
+  SphericalCoordinatesROSInterfacePlugin::ISystemConfigure)
+
+GZ_ADD_PLUGIN_ALIAS(
+  SphericalCoordinatesROSInterfacePlugin,
+  "gazebo::SphericalCoordinatesROSInterfacePlugin")
+
+} // namespace gazebo

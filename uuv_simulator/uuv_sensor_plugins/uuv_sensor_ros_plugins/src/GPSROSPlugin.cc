@@ -1,89 +1,78 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #include <uuv_sensor_ros_plugins/GPSROSPlugin.hh>
+#include <gz/sim/components/NavSat.hh>
+#include <gz/sim/components/Sensor.hh>
+#include <gz/sim/Util.hh>
 
-namespace gazebo {
+namespace gz { namespace sim {
 
-/////////////////////////////////////////////////
-GPSROSPlugin::GPSROSPlugin() : ROSBaseSensorPlugin()
-{ }
+GPSROSPlugin::GPSROSPlugin() : ROSBaseSensorPlugin() {}
+GPSROSPlugin::~GPSROSPlugin() {}
 
-/////////////////////////////////////////////////
-GPSROSPlugin::~GPSROSPlugin()
-{ }
-
-/////////////////////////////////////////////////
-void GPSROSPlugin::Load(sensors::SensorPtr _parent, sdf::ElementPtr _sdf)
+void GPSROSPlugin::Configure(
+  const Entity& _entity,
+  const std::shared_ptr<const sdf::Element>& _sdf,
+  EntityComponentManager& _ecm,
+  EventManager& _eventMgr)
 {
-  gzmsg << "GPSROSPlugin - Loading base sensor plugin" << std::endl;
-  ROSBaseSensorPlugin::Load(_parent, _sdf);
+  ROSBaseSensorPlugin::Configure(_entity, _sdf, _ecm, _eventMgr);
+  auto sdfPtr = std::const_pointer_cast<sdf::Element>(_sdf);
 
-  gzmsg << "GPSROSPlugin - Converting GPS sensor pointer" << std::endl;
-  this->gazeboGPSSensor =
-    std::dynamic_pointer_cast<sensors::GpsSensor>(_parent);
+  this->gpsPub =
+    this->rosNode->create_publisher<sensor_msgs::msg::NavSatFix>(
+      this->sensorOutputTopic, 10);
 
-  gzmsg << "GPSROSPlugin - Initialize sensor topic publisher" << std::endl;
-  this->rosSensorOutputPub = this->rosNode->advertise<sensor_msgs::NavSatFix>(
-    this->sensorOutputTopic, 10);
-
-  // Set the frame ID
   this->gpsMessage.header.frame_id = this->robotNamespace + "/gps_link";
-  // TODO: Get the position covariance from the GPS sensor
   this->gpsMessage.position_covariance_type =
-    sensor_msgs::NavSatFix::COVARIANCE_TYPE_KNOWN;
+    sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_KNOWN;
 
-  double horizontalPosStdDev = 0.0;
-  GetSDFParam(_sdf, "horizontal_pos_std_dev", horizontalPosStdDev, 0.0);
+  double hStdDev = 0.0, vStdDev = 0.0;
+  GetSDFParam(sdfPtr, "horizontal_pos_std_dev", hStdDev, 0.0);
+  GetSDFParam(sdfPtr, "vertical_pos_std_dev",   vStdDev, 0.0);
 
-  double verticalPosStdDev = 0.0;
-  GetSDFParam(_sdf, "vertical_pos_std_dev", verticalPosStdDev, 0.0);
+  this->gpsMessage.position_covariance[0] = hStdDev * hStdDev;
+  this->gpsMessage.position_covariance[4] = hStdDev * hStdDev;
+  this->gpsMessage.position_covariance[8] = vStdDev * vStdDev;
 
-  this->gpsMessage.position_covariance[0] = horizontalPosStdDev * horizontalPosStdDev;
-  this->gpsMessage.position_covariance[4] = horizontalPosStdDev * horizontalPosStdDev;
-  this->gpsMessage.position_covariance[8] = verticalPosStdDev * verticalPosStdDev;
+  this->gpsMessage.status.status  = sensor_msgs::msg::NavSatStatus::STATUS_FIX;
+  this->gpsMessage.status.service = sensor_msgs::msg::NavSatStatus::SERVICE_GPS;
 
-  // TODO: Configurable status setup
-  this->gpsMessage.status.status = sensor_msgs::NavSatStatus::STATUS_FIX;
-  this->gpsMessage.status.service = sensor_msgs::NavSatStatus::SERVICE_GPS;
-
-  // Connect to the sensor update event.
-  this->updateConnection = this->gazeboGPSSensor->ConnectUpdated(
-    boost::bind(&GPSROSPlugin::OnUpdateGPS, this));
+  // Enable NavSat component so the ECM populates it
+  _ecm.SetComponentData<components::NavSat>(
+    this->sensorEntity, components::NavSatData());
 }
 
-/////////////////////////////////////////////////
-bool GPSROSPlugin::OnUpdateGPS()
+bool GPSROSPlugin::OnUpdate(
+  const UpdateInfo& _info,
+  EntityComponentManager& _ecm)
 {
-  // Publish sensor state
+  return OnUpdateGPS(_info, _ecm);
+}
+
+bool GPSROSPlugin::OnUpdateGPS(
+  const UpdateInfo& _info,
+  EntityComponentManager& _ecm)
+{
   this->PublishState();
-  common::Time currentTime = this->gazeboGPSSensor->LastMeasurementTime();
 
-  this->gpsMessage.header.stamp.sec = currentTime.sec;
-  this->gpsMessage.header.stamp.nsec = currentTime.nsec;
+  const auto* navSat =
+    _ecm.Component<components::NavSat>(this->sensorEntity);
+  if (!navSat)
+    return false;
 
-  // Copy the output of Gazebo's GPS sensor into a NavSatFix message
-  this->gpsMessage.latitude = -this->gazeboGPSSensor->Latitude().Degree();
-  this->gpsMessage.longitude = -this->gazeboGPSSensor->Longitude().Degree();
-  this->gpsMessage.altitude = this->gazeboGPSSensor->Altitude();
+  this->gpsMessage.header.stamp =
+    gz::sim::convert<rclcpp::Time>(_info.simTime);
 
-  this->rosSensorOutputPub.publish(this->gpsMessage);
+  this->gpsMessage.latitude  = navSat->Data().LatitudeDeg();
+  this->gpsMessage.longitude = navSat->Data().LongitudeDeg();
+  this->gpsMessage.altitude  = navSat->Data().Altitude();
 
+  this->gpsPub->publish(this->gpsMessage);
+  this->lastMeasurementTime = _info.simTime;
   return true;
 }
 
-/////////////////////////////////////////////////
-GZ_REGISTER_SENSOR_PLUGIN(GPSROSPlugin)
-}
+GZ_ADD_PLUGIN(GPSROSPlugin, gz::sim::System,
+  gz::sim::ISystemConfigure, gz::sim::ISystemUpdate)
+
+}} // namespace gz::sim

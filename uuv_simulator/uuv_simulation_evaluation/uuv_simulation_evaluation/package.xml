@@ -1,27 +1,41 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>uuv_simulation_evaluation</name>
-  <version>0.6.13</version>
-  <description>Package containing Python libraries for ROS bag evaluation and cost function computation</description>
+  <version>0.5.0</version>
+  <description>ROS2 bag evaluation and cost function computation tools</description>
 
-  <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
+  <maintainer email="musa.marcusso@de.bosch.com">
+    Musa Morena Marcusso Manhaes
+  </maintainer>
 
   <license>Apache-2.0</license>
 
-  <author email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</author>
+  <author email="musa.marcusso@de.bosch.com">
+    Musa Morena Marcusso Manhaes
+  </author>
 
+  <!-- Build system -->
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_python</buildtool_depend>
 
+  <!-- Core ROS2 -->
   <exec_depend>rclpy</exec_depend>
-  <exec_depend>ros2cli</exec_depend>
+
+  <!-- Python deps -->
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-matplotlib</exec_depend>
-  <exec_depend>tf2</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+
+  <!-- Optional: replace tf (ROS1) -->
+  <exec_depend>tf2_ros</exec_depend>
+
+  <!-- Internal dependency (ROS2 version assumed) -->
   <exec_depend>uuv_trajectory_control</exec_depend>
 
+  <!-- Testing -->
+  <test_depend>pytest</test_depend>
+
   <export>
-    <build_type>ament_cmake</build_type>
+    <build_type>ament_python</build_type>
   </export>
 </package>

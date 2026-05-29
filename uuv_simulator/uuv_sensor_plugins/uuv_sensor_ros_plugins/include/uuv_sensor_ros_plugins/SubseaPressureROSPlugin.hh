@@ -1,56 +1,27 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #ifndef __UUV_SUBSEA_PRESSURE_ROS_PLUGIN_HH__
 #define __UUV_SUBSEA_PRESSURE_ROS_PLUGIN_HH__
 
-#include <gazebo/gazebo.hh>
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/fluid_pressure.hpp>
 #include <uuv_sensor_ros_plugins/ROSBaseModelPlugin.hh>
-#include "SensorPressure.pb.h"
-#include <sensor_msgs/FluidPressure.h>
 
-namespace gazebo
-{
-  class SubseaPressureROSPlugin : public ROSBaseModelPlugin
-  {
-    /// \brief Class constructor
-    public: SubseaPressureROSPlugin();
+namespace gz { namespace sim {
 
-    /// \brief Class destructor
-    public: ~SubseaPressureROSPlugin();
+class SubseaPressureROSPlugin : public ROSBaseModelPlugin {
+public:
+  SubseaPressureROSPlugin();
+  virtual ~SubseaPressureROSPlugin();
+  void Configure(const Entity& _entity,
+                 const std::shared_ptr<const sdf::Element>& _sdf,
+                 EntityComponentManager& _ecm, EventManager& _eventMgr) override;
 
-    /// \brief Load the plugin
-    public: virtual void Load(physics::ModelPtr _model, sdf::ElementPtr _sdf);
+protected:
+  bool OnUpdate(const UpdateInfo& _info, EntityComponentManager& _ecm) override;
+  double saturation{0.0}, standardPressure{101325.0}, kPaPerM{9.80638};
+  bool estimateDepth{false};
+  rclcpp::Publisher<sensor_msgs::msg::FluidPressure>::SharedPtr pressurePub;
+};
 
-    /// \brief Update sensor measurement
-    protected: virtual bool OnUpdate(const common::UpdateInfo& _info);
-
-    /// \brief Sensor saturation (max. value for output pressure in Pa)
-    protected: double saturation;
-
-    /// \brief If flag is set to true, estimate depth according to pressure
-    /// measurement
-    protected: bool estimateDepth;
-
-    /// \brief Standard pressure
-    protected: double standardPressure;
-
-    /// \brief Factor of kPa per meter
-    protected: double kPaPerM;
-  };
-}
-
-#endif // __UUV_SUBSEA_PRESSURE_ROS_PLUGIN_HH__
+}}  // namespace gz::sim
+#endif

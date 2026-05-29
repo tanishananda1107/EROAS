@@ -1,50 +1,29 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+// Ported to ROS 2 / Gazebo Harmonic (gz-sim 8)
 #ifndef __UUV_RPT_ROS_PLUGIN_HH__
 #define __UUV_RPT_ROS_PLUGIN_HH__
 
-#include <gazebo/gazebo.hh>
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 #include <uuv_sensor_ros_plugins/ROSBaseModelPlugin.hh>
-#include <uuv_sensor_ros_plugins_msgs/PositionWithCovarianceStamped.h>
-#include <geometry_msgs/PoseWithCovarianceStamped.h>
-#include "SensorRpt.pb.h"
+#include <uuv_sensor_ros_plugins_msgs/msg/position_with_covariance_stamped.hpp>
+#include <gz/math/Vector3.hh>
 
-namespace gazebo
-{
-  class RPTROSPlugin :  public ROSBaseModelPlugin
-  {
-    /// \brief Class constructor
-    public: RPTROSPlugin();
+namespace gz { namespace sim {
 
-    /// \brief Class destructor
-    public: virtual ~RPTROSPlugin();
+class RPTROSPlugin : public ROSBaseModelPlugin {
+public:
+  RPTROSPlugin();
+  virtual ~RPTROSPlugin();
+  void Configure(const Entity& _entity,
+                 const std::shared_ptr<const sdf::Element>& _sdf,
+                 EntityComponentManager& _ecm, EventManager& _eventMgr) override;
 
-    /// \brief Load the plugin
-    public: virtual void Load(physics::ModelPtr _model, sdf::ElementPtr _sdf);
+protected:
+  bool OnUpdate(const UpdateInfo& _info, EntityComponentManager& _ecm) override;
+  gz::math::Vector3d position;
+  uuv_sensor_ros_plugins_msgs::msg::PositionWithCovarianceStamped rosMessage;
+  rclcpp::Publisher
+    uuv_sensor_ros_plugins_msgs::msg::PositionWithCovarianceStamped>::SharedPtr posPub;
+};
 
-    /// \brief Update sensor measurement
-    protected: virtual bool OnUpdate(const common::UpdateInfo& _info);
-
-    /// \brief Latest measured position.
-    protected: ignition::math::Vector3d position;
-
-    /// \brief Store message since many attributes do not change (cov.).
-    protected: uuv_sensor_ros_plugins_msgs::PositionWithCovarianceStamped rosMessage;
-  };
-}
-
-#endif // __UUV_RPT_ROS_PLUGIN_HH__
+}}  // namespace gz::sim
+#endif

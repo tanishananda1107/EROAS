@@ -1,8 +1,29 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<!--
+  ROS2 / Gazebo Harmonic (gz-sim 8) migration
+  Changes from ROS1 package.xml (format 1):
+    - format="1" → format="3"  (ROS2 uses format 2 or 3; format 3 preferred)
+    - <buildtool_depend>catkin</buildtool_depend>
+        → <buildtool_depend>ament_cmake</buildtool_depend>
+           <buildtool_depend>ament_cmake_python</buildtool_depend>
+    - <build_depend> / <run_depend> (format-1 combined tags) split into:
+        <depend>         for packages needed at both build and runtime
+        <exec_depend>    for runtime-only dependencies
+    - roslib → removed (ROS1 only; no ROS2 equivalent needed here)
+    - rospy  → rclpy   (ROS2 Python client library)
+    - python-yaml       → python3-yaml
+    - python-matplotlib → python3-matplotlib
+    - python-simplejson → python3-simplejson
+    - python-numpy      → python3-numpy
+    - uuv_simulation_evaluation / uuv_simulation_wrapper kept as exec_depend
+      (must themselves be ported to ROS2 separately)
+    - Added ros_gz_bridge exec_depend for Gazebo Harmonic topic bridging
+    - Added ament_lint_auto / ament_lint_common as test dependencies
+-->
 <package format="3">
   <name>uuv_smac_utils</name>
-  <version>0.6.13</version>
+  <version>0.5.0</version>
   <description>Utility scripts and configuration for the SMAC optimization</description>
 
   <maintainer email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</maintainer>
@@ -11,18 +32,29 @@
 
   <author email="musa.marcusso@de.bosch.com">Musa Morena Marcusso Manhaes</author>
 
+  <!-- Build tools -->
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <build_depend>uuv_simulation_evaluation</build_depend>
+  <!-- Build-time dependency (needed to compile/install the package) -->
+  <depend>uuv_simulation_evaluation</depend>
 
-  <exec_depend>uuv_simulation_evaluation</exec_depend>
+  <!-- Runtime-only dependencies -->
   <exec_depend>uuv_simulation_wrapper</exec_depend>
-  <exec_depend>ros2cli</exec_depend>
   <exec_depend>rclpy</exec_depend>
+
+  <!-- Python runtime dependencies (ROS2 uses python3-* rosdep keys) -->
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-matplotlib</exec_depend>
   <exec_depend>python3-simplejson</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+
+  <!-- Gazebo Harmonic bridge (ros_gz_bridge replaces gazebo_ros in ROS1) -->
+  <exec_depend>ros_gz_bridge</exec_depend>
+
+  <!-- Test dependencies -->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
