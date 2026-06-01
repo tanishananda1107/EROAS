@@ -1,7 +1,8 @@
-.claude/
 build/
 install/
 log/
-devel/
-__pycache__/
+
 *.pyc
+__pycache__/
+.vscode/
+.idea/
