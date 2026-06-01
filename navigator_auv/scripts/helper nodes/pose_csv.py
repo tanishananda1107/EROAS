@@ -1,56 +1,59 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# ROS 2 Jazzy + Gazebo Harmonic
 
-import rospy
-import csv
-import tf.transformations as tft
+import rclpy
+from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64
+import csv
+import math
 
-class PoseToCSV:
+
+def quaternion_to_yaw(x, y, z, w):
+    """Convert quaternion to yaw angle (radians)."""
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
+class PoseToCSV(Node):
     def __init__(self):
-        # Initialize the node
-        rospy.init_node('pose_to_csv', anonymous=True)
-        
-        # Open a CSV file to write pose data
-        self.file = open('/home/user/pose_data.csv', mode='w')
-        self.csv_writer = csv.writer(self.file)
-        
-        # Write the header row to the CSV file
-        self.csv_writer.writerow(['Timestamp', 'Position_X', 'Position_Y', 'Position_Z', 'Yaw', 'H'])
-        
-        # Initialize variable to store the latest h value
+        super().__init__('pose_to_csv')
+
         self.h_value = None
-        
-        # Subscribe to the pose topic
-        self.pose_subscriber = rospy.Subscriber('/rexrov2/pose_gt', Odometry, self.pose_callback)
-        
-        # Subscribe to the h topic
-        self.h_subscriber = rospy.Subscriber('/rexrov2/current_h', Float64, self.h_callback)
-        
-        # Keep the node running
-        rospy.spin()
-    
+
+        self.file = open('/home/user/pose_data.csv', mode='w', newline='')
+        self.csv_writer = csv.writer(self.file)
+        self.csv_writer.writerow(['Timestamp', 'Position_X', 'Position_Y', 'Position_Z', 'Yaw', 'H'])
+
+        self.pose_subscriber = self.create_subscription(
+            Odometry,
+            '/rexrov2/pose_gt',
+            self.pose_callback,
+            10
+        )
+        self.h_subscriber = self.create_subscription(
+            Float64,
+            '/rexrov2/current_h',
+            self.h_callback,
+            10
+        )
+        self.get_logger().info("PoseToCSV node started. Writing to /home/user/pose_data.csv")
+
     def pose_callback(self, msg):
-        # Extract pose data
-        timestamp = msg.header.stamp.to_sec()
+        timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         position = msg.pose.pose.position
         orientation = msg.pose.pose.orientation
-        
-        # Convert quaternion to Euler angles
-        euler = tft.euler_from_quaternion([
+
+        yaw = quaternion_to_yaw(
             orientation.x,
             orientation.y,
             orientation.z,
             orientation.w
-        ])
-        
-        # Extract yaw (which is the third angle in the Euler angles tuple)
-        yaw = euler[2]
-        
-        # Use the latest h value (if available)
+        )
+
         h = self.h_value if self.h_value is not None else 'N/A'
-        
-        # Write pose data to CSV file
+
         self.csv_writer.writerow([
             timestamp,
             position.x,
@@ -59,17 +62,27 @@ class PoseToCSV:
             yaw,
             h
         ])
-    
+
     def h_callback(self, msg):
-        # Update the latest h value
         self.h_value = msg.data
-    
-    def __del__(self):
-        # Close the CSV file when the node is shut down
+
+    def destroy_node(self):
         self.file.close()
+        self.get_logger().info("CSV file closed.")
+        super().destroy_node()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = PoseToCSV()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
 
 if __name__ == '__main__':
-    try:
-        PoseToCSV()
-    except rospy.ROSInterruptException:
-        pass
+    main()

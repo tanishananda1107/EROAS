@@ -1,70 +1,68 @@
-import rospy
-from gazebo_msgs.srv import SpawnModel
-from geometry_msgs.msg import Pose
-from nav_msgs.msg import Odometry
+#!/usr/bin/env python3
+# ROS 2 / gz-sim 8 port
+# gz-sim 8 uses gz.msgs and the /world/<name>/create service (SpawnEntity)
+import rclpy
+from rclpy.node import Node
 import math
+from nav_msgs.msg import Odometry
+from gz_msgs.srv import SpawnEntity   # gz-sim 8
 
-class MarkerSpawner:
+
+class MarkerSpawner(Node):
     def __init__(self):
-        rospy.init_node('marker_spawner', anonymous=True)
-        self.spawn_model = rospy.ServiceProxy('/gazebo/spawn_sdf_model', SpawnModel)
-        self.last_pose = None
-        self.distance_threshold = 0.75 # Distance threshold to spawn a new marker
-
-        # Wait for the spawn model service to become available
-        rospy.wait_for_service('/gazebo/spawn_sdf_model')
-
-        # Subscribe to the robot's pose topic
-        self.pose_sub = rospy.Subscriber('/rexrov2/pose_gt', Odometry, self.pose_callback)
-
-    def pose_callback(self, pose_msg):
-        # Extract robot's pose
-        pose = pose_msg.pose.pose
-        if self.last_pose:
-            dist = self.calculate_distance(pose, self.last_pose)
-            if dist >= self.distance_threshold:
-                self.spawn_marker(pose)
-                self.last_pose = pose
-        else:
-            self.spawn_marker(pose)
-            self.last_pose = pose
+        super().__init__('marker_spawner')
+        self.spawn_cli  = self.create_client(SpawnEntity, '/world/default/create')
+        self.last_pose  = None
+        self.dist_thr   = 0.75
+        self.marker_idx = 0
+        self.create_subscription(Odometry, '/rexrov2/pose_gt', self.pose_callback, 10)
 
     @staticmethod
-    def calculate_distance(pose1, pose2):
-        return math.sqrt((pose1.position.x - pose2.position.x) ** 2 +
-                         (pose1.position.y - pose2.position.y) ** 2 +
-                         (pose1.position.z - pose2.position.z) ** 2)
+    def _dist(p1, p2):
+        return math.sqrt((p1.position.x-p2.position.x)**2 +
+                         (p1.position.y-p2.position.y)**2 +
+                         (p1.position.z-p2.position.z)**2)
 
-    def spawn_marker(self, pose):
-        model_name = "visual_marker_{:.0f}".format(rospy.Time.now().to_sec())
-        model_xml = """
-        <sdf version='1.6'>
-            <model name='{0}'>
-                <static>true</static>
-                <link name='link'>
-                    <visual name='visual'>
-                        <geometry>
-                            <sphere>
-                                <radius>0.25</radius> <!-- Adjust radius as needed -->
-                            </sphere>
-                        </geometry>
-                        <material>
-                            <ambient>0.5 1 0.5 1</ambient> <!-- Green color -->
-                        </material>
-                    </visual>
-                </link>
-                <pose>0 0 0 0 0 0</pose> <!-- Ensure pose values are correct -->
-            </model>
-        </sdf>
-        """.format(model_name, pose.position.x, pose.position.y, pose.position.z)
+    def pose_callback(self, msg):
+        pose = msg.pose.pose
+        if self.last_pose and self._dist(pose, self.last_pose) < self.dist_thr:
+            return
+        self.last_pose = pose
+        self._spawn(pose)
 
-        try:
-            self.spawn_model(model_name, model_xml, "world", pose, "")
-            # rospy.loginfo("Marker spawned at position: {:.2f}, {:.2f}, {:.2f}".format(
-            #     pose.position.x, pose.position.y, pose.position.z))
-        except rospy.ServiceException as e:
-            rospy.logerr("Service call failed: %s" % e)
+    def _spawn(self, pose):
+        if not self.spawn_cli.wait_for_service(timeout_sec=1.0):
+            return
+        name = f'marker_{self.marker_idx}'
+        self.marker_idx += 1
+        sdf = f"""<?xml version='1.0'?>
+<sdf version='1.6'>
+  <model name='{name}'>
+    <static>true</static>
+    <link name='link'>
+      <visual name='v'>
+        <geometry><sphere><radius>0.25</radius></sphere></geometry>
+        <material><ambient>0.5 1 0.5 1</ambient></material>
+      </visual>
+    </link>
+    <pose>{pose.position.x} {pose.position.y} {pose.position.z} 0 0 0</pose>
+  </model>
+</sdf>"""
+        req = SpawnEntity.Request()
+        req.xml = sdf
+        self.spawn_cli.call_async(req)
 
-if __name__ == "__main__":
-    spawner = MarkerSpawner()
-    rospy.spin()
+
+def main():
+    rclpy.init()
+    node = MarkerSpawner()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()

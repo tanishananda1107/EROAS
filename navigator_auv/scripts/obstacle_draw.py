@@ -1,80 +1,58 @@
 #!/usr/bin/env python3
-
-import rospy
+# ROS 2 port
+import rclpy
+from rclpy.node import Node
 import csv
 from sensor_msgs.msg import PointCloud2
 from nav_msgs.msg import Odometry
-from sensor_msgs.point_cloud2 import read_points
+from sensor_msgs_py.point_cloud2 import read_points
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 
-class DataLogger:
+
+class DataLogger(Node):
     def __init__(self):
-        rospy.init_node('data_logger', anonymous=True)
+        super().__init__('data_logger')
 
-        # Subscribers
-        self.point_cloud_sub = Subscriber('/rexrov2/point_cloud', PointCloud2)
-        self.pose_sub = Subscriber('/rexrov2/pose_gt', Odometry)
+        pc_sub  = Subscriber(self, PointCloud2, '/rexrov2/point_cloud')
+        pose_sub = Subscriber(self, Odometry,    '/rexrov2/pose_gt')
 
-        # Synchronizer
-        self.sync = ApproximateTimeSynchronizer(
-            [self.point_cloud_sub, self.pose_sub], queue_size=10, slop=1
-        )
+        self.sync = ApproximateTimeSynchronizer([pc_sub, pose_sub], queue_size=10, slop=1.0)
         self.sync.registerCallback(self.synchronized_callback)
 
-        # File to save the data
-        self.csv_file = '/home/user/data_log.csv'  # Update this path as needed
+        self.csv_file = '/home/user/data_log.csv'
+        self.csv_fh   = open(self.csv_file, mode='a', newline='')
+        self.writer   = csv.writer(self.csv_fh)
+        if self._is_empty(self.csv_file):
+            self.writer.writerow(['Timestamp','Pose_X','Pose_Y','Pose_Z','Point_X','Point_Y','Point_Z'])
 
-        # Check if the CSV file is empty and open it for appending
-        self.csv_file_handle = open(self.csv_file, mode='a', newline='')
-        self.csv_writer = csv.writer(self.csv_file_handle)
-
-        # Write header if the file was just created and is empty
-        if self.is_file_empty(self.csv_file):
-            self.csv_writer.writerow(['Timestamp', 'Pose_X', 'Pose_Y', 'Pose_Z', 'Point_X', 'Point_Y', 'Point_Z'])
-
-    def is_file_empty(self, filepath):
-        """Check if the file is empty."""
-        with open(filepath, 'r') as f:
+    def _is_empty(self, path):
+        with open(path, 'r') as f:
             return f.read(1) == ''
 
-    def synchronized_callback(self, point_cloud_msg, pose_msg):
-        try:
-            # Get timestamp
-            timestamp = rospy.Time.now()
+    def synchronized_callback(self, pc_msg, pose_msg):
+        ts   = self.get_clock().now().nanoseconds / 1e9
+        px   = pose_msg.pose.pose.position.x
+        py   = pose_msg.pose.pose.position.y
+        pz   = pose_msg.pose.pose.position.z
+        for pt in read_points(pc_msg, field_names=('x','y','z'), skip_nans=True):
+            self.writer.writerow([ts, px, py, pz, pt[0], pt[1], pt[2]])
 
-            # Extract pose data
-            pose_x = pose_msg.pose.pose.position.x
-            pose_y = pose_msg.pose.pose.position.y
-            pose_z = pose_msg.pose.pose.position.z
+    def destroy_node(self):
+        if hasattr(self, 'csv_fh'):
+            self.csv_fh.close()
+        super().destroy_node()
 
-            # Extract point cloud data
-            point_cloud_points = list(read_points(point_cloud_msg, field_names=("x", "y", "z"), skip_nans=True))
 
-            # Write data to CSV
-            for point in point_cloud_points:
-                self.csv_writer.writerow([timestamp.to_sec(), pose_x, pose_y, pose_z, point[0], point[1], point[2]])
-
-        except Exception as e:
-            rospy.logerr(f"Error in synchronized callback: {e}")
-
-    def run(self):
-        rospy.loginfo("Data Logger Node Running")
-        rospy.spin()
-
-    def __del__(self):
-        # Close CSV file when node shuts down
-        if hasattr(self, 'csv_file_handle') and self.csv_file_handle:
-            self.csv_file_handle.close()
+def main():
+    rclpy.init()
+    node = DataLogger()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
-    try:
-        node = DataLogger()
-        node.run()
-    except rospy.ROSInterruptException:
-        pass
-    except Exception as e:
-        rospy.logerr(f"Unhandled exception: {e}")
-    finally:
-        # Ensure the CSV file is closed if there's an interruption
-        if 'node' in locals():
-            del node
+    main()

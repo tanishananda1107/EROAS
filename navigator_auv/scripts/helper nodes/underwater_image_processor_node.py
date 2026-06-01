@@ -1,81 +1,85 @@
 #!/usr/bin/env python3
+# ROS 2 Jazzy + Gazebo Harmonic
 
-import rospy
+import rclpy
+from rclpy.node import Node
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
 
-class UnderwaterImageProcessor:
-    def __init__(self, texture_image_path):
-        self.node_name = "underwater_image_processor"
-        rospy.init_node(self.node_name)
 
-        # Initialize the CV bridge
+class UnderwaterImageProcessor(Node):
+    def __init__(self):
+        super().__init__('underwater_image_processor')
+
+        texture_image_path = self.declare_parameter(
+            'texture_image_path', '/home/user/P1.jpg'
+        ).get_parameter_value().string_value
+
         self.bridge = CvBridge()
-        
-        # Load the water texture image
         self.texture_image = cv2.imread(texture_image_path, cv2.IMREAD_COLOR)
-        
-        # Subscribe to the camera topic
-        self.subscriber = rospy.Subscriber("/rexrov2/rexrov2/camera/camera_image", Image, self.callback, queue_size=10)
-        
-        # Publisher for the modified images
-        self.publisher = rospy.Publisher("/rexrov2/underwater_image_1", Image, queue_size=10)
+
+        if self.texture_image is None:
+            self.get_logger().warn(f"Could not load texture image from: {texture_image_path}")
+
+        self.subscription = self.create_subscription(
+            Image,
+            '/rexrov2/rexrov2/camera/image_raw',
+            self.callback,
+            10
+        )
+        self.publisher = self.create_publisher(Image, '/rexrov2/underwater_image_1', 10)
+        self.get_logger().info("UnderwaterImageProcessor node started.")
 
     def add_blue_green_tint(self, image):
-        # Create a blue-green tint matrix
-        tint = np.full_like(image, (50, 100, 150), dtype=np.uint8)  # BGR format
-        tinted_image = cv2.addWeighted(image, 0.7, tint, 0.1, 0)
-        return tinted_image
+        tint = np.full_like(image, (50, 100, 150), dtype=np.uint8)  # BGR
+        return cv2.addWeighted(image, 0.7, tint, 0.1, 0)
 
     def blend_with_texture(self, image):
-        # Ensure the texture has the same size as the input image
+        if self.texture_image is None:
+            return image
         texture_resized = cv2.resize(self.texture_image, (image.shape[1], image.shape[0]))
-
-        # Blend the images
-        blended_image = cv2.addWeighted(image, 0.7, texture_resized, 0.3, 0)
-        return blended_image
+        return cv2.addWeighted(image, 0.7, texture_resized, 0.3, 0)
 
     def adjust_brightness_contrast(self, image, brightness=0, contrast=30):
-        # Adjust brightness and contrast
         img = np.int16(image)
         img = img * (contrast / 127 + 1) - contrast + brightness
         img = np.clip(img, 0, 255)
-        img = np.uint8(img)
-        return img
+        return np.uint8(img)
 
     def callback(self, data):
         try:
-            # Convert ROS Image message to CV2 format
             cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
-            
-            # Add blue-green tint
-            tinted_image = self.add_blue_green_tint(cv_image)
-            
-            # Blend with water texture
-            blended_image = self.blend_with_texture(tinted_image)
-            
-            # Adjust brightness and contrast
-            underwater_image = self.adjust_brightness_contrast(blended_image)
-            
-            # Convert the modified CV2 image back to ROS Image message
-            image_msg = self.bridge.cv2_to_imgmsg(underwater_image, "bgr8")
-            
-            # Publish the image with the water effect
+
+            tinted = self.add_blue_green_tint(cv_image)
+            blended = self.blend_with_texture(tinted)
+            underwater = self.adjust_brightness_contrast(blended)
+
+            image_msg = self.bridge.cv2_to_imgmsg(underwater, "bgr8")
+            image_msg.header = data.header
             self.publisher.publish(image_msg)
 
-            rospy.loginfo(f" the image width : {image_msg.width} and image height : {image_msg.height}")
-        
+            self.get_logger().info(
+                f"Published underwater image — width: {image_msg.width}, height: {image_msg.height}"
+            )
+
         except Exception as e:
-            rospy.logerr(f"Error in UnderwaterImageProcessor callback: {e}")
+            self.get_logger().error(f"Error in UnderwaterImageProcessor callback: {e}")
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = UnderwaterImageProcessor()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        cv2.destroyAllWindows()
+        rclpy.shutdown()
+
 
 if __name__ == '__main__':
-    texture_image_path = "/home/user/P1.jpg"  # Update this path
-    processor = UnderwaterImageProcessor(texture_image_path)
-    try:
-        rospy.spin()
-    except KeyboardInterrupt:
-        rospy.loginfo("Shutting down Underwater Image Processor Node")
-    finally:
-        cv2.destroyAllWindows()
+    main()

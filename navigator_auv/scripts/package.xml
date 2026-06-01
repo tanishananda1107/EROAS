@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<package format="3">
+
+  <name>navigator_auv</name>
+  <version>0.0.0</version>
+  <description>Navigator AUV package</description>
+
+  <maintainer email="user@todo.todo">user</maintainer>
+
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Core ROS 2 -->
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>visualization_msgs</depend>
+
+  <!-- Launch system -->
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+
+  <!-- Gazebo Harmonic -->
+  <depend>ros_gz_sim</depend>
+  <depend>ros_gz_bridge</depend>
+
+  <!-- If these packages are ported to ROS 2 -->
+  <depend>uuv_world_ros_plugins_msgs</depend>
+  <depend>uuv_gazebo_ros_plugins_msgs</depend>
+  <depend>uuv_control_msgs</depend>
+  <depend>uuv_trajectory_control</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+
+</package>

@@ -1,47 +1,67 @@
 #!/usr/bin/env python3
+# ROS 2 Jazzy + Gazebo Harmonic
+# Uses ultralytics YOLOv8 (recommended for ROS 2 Jazzy / Python 3.12)
 
-import rospy
+import rclpy
+from rclpy.node import Node
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import cv2
-import torch
+from ultralytics import YOLO
 
-class YOLODetector:
+
+class YOLODetector(Node):
     def __init__(self):
-        self.node_name = "yolo_detector"
-        rospy.init_node(self.node_name)
-        
-        # Initialize YOLO model
-        self.model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-        
-        # Initialize the CV bridge
+        super().__init__('yolo_detector')
+
+        # YOLOv8 nano — swap for yolov8s.pt, yolov8m.pt etc. as needed
+        self.model = YOLO('yolov8n.pt')
+
         self.bridge = CvBridge()
-        
-        # Subscribe to the camera topic
-        self.subscriber = rospy.Subscriber("/rexrov2/rexrov2/camera/camera_image", Image, self.callback, queue_size=1)
-        
-        # Publisher for the images with bounding boxes
-        self.publisher = rospy.Publisher("/new/detected_objects", Image, queue_size=10)
-    
+
+        self.subscription = self.create_subscription(
+            Image,
+            '/rexrov2/rexrov2/camera/image_raw',
+            self.callback,
+            1
+        )
+        self.publisher = self.create_publisher(Image, '/new/detected_objects', 10)
+        self.get_logger().info("YOLODetector node started.")
+
     def callback(self, data):
-        # Convert ROS Image message to CV2 format
         cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
-        
-        # Run YOLO model
-        results = self.model(cv_image)
-        
-        # Draw bounding boxes on the image
-        for *xyxy, conf, cls in results.xyxy[0]:
-            label = f'{results.names[int(cls)]} {conf:.2f}'
-            cv2.rectangle(cv_image, (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3])), (255, 0, 0), 2)
-            cv2.putText(cv_image, label, (int(xyxy[0]), int(xyxy[1])-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 2)
-        
-        # Convert the modified CV2 image back to ROS Image message
+
+        results = self.model(cv_image, verbose=False)
+
+        for result in results:
+            for box in result.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                conf = float(box.conf[0])
+                cls = int(box.cls[0])
+                label = f'{self.model.names[cls]} {conf:.2f}'
+
+                cv2.rectangle(cv_image, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                cv2.putText(
+                    cv_image, label, (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2
+                )
+
         image_msg = self.bridge.cv2_to_imgmsg(cv_image, "bgr8")
-        
-        # Publish the image with detections
+        image_msg.header = data.header
         self.publisher.publish(image_msg)
 
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = YOLODetector()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 if __name__ == '__main__':
-    detector = YOLODetector()
-    rospy.spin()
+    main()

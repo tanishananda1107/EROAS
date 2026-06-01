@@ -1,44 +1,43 @@
 #!/usr/bin/env python3
-import rospy
-from std_msgs.msg import Float64
+# ROS 2 port
+import rclpy
+from rclpy.node import Node
 from geometry_msgs.msg import WrenchStamped
 
 
-
-class CBFHelper:
+class CBFHelper(Node):
     def __init__(self):
-        # Initialize the ROS node
-        rospy.init_node('CBF_Helper', anonymous=True)
-
-        # Publisher for the unified thruster command
-        self.pub = rospy.Publisher('/rexrov2/thruster_manager/input_stamped', WrenchStamped, queue_size=10)
-
-        # Subscribers to the two thruster command topics
-        self.sub1 = rospy.Subscriber('/rexrov2/thruster_manager/input_stamped_1', WrenchStamped, self.callback1)
-        self.sub2 = rospy.Subscriber('/rexrov2/thruster_manager/input_stamped_2', WrenchStamped, self.callback2)
-
-        # Variable to store the last received message from input_stamped_1
+        super().__init__('CBF_Helper')
+        self.pub = self.create_publisher(WrenchStamped,
+                                         '/rexrov2/thruster_manager/input_stamped', 10)
+        self.create_subscription(WrenchStamped,
+                                  '/rexrov2/thruster_manager/input_stamped_1',
+                                  self.cb1, 10)
+        self.create_subscription(WrenchStamped,
+                                  '/rexrov2/thruster_manager/input_stamped_2',
+                                  self.cb2, 10)
         self.last_msg1 = None
 
-    def callback1(self, data):
-        # Callback for input_stamped_1, updates the last received message
-        #cbf
-        self.last_msg1 = data
+    def cb1(self, msg): self.last_msg1 = msg
 
-    def callback2(self, data):
-        # Callback for input_stamped_2, publishes based on the availability of input_stamped_1
-        # PID data
+    def cb2(self, msg):
         if self.last_msg1 is None:
-            # If no message has been received from input_stamped_1, publish data from input_stamped_2
-            self.pub.publish(data)
+            self.pub.publish(msg)
         else:
-            # If a message has been received from input_stamped_1, publish that
             self.pub.publish(self.last_msg1)
-            self.last_msg1 = None  # Reset after publishing
+            self.last_msg1 = None
+
+
+def main():
+    rclpy.init()
+    node = CBFHelper()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
-    try:
-        tm = CBFHelper()
-        rospy.spin()
-    except rospy.ROSInterruptException:
-        pass
+    main()

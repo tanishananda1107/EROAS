@@ -1,32 +1,30 @@
-#!/usr/bin/env python
-
-import rospy
+#!/usr/bin/env python3
+# ROS 2 port
+import rclpy
+from rclpy.node import Node
 from std_msgs.msg import Float64
 
-def sonar_publisher():
-    # Initialize the ROS node
-    rospy.init_node('sonar_zero_publisher', anonymous=True)
 
-    # Create a publisher for the '/rexrov2/sonar/moving' topic
-    pub = rospy.Publisher('/rexrov2/sonar/moving', Float64, queue_size=10)
+class SonarZeroPublisher(Node):
+    def __init__(self):
+        super().__init__('sonar_zero_publisher')
+        self.pub   = self.create_publisher(Float64, '/rexrov2/sonar/moving', 10)
+        self.timer = self.create_timer(0.1, self.publish_zero)   # 10 Hz
 
-    # Set the publishing rate (e.g., 10 Hz)
-    rate = rospy.Rate(10)
+    def publish_zero(self):
+        self.pub.publish(Float64(data=0.0))
 
-    while not rospy.is_shutdown():
-        # Create a Float64 message with value 0
-        msg = Float64()
-        msg.data = 0.0
-        
-        # Publish the message
-        pub.publish(msg)
-        
-        
-        # Sleep to maintain the publishing rate
-        rate.sleep()
+
+def main():
+    rclpy.init()
+    node = SonarZeroPublisher()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
-    try:
-        sonar_publisher()
-    except rospy.ROSInterruptException:
-        pass
+    main()
