@@ -1,0 +1,11 @@
+# ROS2 colcon
+build/
+install/
+log/
+
+# VS Code
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
