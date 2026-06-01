@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
  * Copyright (C) 2012 Open Source Robotics Foundation
  *
@@ -44,3 +45,6 @@ void SelectionRenderListener::postRenderTargetUpdate(
 {
   Ogre::MaterialManager::getSingleton().removeListener(this->materialListener);
 }
+=======
+  // namespace gz
+>>>>>>> bde8874 (Remove unused directories from navigator_auv)

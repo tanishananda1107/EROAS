@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
  * Copyright (C) 2012 Open Source Robotics Foundation
  *
@@ -124,3 +125,5 @@ size_t MaterialSwitcher::VisualCount() const
 {
   return this->colorDict.size();
 }
+=======
+>>>>>>> bde8874 (Remove unused directories from navigator_auv)

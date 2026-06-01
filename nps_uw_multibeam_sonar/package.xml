@@ -1,57 +1,41 @@
 <?xml version="1.0"?>
 <package format="3">
-
   <name>nps_uw_multibeam_sonar</name>
   <version>0.0.1</version>
-
   <description>
-    NPS Multibeam Sonar Plugin with NVIDIA CUDA library
+    NPS Multibeam Sonar Plugin with NVIDIA CUDA library.
+    Ported to ROS 2 Jazzy and Gazebo Harmonic (gz-sim 8).
   </description>
-
-  <maintainer email="woensug.choi.ks@nps.edu">
-    Woensug Choi
-  </maintainer>
-
-  <author email="woensug.choi.ks@nps.edu">
-    Woensug Choi
-  </author>
-
+  <maintainer email="woensug.choi.ks@nps.edu">Woensug Choi</maintainer>
+  <author email="woensug.choi.ks@nps.edu">Woensug Choi</author>
   <license>Apache-2.0</license>
 
-  <!-- Build system -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <!-- ROS2 -->
   <depend>rclcpp</depend>
-  <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>image_transport</depend>
+  <depend>cv_bridge</depend>
+  <depend>marine_acoustic_msgs</depend>
+  <depend>xacro</depend>
+  <depend>pcl_conversions</depend>
 
-  <!-- TF2 -->
-  <depend>tf2</depend>
-  <depend>tf2_ros</depend>
-  <depend>tf2_geometry_msgs</depend>
+  <depend>gz-sim8</depend>
+  <depend>gz-rendering8</depend>
+  <depend>gz-sensors8</depend>
+  <depend>gz-transport13</depend>
+  <depend>gz-math7</depend>
+  <depend>gz-plugin2</depend>
+  <depend>gz-common5</depend>
 
-  <!-- Gazebo Harmonic -->
   <depend>ros_gz_sim</depend>
   <depend>ros_gz_bridge</depend>
-  <depend>ros_gz_interfaces</depend>
-
-  <!-- Vision -->
-  <depend>cv_bridge</depend>
-
-  <!-- PointCloud -->
-  <depend>pcl_conversions</depend>
-  <depend>pcl_ros</depend>
-
-  <!-- Acoustic messages -->
-  <depend>marine_acoustic_msgs</depend>
-
-  <!-- Utility -->
-  <depend>xacro</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
+    <gazebo_sim gazebo_model_path="${prefix}/models"/>
+    <gazebo_sim gazebo_resource_path="${prefix}"/>
   </export>
-
 </package>
