@@ -1,62 +1,86 @@
-<<<<<<< HEAD
 /*
  * Copyright (C) 2012 Open Source Robotics Foundation
  *
- * Updated for Gazebo Harmonic / gz-sim8
- */
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
 
-#include "MaterialSwitcher.hh"
+#include "selection_buffer/MaterialSwitcher.hh"
 
-using namespace gazebo;
-using namespace rendering;
-
-/////////////////////////////////////////////////
-MaterialSwitcher::MaterialSwitcher()
+#include <gz/rendering/Scene.hh>
+#include <gz/rendering/Visual.hh>
+namespace gazebo
 {
-  this->currentColor =
-      gz::math::Color(0.0f, 0.0f, 0.1f, 1.0f);
-}
-
-/////////////////////////////////////////////////
-MaterialSwitcher::~MaterialSwitcher()
+namespace rendering
+{
+//////////////////////////////////////////////////
+MaterialSwitcher::MaterialSwitcher()
 {
   this->Reset();
 }
 
-/////////////////////////////////////////////////
-void MaterialSwitcher::Reset()
+//////////////////////////////////////////////////
+MaterialSwitcher::~MaterialSwitcher()
 {
-  this->currentColor =
-      gz::math::Color(0.0f, 0.0f, 0.1f, 1.0f);
-
-  this->colorDict.clear();
 }
 
-/////////////////////////////////////////////////
-void MaterialSwitcher::GetNextColor()
+//////////////////////////////////////////////////
+gz::rendering::MaterialPtr MaterialSwitcher::GetSelectionMaterial(
+    gz::rendering::ScenePtr _scene, gz::rendering::VisualPtr _visual)
 {
-  uint32_t color =
-      this->currentColor.AsARGB();
+  if (!_scene || !_visual)
+  {
+    return gz::rendering::MaterialPtr();
+  }
 
-  ++color;
+  // If the visual is the same as the last processed one, reuse its material
+  if (this->lastEntity == _visual->Name())
+  {
+    std::string matName = "selection_mat_" + std::to_string(this->currentColor.AsRGBA());
+    gz::rendering::MaterialPtr mat = _scene->Material(matName);
+    if (mat)
+    {
+      mat->SetAmbient(this->currentColor);
+      mat->SetDiffuse(this->currentColor);
+      return mat;
+    }
+  }
 
-  this->currentColor.SetFromARGB(color);
-}
-
-/////////////////////////////////////////////////
-gz::math::Color MaterialSwitcher::NextColor()
-{
+  // Iterate to next unique visual tracking color channel 
   this->GetNextColor();
-  return this->currentColor;
+
+  std::string matName = "selection_mat_" + std::to_string(this->currentColor.AsRGBA());
+  gz::rendering::MaterialPtr newMat = _scene->CreateMaterial(matName);
+
+  if (newMat)
+  {
+    newMat->SetAmbient(this->currentColor);
+    newMat->SetDiffuse(this->currentColor);
+
+    // Map unique color to visual entity identifier name
+    this->lastEntity = _visual->Name();
+    this->colorDict[this->currentColor.AsRGBA()] = this->lastEntity;
+    return newMat;
+  }
+
+  return gz::rendering::MaterialPtr();
 }
 
-/////////////////////////////////////////////////
-const std::string &
-MaterialSwitcher::GetEntityName(
+//////////////////////////////////////////////////
+const std::string &MaterialSwitcher::GetEntityName(
     const gz::math::Color &_color) const
 {
-  auto iter =
-      this->colorDict.find(_color.AsRGBA());
+  auto iter = this->colorDict.find(_color.AsRGBA());
 
   if (iter != this->colorDict.end())
     return iter->second;
@@ -64,66 +88,20 @@ MaterialSwitcher::GetEntityName(
   return this->emptyString;
 }
 
-/////////////////////////////////////////////////
-void MaterialSwitcher::RegisterVisual(
-    const gz::rendering::VisualPtr &_visual)
+//////////////////////////////////////////////////
+void MaterialSwitcher::GetNextColor()
 {
-  if (!_visual)
-    return;
-
-  this->GetNextColor();
-
-  gz::rendering::MaterialPtr material =
-      _visual->Material();
-
-  if (!material)
-  {
-    auto scene = _visual->Scene();
-
-    if (!scene)
-      return;
-
-    material = scene->CreateMaterial();
-  }
-
-  material->SetAmbient(this->currentColor);
-  material->SetDiffuse(this->currentColor);
-  material->SetEmissive(this->currentColor);
-
-  material->SetTransparency(0.0);
-
-  _visual->SetMaterial(material);
-
-  this->colorDict[this->currentColor.AsRGBA()] =
-      _visual->Name();
+  auto color = this->currentColor.AsARGB();
+  color++;
+  this->currentColor.SetFromARGB(color);
 }
 
-/////////////////////////////////////////////////
-bool MaterialSwitcher::HasColor(
-    const gz::math::Color &_color) const
+//////////////////////////////////////////////////
+void MaterialSwitcher::Reset()
 {
-  return this->colorDict.find(_color.AsRGBA()) !=
-         this->colorDict.end();
+  this->currentColor = gz::math::Color(0.0f, 0.0f, 0.1f);
+  this->lastEntity.clear();
+  this->colorDict.clear();
 }
-
-/////////////////////////////////////////////////
-std::vector<std::string>
-MaterialSwitcher::RegisteredVisuals() const
-{
-  std::vector<std::string> names;
-
-  for (const auto &item : this->colorDict)
-  {
-    names.push_back(item.second);
-  }
-
-  return names;
 }
-
-/////////////////////////////////////////////////
-size_t MaterialSwitcher::VisualCount() const
-{
-  return this->colorDict.size();
 }
-=======
->>>>>>> bde8874 (Remove unused directories from navigator_auv)

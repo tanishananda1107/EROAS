@@ -1,29 +1,4 @@
-/*
-<<<<<<< HEAD
- * Copyright (C) 2012 Open Source Robotics Foundation
-=======
- * Copyright 2020 Naval Postgraduate School
->>>>>>> bde8874 (Remove unused directories from navigator_auv)
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
-<<<<<<< HEAD
- * http://www.apache.org/licenses/LICENSE-2.0
-=======
- *     http://www.apache.org/licenses/LICENSE-2.0
->>>>>>> bde8874 (Remove unused directories from navigator_auv)
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
-<<<<<<< HEAD
- *
-*/
-
+ 
 #ifndef GAZEBO_ROS_MULTIBEAM_SONAR_RAY_HH
 #define GAZEBO_ROS_MULTIBEAM_SONAR_RAY_HH
 
@@ -39,8 +14,7 @@
 #include <geometry_msgs/msg/vector3.hpp>
 
 // Marine Acoustic Message Definitions (ROS 2 Versions)
-=======
-*/
+
 
 #ifndef GZ_SIM_MULTIBEAM_SONAR_HH
 #define GZ_SIM_MULTIBEAM_SONAR_HH
@@ -55,12 +29,12 @@
 #include <std_msgs/msg/float32.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
 #include <image_transport/image_transport.hpp>
->>>>>>> bde8874 (Remove unused directories from navigator_auv)
+
 #include <marine_acoustic_msgs/msg/projected_sonar_image.hpp>
 #include <marine_acoustic_msgs/msg/sonar_image_data.hpp>
 #include <marine_acoustic_msgs/msg/ping_info.hpp>
 
-<<<<<<< HEAD
+
 // Gazebo Harmonic (Gz Sim 8) Headers
 #include <gz/sim/System.hh>
 #include <gz/sim/Sensor.hh>
@@ -78,7 +52,6 @@
 
 // Standard C++ Implementations
 #include <string>
-=======
 // ── Gazebo Harmonic (gz-sim 8) ────────────────────────────────────────────
 #include <gz/sim/System.hh>
 #include <gz/sim/EntityComponentManager.hh>
@@ -111,12 +84,10 @@
 // Third-party / standard
 #include <opencv2/core.hpp>
 #include <boost/thread/mutex.hpp>
->>>>>>> bde8874 (Remove unused directories from navigator_auv)
 #include <complex>
 #include <valarray>
 #include <sstream>
 #include <chrono>
-<<<<<<< HEAD
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -260,8 +231,7 @@ namespace gazebo_plugins
   }
 }
 
-#endif // GAZEBO_ROS_MULTIBEAM_SONAR_RAY_HH
-=======
+#endif 
 #include <string>
 #include <set>
 #include <vector>

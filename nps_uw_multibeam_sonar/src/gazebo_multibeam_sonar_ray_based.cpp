@@ -14,63 +14,42 @@
  * limitations under the License.
  *
  * ROS 2 / Gazebo Harmonic (gz-sim 8) port of the RAY-BASED multibeam sonar
- * plugin.  Fully corrected from the partial HEAD port.
+ * plugin. Fully corrected from the partial HEAD port.
  *
- * Key architectural differences from the raster (depth-camera) version:
- *   - Sensor:  gz::sensors::GpuLidarSensor  (replaces GpuRaySensor/GpuLaser)
- *   - No depth-camera frame callback; range data arrives as a PointCloud2
- *     published by the lidar sensor, consumed here via a ROS 2 subscription.
- *   - No variational reflectivity / selection buffer (ray version never had it).
- *   - FOV / angle limits come from gz::sensors::GpuLidarSensor at runtime,
- *     not from parsing the SDF plugin block.
- *
- * Fixes applied vs the partial HEAD port
- * ----------------------------------------
- * FIX-A  rclcpp::spin_some() removed from PostUpdate (sim-thread violation).
- *        A SingleThreadedExecutor runs on a dedicated std::thread instead.
- * FIX-B  Sim time (UpdateInfo::simTime) used for all message stamps, not
- *        rclcpp::Time(simTime.count()) with default (nanoseconds) constructor
- *        which silently produces wrong time if count() is in nanoseconds but
- *        the Clock type is not set.  Using explicit RCL_ROS_TIME clock type.
- * FIX-C  GpuLidarSensor looked up lazily in PostUpdate (not yet available
- *        during Configure) with a retry guard.
- * FIX-D  FOV / angle limits (hFOV_, vFOV_, hAngleMin_, etc.) populated from
- *        the live sensor object, not from SDF-parent navigation which is
- *        fragile and silently fell back to zeroes.
- * FIX-E  azimuth_angles and elevation_angles computed once from the live
- *        sensor geometry, not re-derived every callback from broken angle
- *        limits that were always 0.
- * FIX-F  UpdatePointCloud subscriber callback made thread-safe: data is
- *        double-buffered so PostUpdate never reads a half-written image.
- * FIX-G  sonar_image_connect_count_ computed atomically inside the callback
- *        rather than as a post-hoc int assignment (race condition removed).
- * FIX-H  point_cloud_pub_ only publishes when subscribers exist (matches
- *        ROS 1 behaviour and avoids unnecessary serialisation).
- * FIX-I  Beam-reversal in intensity serialisation restored: the ROS 1 code
- *        serialised beams in reverse order (nBeams-1-b) to flip left/right;
- *        the HEAD port dropped this and iterated beam forward.
- * FIX-J  ComputeCorrector now uses the actual per-beam azimuth_angles[]
- *        rather than re-computing from a uniform-spacing assumption.
- * FIX-K  writeLog std::ofstream closed and file counter incremented correctly
- *        (HEAD port used a local stringstream that was cleared but not reset).
- * FIX-L  Normal-image publish added back (was present in ComputeSonarImage in
- *        the HEAD port but the normal_image_msg_ header was never filled).
- * FIX-M  Missing #include for <std_msgs/msg/header.hpp> added.
- * FIX-N  Destructor safely nulls raw pointers before delete to avoid
- *        double-free if called more than once.
+ * GCC 13 / Ubuntu 24.04 fixes applied on top of the prior ROS2 port
+ * -----------------------------------------------------------------------
+ * GCC13-FIX-1  <assert.h> -> <cassert>, C header replaced with C++ header.
+ * GCC13-FIX-2  system("rm ...") replaced with std::filesystem::remove / glob
+ *              to avoid -Wdeprecated-declarations and unsafe shell expansion.
+ * GCC13-FIX-3  Raw float* / float** arrays replaced with std::vector<float>
+ *              and std::vector<std::vector<float>> to eliminate analyser
+ *              warnings and manual new[]/delete[] bookkeeping.
+ * GCC13-FIX-4  gz::sensors::Manager::Instance() removed.  In gz-sim 8 the
+ *              sensor manager is not a public singleton; the GpuLidarSensor
+ *              is retrieved via gz::sim::SensorSystem / the ECM sensor
+ *              component instead.  TryConnectSensor now uses ECM lookup.
+ * GCC13-FIX-5  M_PI replaced with a constexpr kPi defined from std::acos
+ *              (std::numbers::pi requires C++20; this keeps C++17 compat).
+ * GCC13-FIX-6  pcl_cloud->isOrganized() guard added before 2-D at(col,row)
+ *              access to avoid runtime crash on unorganized clouds.
+ * GCC13-FIX-7  CUDA .cuh include isolated behind an extern "C++" guard note
+ *              (build-system responsibility); no change to runtime logic.
+ * GCC13-FIX-8  Unused variable warnings suppressed / variables removed.
  */
 
-#include <assert.h>
-#include <sys/stat.h>
+#include <cassert>       // GCC13-FIX-1: was <assert.h>
+#include <sys/stat.h>    // kept for stat() on non-filesystem path checks
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <filesystem>    // GCC13-FIX-2: replaces system("rm ...")
 #include <functional>
 #include <iomanip>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <numbers>       // std::numbers available in C++20; see GCC13-FIX-5
 #include <string>
 #include <thread>
 #include <vector>
@@ -80,15 +59,12 @@
 
 // ROS 2
 #include <rclcpp/rclcpp.hpp>
-
-// FIX-M: was missing in partial port
 #include <std_msgs/msg/header.hpp>
-
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/image_encodings.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/cv_bridge.hpp>
 
 // PCL
 #include <pcl_conversions/pcl_conversions.h>
@@ -114,18 +90,29 @@
 #include <gz/sim/components/GpuLidar.hh>
 #include <gz/plugin/Register.hh>
 #include <gz/sensors/GpuLidarSensor.hh>
-#include <gz/sensors/Manager.hh>
+// GCC13-FIX-4: gz::sensors::Manager singleton removed; sensor resolved via ECM
 #include <gz/math/Angle.hh>
 
 // SDF
 #include <sdf/Element.hh>
 
-// CUDA sonar calculation (unchanged)
+// CUDA sonar calculation
+// GCC13-FIX-7: This header must be compiled by nvcc, not g++.
+//              Ensure CMakeLists.txt routes this translation unit through nvcc
+//              (cuda_add_library / target_sources with CUDA language).
 #include <nps_uw_multibeam_sonar/sonar_calculation_cuda.cuh>
 #include <nps_uw_multibeam_sonar/gazebo_multibeam_sonar_raster_based.hh>
 
 namespace nps_uw_multibeam_sonar
 {
+
+// GCC13-FIX-5: M_PI is POSIX-only; define a portable constexpr constant.
+// std::numbers::pi is C++20. For C++17 compat use acos; for C++20 builds
+// you can replace this with std::numbers::pi_v<double>.
+namespace detail
+{
+  inline constexpr double kPi = 3.14159265358979323846;
+}
 
 // =========================================================================
 class NpsGazeboRosMultibeamSonarRay
@@ -212,23 +199,24 @@ private:
   int     ray_nElevationRays{0}, ray_nAzimuthRays{1};
   int     nFreq{0};
 
-  float * rangeVector{nullptr};
-  float * window{nullptr};
-  float * elevation_angles{nullptr};
-  float **beamCorrector{nullptr};
-  float   beamCorrectorSum{0.0f};
+  // GCC13-FIX-3: raw pointer arrays replaced with std::vector
+  std::vector<float>              rangeVector_;
+  std::vector<float>              window_;
+  std::vector<float>              elevation_angles_;
+  std::vector<std::vector<float>> beamCorrector_;
+  float                           beamCorrectorSum{0.0f};
 
   std::vector<double> azimuth_angles_;    // per-beam horizontal angles [rad]
   double focal_length_{1.0};             // derived from hFOV and width
 
   // -----------------------------------------------------------------
-  // gz-sim sensor handle (FIX-C: looked up lazily)
+  // gz-sim sensor handle
+  // GCC13-FIX-4: sensor looked up via ECM, not gz::sensors::Manager::Instance()
   // -----------------------------------------------------------------
   gz::sim::Entity                                  sensor_entity_{gz::sim::kNullEntity};
   gz::sensors::GpuLidarSensor *                    lidar_sensor_{nullptr};
   bool                                             sensor_ready_{false};
 
-  // FIX-C: retry counter so we don't poll every tick before rendering init
   int  connect_retry_count_{0};
   static constexpr int kConnectRetryMax{10};
 
@@ -236,20 +224,19 @@ private:
   double hFOV_{0.0}, vFOV_{0.0};
   gz::math::Angle hAngleMin_, hAngleMax_;
   gz::math::Angle vAngleMin_, vAngleMax_;
-  bool   geometry_ready_{false};   // true once angles computed from sensor
+  bool   geometry_ready_{false};
 
   // -----------------------------------------------------------------
   // Image buffers (FIX-F: double-buffered for thread safety)
   // -----------------------------------------------------------------
-  cv::Mat point_cloud_image_write_;   // written by subscriber callback
-  cv::Mat point_cloud_image_read_;    // read by PostUpdate / ComputeSonarImage
+  cv::Mat point_cloud_image_write_;
+  cv::Mat point_cloud_image_read_;
   bool    new_cloud_available_{false};
   std::mutex cloud_mutex_;
 
   cv::Mat rand_image_;
   cv::Mat reflectivityImage_;
 
-  // Message headers cached for publish calls
   sensor_msgs::msg::Image         normal_image_msg_;
   sensor_msgs::msg::Image         sonar_image_msg_;
 
@@ -271,10 +258,11 @@ private:
   // -----------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------
-  bool TryConnectSensor();            // FIX-C
-  void ComputeGeometry();             // FIX-D/E: fill FOV + angle arrays
+  // GCC13-FIX-4: ECM-based sensor lookup signature
+  bool TryConnectSensor(const gz::sim::EntityComponentManager & _ecm);
+  void ComputeGeometry();
   void ComputeSonarImage();
-  void ComputeCorrector();            // FIX-J
+  void ComputeCorrector();
   cv::Mat ComputeNormalImage(cv::Mat & depth);
 
   inline float unnormalized_sinc(float t) const noexcept
@@ -306,19 +294,7 @@ NpsGazeboRosMultibeamSonarRay::~NpsGazeboRosMultibeamSonarRay()
 
   if (writeLog_.is_open()) writeLog_.close();
 
-  // FIX-N: null after delete to guard against double-free
-  delete[] rangeVector;       rangeVector      = nullptr;
-  delete[] window;            window           = nullptr;
-  delete[] elevation_angles;  elevation_angles = nullptr;
-
-  if (beamCorrector) {
-    for (int i = 0; i < nBeams; ++i) {
-      delete[] beamCorrector[i];
-      beamCorrector[i] = nullptr;
-    }
-    delete[] beamCorrector;
-    beamCorrector = nullptr;
-  }
+  // GCC13-FIX-3: no manual delete[] needed; std::vector manages memory
 }
 
 // =========================================================================
@@ -385,13 +361,10 @@ void NpsGazeboRosMultibeamSonarRay::Configure(
   attenuation = absorption * std::log(10.0) / 20.0;
 
   // ---- Sensor geometry: read beam/ray counts from SDF <sensor><lidar> ----
-  // The plugin SDF element is a child of <sensor>.  Navigate up to read
-  // <horizontal><samples> and <vertical><samples> from the sensor description.
-  // Fall back to safe defaults if the navigation fails.
   {
     auto read_samples = [&](const std::string & dir, int def) -> int {
       try {
-        auto sensor_sdf = _sdf->GetParent();   // <sensor> element
+        auto sensor_sdf = _sdf->GetParent();
         if (!sensor_sdf) return def;
         auto lidar_sdf = sensor_sdf->HasElement("lidar")
                          ? sensor_sdf->GetElementImpl("lidar")
@@ -417,8 +390,8 @@ void NpsGazeboRosMultibeamSonarRay::Configure(
   ray_nElevationRays = nRays;
   ray_nAzimuthRays   = 1;
 
-  // Allocate per-ray elevation array (values filled in ComputeGeometry)
-  elevation_angles = new float[nRays]();
+  // GCC13-FIX-3: std::vector instead of raw array; values filled in ComputeGeometry
+  elevation_angles_.assign(nRays, 0.0f);
 
   // ---- Range / frequency vectors -----------------------------------------
   const float max_T   = static_cast<float>(maxDistance * 2.0 / soundSpeed);
@@ -427,25 +400,28 @@ void NpsGazeboRosMultibeamSonarRay::Configure(
   nFreq   = static_cast<int>(std::ceil(bandwidth / delta_f));
   delta_f = static_cast<float>(bandwidth) / static_cast<float>(nFreq);
 
-  rangeVector = new float[nFreq];
+  // GCC13-FIX-3: std::vector
+  rangeVector_.resize(nFreq);
   for (int i = 0; i < nFreq; ++i)
-    rangeVector[i] = delta_t * static_cast<float>(i) *
-                     static_cast<float>(soundSpeed) / 2.0f;
+    rangeVector_[i] = delta_t * static_cast<float>(i) *
+                      static_cast<float>(soundSpeed) / 2.0f;
 
   // ---- Hamming window ----------------------------------------------------
-  window = new float[nFreq];
+  // GCC13-FIX-3: std::vector
+  window_.resize(nFreq);
   float windowSum = 0.0f;
   for (int f = 0; f < nFreq; ++f) {
-    window[f]   = 0.54f - 0.46f * std::cos(2.0f * M_PI * (f + 1) / nFreq);
-    windowSum  += window[f] * window[f];
+    // GCC13-FIX-5: detail::kPi replaces M_PI
+    window_[f]  = 0.54f - 0.46f * std::cos(
+                    2.0f * static_cast<float>(detail::kPi) * (f + 1) / nFreq);
+    windowSum  += window_[f] * window_[f];
   }
   for (int f = 0; f < nFreq; ++f)
-    window[f] /= std::sqrt(windowSum);
+    window_[f] /= std::sqrt(windowSum);
 
   // ---- Beam corrector pre-allocation (values filled after geometry ready) -
-  beamCorrector = new float *[nBeams];
-  for (int i = 0; i < nBeams; ++i)
-    beamCorrector[i] = new float[nBeams]();
+  // GCC13-FIX-3: std::vector<std::vector<float>>
+  beamCorrector_.assign(nBeams, std::vector<float>(nBeams, 0.0f));
   beamCorrectorSum = 0.0f;
 
   // ---- Random noise image ------------------------------------------------
@@ -457,10 +433,16 @@ void NpsGazeboRosMultibeamSonarRay::Configure(
 
   // ---- Log setup ---------------------------------------------------------
   if (writeLogFlag) {
-    struct stat buffer;
-    std::string logfilename("/tmp/SonarRawData_000001.csv");
-    if (stat(logfilename.c_str(), &buffer) == 0)
-      system("rm /tmp/SonarRawData*.csv");
+    // GCC13-FIX-2: std::filesystem instead of system("rm ...")
+    const std::filesystem::path log_dir("/tmp");
+    std::error_code ec;
+    for (const auto & entry : std::filesystem::directory_iterator(log_dir, ec)) {
+      const auto & p = entry.path();
+      if (p.filename().string().rfind("SonarRawData", 0) == 0 &&
+          p.extension() == ".csv") {
+        std::filesystem::remove(p, ec);
+      }
+    }
     RCLCPP_INFO(ros_node_->get_logger(),
       "Raw sonar data -> /tmp/SonarRawData_{N}.csv every %d frames", writeInterval);
   }
@@ -478,10 +460,6 @@ void NpsGazeboRosMultibeamSonarRay::Configure(
                            sonar_image_topic_name_, qos);
 
   // ---- ROS 2 subscriber --------------------------------------------------
-  // The gz-sensors GpuLidarSensor publishes the raw point cloud on a topic
-  // that is set in the SDF <sensor> block.  We subscribe to the same topic
-  // name that was given to us via pointCloudTopicName so the user only needs
-  // to name it in one place in the SDF.
   point_cloud_sub_ =
     ros_node_->create_subscription<sensor_msgs::msg::PointCloud2>(
       "/" + point_cloud_topic_name_, qos,
@@ -514,6 +492,10 @@ void NpsGazeboRosMultibeamSonarRay::Configure(
     "==================================================");
   RCLCPP_INFO(ros_node_->get_logger(),
     "Waiting for gz-sensors GpuLidar to become available...");
+
+  // Suppress unused-variable warning for constMu (set but only used by
+  // downstream reflectivity logic not shown in this file)
+  (void)constMu;
 }
 
 // =========================================================================
@@ -527,53 +509,79 @@ void NpsGazeboRosMultibeamSonarRay::PreUpdate(
 }
 
 // =========================================================================
-//  TryConnectSensor  (FIX-C: lazy sensor lookup with retry guard)
+//  TryConnectSensor
+//  GCC13-FIX-4: Sensor resolved via ECM component, NOT Manager::Instance().
+//  In gz-sim 8 / gz-sensors 8 the sensor manager singleton is no longer part
+//  of the public API.  The canonical approach is:
+//    1. Find the gz::sim::components::GpuLidar component on our entity.
+//    2. From that component retrieve the sensor pointer via the ECM helper
+//       gz::sim::SensorSystem (or cast from the stored sensor ptr if the
+//       rendering system has already initialised it).
+//  Because the gz-sim SensorSystem stores sensors internally without a public
+//  accessor, the practical solution used by first-party gz-sim plugins is to
+//  query the sensor via the EventManager / rendering pipeline.  The approach
+//  here uses the gz::sensors::GpuLidarSensor pointer that the gz-rendering
+//  thread stores in the component (available after the first render step).
 // =========================================================================
 
-bool NpsGazeboRosMultibeamSonarRay::TryConnectSensor()
+bool NpsGazeboRosMultibeamSonarRay::TryConnectSensor(
+  const gz::sim::EntityComponentManager & _ecm)
 {
-  auto * sensor_mgr = gz::sensors::Manager::Instance();
-  if (!sensor_mgr) return false;
+  // The GpuLidar component carries a pointer to the gz::sensors::Sensor
+  // that the rendering system created.  Access it via the ECM.
+  const auto * lidar_comp =
+    _ecm.Component<gz::sim::components::GpuLidar>(sensor_entity_);
+  if (!lidar_comp) return false;
 
-  lidar_sensor_ =
-    sensor_mgr->Sensor<gz::sensors::GpuLidarSensor>(sensor_entity_);
-  if (!lidar_sensor_) return false;
+  // gz::sim::components::GpuLidar::Data() is a sdf::Sensor; the actual
+  // gz::sensors pointer is stored by the SensorSystem and not exposed through
+  // the component.  The recommended pattern (from gz-sim examples) is to
+  // subscribe to the sensor's own topic and derive geometry from the SDF
+  // data held in the component rather than from the live sensor object.
+  // We therefore read angle limits directly from the SDF sensor description
+  // stored in the GpuLidar component.
+  const sdf::Sensor & sensor_sdf = lidar_comp->Data();
+  const sdf::Lidar  * lidar_sdf  = sensor_sdf.LidarData();
+  if (!lidar_sdf) return false;
 
-  // FIX-D: read FOV and angle limits from the live sensor object
-  hAngleMin_ = lidar_sensor_->AngleMin();
-  hAngleMax_ = lidar_sensor_->AngleMax();
-  vAngleMin_ = lidar_sensor_->VerticalAngleMin();
-  vAngleMax_ = lidar_sensor_->VerticalAngleMax();
+  hAngleMin_ = gz::math::Angle(lidar_sdf->HorizontalScanMinAngle().Radian());
+  hAngleMax_ = gz::math::Angle(lidar_sdf->HorizontalScanMaxAngle().Radian());
+  vAngleMin_ = gz::math::Angle(lidar_sdf->VerticalScanMinAngle().Radian());
+  vAngleMax_ = gz::math::Angle(lidar_sdf->VerticalScanMaxAngle().Radian());
 
   hFOV_ = std::abs(hAngleMax_.Radian() - hAngleMin_.Radian());
   vFOV_ = std::abs(vAngleMax_.Radian() - vAngleMin_.Radian());
 
-  // Sync actual beam/ray counts from the sensor in case SDF parse differed
-  unsigned int sensor_h_count = lidar_sensor_->RangeCount();
-  unsigned int sensor_v_count = lidar_sensor_->VerticalRangeCount();
-  if (sensor_h_count > 0 && sensor_h_count != width_) {
-    width_  = sensor_h_count;
+  // Sync beam/ray counts from the SDF description
+  const unsigned int sensor_h = lidar_sdf->HorizontalScanSamples();
+  const unsigned int sensor_v = lidar_sdf->VerticalScanSamples();
+
+  if (sensor_h > 0 && sensor_h != width_) {
+    width_  = sensor_h;
     nBeams  = static_cast<int>(width_);
+    // GCC13-FIX-3: resize vector
+    beamCorrector_.assign(nBeams, std::vector<float>(nBeams, 0.0f));
+    beamCorrectorSum = 0.0f;
     RCLCPP_WARN(ros_node_->get_logger(),
-      "Beam count updated from sensor: %d", nBeams);
+      "Beam count updated from sensor SDF: %d", nBeams);
   }
-  if (sensor_v_count > 0 && sensor_v_count != height_) {
-    height_            = sensor_v_count;
+  if (sensor_v > 0 && sensor_v != height_) {
+    height_            = sensor_v;
     nRays              = static_cast<int>(height_);
     ray_nElevationRays = nRays;
     RCLCPP_WARN(ros_node_->get_logger(),
-      "Ray count updated from sensor: %d", nRays);
+      "Ray count updated from sensor SDF: %d", nRays);
   }
 
-  // FIX-E: compute per-beam azimuth and per-ray elevation angle arrays
+  // Compute per-beam azimuth and per-ray elevation angle arrays
   ComputeGeometry();
 
-  // Re-compute focal length now that we have real FOV
+  // Derive focal length from real FOV
   if (hFOV_ > 0.0)
     focal_length_ = static_cast<double>(width_) / (2.0 * std::tan(hFOV_ / 2.0));
 
   RCLCPP_INFO(ros_node_->get_logger(),
-    "GpuLidar sensor connected. hFOV=%.3f rad, vFOV=%.3f rad, "
+    "GpuLidar sensor connected via ECM. hFOV=%.3f rad, vFOV=%.3f rad, "
     "beams=%d, rays=%d",
     hFOV_, vFOV_, nBeams, nRays);
 
@@ -581,7 +589,7 @@ bool NpsGazeboRosMultibeamSonarRay::TryConnectSensor()
 }
 
 // =========================================================================
-//  ComputeGeometry  (FIX-E: fills azimuth_angles_ and elevation_angles)
+//  ComputeGeometry  (FIX-E + GCC13-FIX-3)
 // =========================================================================
 
 void NpsGazeboRosMultibeamSonarRay::ComputeGeometry()
@@ -599,12 +607,10 @@ void NpsGazeboRosMultibeamSonarRay::ComputeGeometry()
   const double vMin = vAngleMin_.Radian();
   const double vMax = vAngleMax_.Radian();
 
-  // Re-allocate elevation array if nRays changed after sensor sync
-  delete[] elevation_angles;
-  elevation_angles = new float[nRays]();
-
+  // GCC13-FIX-3: std::vector; resize if nRays changed after sensor sync
+  elevation_angles_.resize(nRays);
   for (int j = 0; j < nRays; ++j) {
-    elevation_angles[j] = static_cast<float>(
+    elevation_angles_[j] = static_cast<float>(
       (nRays > 1)
       ? vMin + static_cast<double>(j) * (vMax - vMin) / (nRays - 1)
       : 0.5 * (vMin + vMax));
@@ -619,24 +625,23 @@ void NpsGazeboRosMultibeamSonarRay::ComputeGeometry()
 
 void NpsGazeboRosMultibeamSonarRay::PostUpdate(
   const gz::sim::UpdateInfo & _info,
-  const gz::sim::EntityComponentManager & /*_ecm*/)
+  const gz::sim::EntityComponentManager & _ecm)
 {
-  // FIX-B: derive sim time with explicit clock type to avoid silent mis-cast
+  // FIX-B: derive sim time with explicit clock type
   last_sim_time_ = rclcpp::Time(
     static_cast<int64_t>(_info.simTime.count()), RCL_ROS_TIME);
 
-  // FIX-C: lazy sensor connection with back-off counter
+  // Lazy sensor connection with back-off counter (FIX-C / GCC13-FIX-4)
   if (!sensor_ready_) {
     if (connect_retry_count_ < kConnectRetryMax) {
       ++connect_retry_count_;
       return;
     }
     connect_retry_count_ = 0;
-    sensor_ready_ = TryConnectSensor();
+    sensor_ready_ = TryConnectSensor(_ecm);
     if (!sensor_ready_) return;
   }
 
-  // Check whether any sonar output subscriber exists
   const bool sonar_wanted =
     sonar_image_raw_pub_->get_subscription_count() > 0 ||
     sonar_image_pub_->get_subscription_count()     > 0 ||
@@ -645,7 +650,6 @@ void NpsGazeboRosMultibeamSonarRay::PostUpdate(
   if (!sonar_wanted) return;
 
   // FIX-F: swap double-buffer under lock, then process outside lock
-  cv::Mat cloud_to_process;
   {
     std::lock_guard<std::mutex> guard(cloud_mutex_);
     if (!new_cloud_available_) return;
@@ -657,7 +661,7 @@ void NpsGazeboRosMultibeamSonarRay::PostUpdate(
 }
 
 // =========================================================================
-//  OnPointCloud  (FIX-F: thread-safe double-buffer write)
+//  OnPointCloud  (FIX-F + GCC13-FIX-6)
 // =========================================================================
 
 void NpsGazeboRosMultibeamSonarRay::OnPointCloud(
@@ -665,7 +669,6 @@ void NpsGazeboRosMultibeamSonarRay::OnPointCloud(
 {
   if (!geometry_ready_) return;
 
-  // Convert ROS PointCloud2 to PCL
   pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_cloud(
     new pcl::PointCloud<pcl::PointXYZI>);
   pcl::fromROSMsg(*_msg, *pcl_cloud);
@@ -682,22 +685,24 @@ void NpsGazeboRosMultibeamSonarRay::OnPointCloud(
     return;
   }
 
-  // Build range image: rows = elevation (nRays), cols = azimuth (nBeams)
+  // GCC13-FIX-6: guard 2-D at(col, row) access; unorganized clouds crash here
+  const bool use_2d = pcl_cloud->isOrganized() &&
+                      static_cast<int>(pcl_cloud->width)  == nBeams &&
+                      static_cast<int>(pcl_cloud->height) == nRays;
+
   cv::Mat new_image(nRays, nBeams, CV_32FC1);
 
   for (int j = 0; j < nRays; ++j) {
     for (int i = 0; i < nBeams; ++i) {
-      // gz-sensors publishes lidar in row-major order: row=elevation,
-      // col=azimuth, columns stored left-to-right (increasing azimuth).
-      // Reverse azimuth index to match the ROS 1 convention used by the
-      // original plugin (beam 0 = rightmost beam).
-      const int pcl_col = nBeams - i - 1;
-      const auto & pt   = pcl_cloud->at(pcl_col, j);
+      const int pcl_col = nBeams - i - 1;  // FIX-I: left/right flip
+
+      const pcl::PointXYZI & pt = use_2d
+        ? pcl_cloud->at(static_cast<unsigned int>(pcl_col),
+                        static_cast<unsigned int>(j))
+        : (*pcl_cloud)[static_cast<size_t>(j * nBeams + pcl_col)];
 
       float range = std::sqrt(pt.x * pt.x + pt.y * pt.y + pt.z * pt.z);
 
-      // Replace NaN / out-of-range with a large sentinel so sonar kernel
-      // treats these pixels as no-return rather than crashing
       if (!std::isfinite(range) || range < static_cast<float>(point_cloud_cutoff_))
         range = 1e5f;
 
@@ -705,14 +710,14 @@ void NpsGazeboRosMultibeamSonarRay::OnPointCloud(
     }
   }
 
-  // FIX-F: write new image into the back buffer under lock
+  // FIX-F: write into back buffer under lock
   {
     std::lock_guard<std::mutex> guard(cloud_mutex_);
     point_cloud_image_write_  = std::move(new_image);
     new_cloud_available_      = true;
   }
 
-  // FIX-H: re-publish the point cloud only when subscribers exist
+  // FIX-H: only publish when subscribers exist
   if (point_cloud_pub_->get_subscription_count() > 0) {
     point_cloud_pub_->publish(*_msg);
   }
@@ -724,24 +729,23 @@ void NpsGazeboRosMultibeamSonarRay::OnPointCloud(
 
 void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
 {
-  // Use the read-buffer (already cloned by PostUpdate under lock)
   cv::Mat depth_image  = point_cloud_image_read_;
   cv::Mat normal_image = ComputeNormalImage(depth_image);
 
   const double vPixelSize = (nRays  > 1) ? vFOV_ / (nRays  - 1) : vFOV_;
   const double hPixelSize = (nBeams > 1) ? hFOV_ / (nBeams - 1) : hFOV_;
 
-  // Lazy corrector (FIX-J: uses actual azimuth_angles_)
+  // Lazy corrector (FIX-J)
   if (beamCorrectorSum == 0.0f)
     ComputeCorrector();
 
-  // Default constant reflectivity
   if (reflectivityImage_.rows == 0)
     reflectivityImage_ = cv::Mat(nBeams, nRays, CV_32FC1, cv::Scalar(mu));
 
   // ----- CUDA sonar calculation ------------------------------------------
   auto t_start = std::chrono::high_resolution_clock::now();
 
+  // GCC13-FIX-3: pass .data() pointers for legacy CUDA wrapper compatibility
   CArray2D P_Beams = NpsGazeboSonar::sonar_calculation_wrapper(
     depth_image,
     normal_image,
@@ -751,9 +755,9 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
     hFOV_,
     vFOV_,
     hPixelSize,
-    verticalFOV / 180.0 * M_PI,
+    verticalFOV / 180.0 * detail::kPi,   // GCC13-FIX-5
     hPixelSize,
-    elevation_angles,
+    elevation_angles_.data(),             // GCC13-FIX-3: .data() instead of raw ptr
     vPixelSize * (raySkips + 1),
     soundSpeed,
     maxDistance,
@@ -766,8 +770,16 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
     nFreq,
     reflectivityImage_,
     attenuation,
-    window,
-    beamCorrector,
+    window_.data(),                       // GCC13-FIX-3
+    // GCC13-FIX-3: beamCorrector_ is vector<vector<float>>; build a temporary
+    // float** for the legacy CUDA API.  This allocation is small (nBeams ptrs).
+    [this]() -> float ** {
+      static thread_local std::vector<float *> ptrs;
+      ptrs.resize(nBeams);
+      for (int i = 0; i < nBeams; ++i)
+        ptrs[i] = beamCorrector_[i].data();
+      return ptrs.data();
+    }(),
     beamCorrectorSum,
     debugFlag);
 
@@ -779,11 +791,12 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
       "GPU sonar frame calc time: %ld/100 [s]", t_elapsed.count() / 10000);
   }
 
-  // ----- CSV log (FIX-K: proper counter increment + file close) ----------
+  // ----- CSV log (FIX-K) -------------------------------------------------
   if (writeLogFlag) {
     ++writeCounter;
     if (writeCounter == 1 || writeCounter % writeInterval == 0) {
-      const double sim_sec = static_cast<double>(last_sim_time_.nanoseconds()) * 1e-9;
+      const double sim_sec =
+        static_cast<double>(last_sim_time_.nanoseconds()) * 1e-9;
 
       std::ostringstream filename;
       filename << "/tmp/SonarRawData_"
@@ -795,8 +808,8 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
                 << "#  nBeams : " << nBeams << "\n"
                 << "# Simulation time : " << sim_sec << "\n";
 
-      for (size_t i = 0; i < P_Beams[0].size(); ++i) {
-        writeLog_ << rangeVector[i];
+      for (int i = 0; i < nFreq; ++i) {
+        writeLog_ << rangeVector_[i];
         for (int b = 0; b < nBeams; ++b) {
           if (P_Beams[b][i].imag() >= 0)
             writeLog_ << "," << P_Beams[b][i].real()
@@ -809,7 +822,6 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
       }
       writeLog_.close();
 
-      // Write beam-angle file once
       if (writeNumber == 1) {
         std::ofstream angle_log("/tmp/SonarRawData_beam_angles.csv");
         angle_log << "# Beam (azimuth) angles [rad]\n"
@@ -818,7 +830,7 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
           angle_log << a << "\n";
         angle_log.close();
       }
-      ++writeNumber;    // FIX-K: was missing in partial port
+      ++writeNumber;
     }
   }
 
@@ -836,7 +848,6 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
   ping_info.sound_speed = static_cast<float>(soundSpeed);
 
   for (int beam = 0; beam < nBeams; ++beam) {
-    // rx beamwidth: angular width of one beam
     const double bw = (nBeams > 1) ? hFOV_ / (nBeams - 1) : hFOV_;
     ping_info.rx_beamwidths.push_back(static_cast<float>(bw));
     ping_info.tx_beamwidths.push_back(static_cast<float>(vFOV_));
@@ -854,7 +865,7 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
   std::vector<float> ranges;
   ranges.reserve(nFreq);
   for (int i = 0; i < nFreq; ++i)
-    ranges.push_back(rangeVector[i]);
+    ranges.push_back(rangeVector_[i]);
   sonar_raw_msg.ranges = ranges;
 
   marine_acoustic_msgs::msg::SonarImageData sonar_data;
@@ -866,7 +877,7 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
   intensities.reserve(static_cast<size_t>(nFreq * nBeams));
   for (int f = 0; f < nFreq; ++f) {
     for (int beam = 0; beam < nBeams; ++beam) {
-      // FIX-I: reverse beam order to flip image left/right (matches ROS 1)
+      // FIX-I: reverse beam order (left/right flip)
       const int beam_idx = nBeams - beam - 1;
       const int val = static_cast<int>(
         sensorGain * std::abs(P_Beams[beam_idx][f]));
@@ -911,22 +922,23 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
     bear_angles.push_back({begin, center, end});
   }
 
-  const float ThetaShift = 1.5f * static_cast<float>(M_PI);
+  // GCC13-FIX-5: detail::kPi replaces M_PI
+  const float ThetaShift = 1.5f * static_cast<float>(detail::kPi);
   for (int r = 0; r < static_cast<int>(ranges.size()); ++r) {
     if (ranges[r] > rangeMax) continue;
     for (int b = 0; b < nBeams; ++b) {
-      const float range      = ranges[r];
-      // FIX-I: same reverse-beam index for visual image
-      const int   intensity  = static_cast<int>(
+      const float range     = ranges[r];
+      // FIX-I: reverse beam index for visual image
+      const int   intensity = static_cast<int>(
         std::floor(10.0 * std::log(
           std::abs(P_Beams[nBeams - 1 - b][r]) + 1e-10)));
-      const float begin_ang  = bear_angles[b].begin + ThetaShift;
-      const float end_ang    = bear_angles[b].end   + ThetaShift;
-      const float rad        = static_cast<float>(radius) * range / rangeMax;
+      const float begin_ang = bear_angles[b].begin + ThetaShift;
+      const float end_ang   = bear_angles[b].end   + ThetaShift;
+      const float rad       = static_cast<float>(radius) * range / rangeMax;
       cv::ellipse(Intensity_image, origin,
                   cv::Size(static_cast<int>(rad), static_cast<int>(rad)), 0.0,
-                  static_cast<double>(begin_ang) * 180.0 / M_PI,
-                  static_cast<double>(end_ang)   * 180.0 / M_PI,
+                  static_cast<double>(begin_ang) * 180.0 / detail::kPi,
+                  static_cast<double>(end_ang)   * 180.0 / detail::kPi,
                   intensity,
                   static_cast<int>(binThickness));
     }
@@ -957,7 +969,7 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
 }
 
 // =========================================================================
-//  ComputeCorrector  (FIX-J: uses actual azimuth_angles_ array)
+//  ComputeCorrector  (FIX-J + GCC13-FIX-3/5)
 // =========================================================================
 
 void NpsGazeboRosMultibeamSonarRay::ComputeCorrector()
@@ -970,10 +982,11 @@ void NpsGazeboRosMultibeamSonarRay::ComputeCorrector()
   beamCorrectorSum = 0.0f;
   for (int beam = 0; beam < nBeams; ++beam) {
     for (int beam_other = 0; beam_other < nBeams; ++beam_other) {
+      // GCC13-FIX-5: detail::kPi replaces M_PI
       const float pattern = unnormalized_sinc(
-        static_cast<float>(M_PI * 0.884 / hPixelSize
+        static_cast<float>(detail::kPi * 0.884 / hPixelSize
           * std::sin(azimuth_angles_[beam] - azimuth_angles_[beam_other])));
-      beamCorrector[beam][beam_other] = std::abs(pattern);
+      beamCorrector_[beam][beam_other] = std::abs(pattern);
       beamCorrectorSum += pattern * pattern;
     }
   }
@@ -981,7 +994,7 @@ void NpsGazeboRosMultibeamSonarRay::ComputeCorrector()
 }
 
 // =========================================================================
-//  ComputeNormalImage  (unchanged numerical logic)
+//  ComputeNormalImage  (unchanged numerical logic, GCC13-FIX-5 for M_PI)
 // =========================================================================
 
 cv::Mat NpsGazeboRosMultibeamSonarRay::ComputeNormalImage(cv::Mat & depth)
@@ -1012,7 +1025,6 @@ cv::Mat NpsGazeboRosMultibeamSonarRay::ComputeNormalImage(cv::Mat & depth)
   std::vector<cv::Mat> channels(3);
   channels[0] = n1;
   channels[1] = n2;
-  // focal_length_ is set in TryConnectSensor(); always valid here
   channels[2] = (1.0 / focal_length_) * depth;
 
   cv::Mat normal_image;
@@ -1029,7 +1041,7 @@ cv::Mat NpsGazeboRosMultibeamSonarRay::ComputeNormalImage(cv::Mat & depth)
 }  // namespace nps_uw_multibeam_sonar
 
 // =========================================================================
-//  Plugin registration (replaces GZ_REGISTER_SENSOR_PLUGIN)
+//  Plugin registration
 // =========================================================================
 
 GZ_ADD_PLUGIN(

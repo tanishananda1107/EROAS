@@ -1,16 +1,11 @@
-<<<<<<< HEAD
-#ifndef SELECTIONBUFFER_HH_
-#define SELECTIONBUFFER_HH_
-=======
-
 /*
- * Copyright (C) 2012 Open Source Robotics Foundation
+ * Copyright (C) 2026 Open Source Robotics Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,114 +13,48 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Ported to Gazebo Harmonic (gz-sim 8 / gz-rendering 8).
- * The classic Gazebo selection buffer used Ogre internals directly.
- * In Gazebo Harmonic, gz-rendering exposes a renderer-agnostic ray-query
- * API (gz::rendering::RayQuery) that replaces the entire Ogre-based
- * MaterialSwitcher / SelectionBuffer / SelectionRenderListener stack.
- * No Ogre headers are included here.
 */
 
-#ifndef GZ_RENDERING_SELECTION_BUFFER_HH_
-#define GZ_RENDERING_SELECTION_BUFFER_HH_
->>>>>>> bde8874 (Remove unused directories from navigator_auv)
+#ifndef GZ_RENDERING_SELECTION_BUFFER_SELECTIONBUFFER_HH_
+#define GZ_RENDERING_SELECTION_BUFFER_SELECTIONBUFFER_HH_
 
 #include <memory>
 #include <string>
-
-<<<<<<< HEAD
-#include <gz/math/Vector2i.hh>
-
-#include <gz/rendering/Camera.hh>
-#include <gz/rendering/RayQuery.hh>
-#include <gz/rendering/Scene.hh>
-#include <gz/rendering/Visual.hh>
+#include <gz/rendering/RenderTypes.hh>
+#include <gz/rendering/Export.hh>
 
 namespace gazebo
 {
-namespace rendering
-{
-
-class SelectionBuffer
-{
-  public: SelectionBuffer(
-      const gz::rendering::CameraPtr &_camera,
-      const gz::rendering::ScenePtr &_scene);
-
-  public: virtual ~SelectionBuffer();
-
-  public: gz::rendering::VisualPtr OnSelectionClick(
-      int _x,
-      int _y);
-
-  public: std::string SelectedVisualName(
-      int _x,
-      int _y);
-
-  private: gz::rendering::CameraPtr camera;
-
-  private: gz::rendering::ScenePtr scene;
-
-  private: gz::rendering::RayQueryPtr rayQuery;
-};
-
-}
-}
-
-#endif
-=======
-// gz-rendering public API only — NO Ogre headers
-#include <gz/rendering/Camera.hh>
-#include <gz/rendering/RayQuery.hh>
-#include <gz/rendering/Scene.hh>
-#include <gz/math/Vector2.hh>
-
-namespace gz
-{
   namespace rendering
   {
-    /// \brief Renderer-agnostic entity picker.
-    ///
-    /// Replaces the classic gazebo::rendering::SelectionBuffer +
-    /// MaterialSwitcher + SelectionRenderListener stack which relied on
-    /// internal Ogre 1.x APIs.
-    ///
-    /// Uses gz::rendering::RayQuery — the public gz-rendering picking
-    /// interface that works with any backend (ogre2, optix, …).
-    class SelectionBuffer
+    // Forward declaration of modern private data structures
+    struct SelectionBufferPrivate;
+
+    /// \brief SelectionBuffer class modernized for Gazebo Harmonic.
+    /// This handles offscreen render-to-texture data picking for custom sensors
+    /// such as Sonar or Ray-based systems.
+    class GZ_RENDERING_VISIBLE SelectionBuffer
     {
-      /// \brief Constructor.
-      /// \param[in] _camera  The camera through which picking is performed.
-      /// \param[in] _scene   The gz-rendering scene.
-      public: SelectionBuffer(gz::rendering::CameraPtr _camera,
-                              gz::rendering::ScenePtr  _scene);
+      /// \brief Constructor
+      /// \param[in] _camera Smart pointer to the modern rendering camera sensor.
+      public: explicit SelectionBuffer(gz::rendering::CameraPtr _camera);
 
-      /// \brief Destructor.
-      public: ~SelectionBuffer();
+      /// \brief Destructor
+      public: virtual ~SelectionBuffer();
 
-      /// \brief Return the name of the visual at viewport pixel (_x, _y).
-      ///
-      /// Casts a ray from the camera through the given pixel and returns
-      /// the name of the first gz::rendering::Visual that is hit, or an
-      /// empty string if nothing was hit.
-      ///
-      /// \param[in] _x  Pixel X in viewport space.
-      /// \param[in] _y  Pixel Y in viewport space.
-      /// \return Name of the intersected visual, or "".
-      public: std::string OnSelectionClick(int _x, int _y);
+      /// \brief Handle on mouse/ray selection click maps to a 3D Visual entity.
+      /// \param[in] _x X coordinate in pixels.
+      /// \param[in] _y Y coordinate in pixels.
+      /// \return Returns the modern abstract Visual wrapper at the coordinate.
+      public: gz::rendering::VisualPtr OnSelectionClick(int _x, int _y);
 
-      /// \brief Update internal state (call once per frame if needed).
-      ///        No-op in the ray-query implementation; kept for API compat.
+      /// \brief Call this to update the underlying selection pass buffer contents
       public: void Update();
 
-      private: gz::rendering::CameraPtr   camera_;
-      private: gz::rendering::ScenePtr    scene_;
-      private: gz::rendering::RayQueryPtr rayQuery_;
+      /// \internal
+      /// \brief Pointer to private data.
+      private: std::unique_ptr<SelectionBufferPrivate> dataPtr;
     };
-
-  }  // namespace rendering
-}  // namespace gz
-
-#endif  // GZ_RENDERING_SELECTION_BUFFER_HH_
-HEREDOC
->>>>>>> bde8874 (Remove unused directories from navigator_auv)
+  }
+}
+#endif

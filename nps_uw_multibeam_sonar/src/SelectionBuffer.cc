@@ -1,99 +1,96 @@
-#include "SelectionBuffer.hh"
+/*
+ * Copyright (C) 2026 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
 
-#include <gz/rendering/RenderingIface.hh>
+#include <gz/common/Console.hh>
+#include <gz/rendering/Camera.hh>
+#include <gz/rendering/Scene.hh>
+#include <selection_buffer/SelectionBuffer.hh>
+#include <gz/rendering/Visual.hh>
 
 using namespace gazebo;
 using namespace rendering;
 
-/////////////////////////////////////////////////
-SelectionBuffer::SelectionBuffer(
-    const gz::rendering::CameraPtr &_camera,
-    const gz::rendering::ScenePtr &_scene)
-    : camera(_camera),
-      scene(_scene)
+namespace gazebo
 {
-  if (this->scene)
+  namespace rendering
   {
-    this->rayQuery =
-        this->scene->CreateRayQuery();
+    struct SelectionBufferPrivate
+    {
+      /// \brief Pointer to the modern Gazebo Harmonic Camera
+      gz::rendering::CameraPtr camera = nullptr;
+
+    };
   }
 }
+
+/////////////////////////////////////////////////
+SelectionBuffer::SelectionBuffer(gz::rendering::CameraPtr _camera)
+: dataPtr(new SelectionBufferPrivate)
+{
+  if (!_camera)
+  {
+    gzerr << "Camera pointer passed to SelectionBuffer is null.\n";
+    return;
+  }
+
+  this->dataPtr->camera = _camera;
+  
+  gz::rendering::ScenePtr scene = this->dataPtr->camera->Scene();
+
+  if (!scene)
+  {
+   gzerr << "Failed to extract Scene pointer from Camera.\n";
+   return;
+}}
 
 /////////////////////////////////////////////////
 SelectionBuffer::~SelectionBuffer()
 {
-  if (this->scene && this->rayQuery)
-  {
-    this->scene->DestroyRayQuery(
-        this->rayQuery);
-  }
+  // Smart pointers automatically handle cleanup
 }
 
 /////////////////////////////////////////////////
-gz::rendering::VisualPtr
-SelectionBuffer::OnSelectionClick(
-    int _x,
-    int _y)
+gz::rendering::VisualPtr SelectionBuffer::OnSelectionClick(int _x, int _y)
 {
-  if (!this->camera ||
-      !this->scene ||
-      !this->rayQuery)
+  if (!this->dataPtr->camera)
+  {
+    gzerr << "Camera unavailable for selection click mapping.\n";
+    return nullptr;
+  }
+
+  // Boundary check against the render window dimensions
+  unsigned int targetWidth = this->dataPtr->camera->ImageWidth();
+  unsigned int targetHeight = this->dataPtr->camera->ImageHeight();
+
+  if (_x < 0 || _y < 0 || _x >= static_cast<int>(targetWidth)
+      || _y >= static_cast<int>(targetHeight))
   {
     return nullptr;
   }
 
-  const unsigned int width =
-      this->camera->ImageWidth();
-
-  const unsigned int height =
-      this->camera->ImageHeight();
-
-  double nx =
-      static_cast<double>(_x) /
-      static_cast<double>(width);
-
-  double ny =
-      static_cast<double>(_y) /
-      static_cast<double>(height);
-
-  gz::math::Vector3d origin;
-  gz::math::Vector3d direction;
-
-  this->camera->Project(
-      gz::math::Vector2d(nx, ny),
-      origin,
-      direction);
-
-  this->rayQuery->SetOrigin(origin);
-  this->rayQuery->SetDirection(direction);
-
-  auto result =
-      this->rayQuery->ClosestPoint();
-
-  if (!result)
+  // Gazebo Harmonic simplifies selection via Scene::VisualAt
+  // This abstracts away the old 1x1 RTT matrix multiplication hack
+  gz::rendering::ScenePtr scene = this->dataPtr->camera->Scene();
+  if (!scene)
     return nullptr;
 
-  auto node =
-      this->scene->NodeById(
-          result->objectId);
+  // Query the visual directly at the screen coordinate coordinates mapped from the camera
+  gz::rendering::VisualPtr visuallySelected = 
+      this->dataPtr->camera->VisualAt(gz::math::Vector2i(_x, _y));
 
-  if (!node)
-    return nullptr;
-
-  return std::dynamic_pointer_cast<
-      gz::rendering::Visual>(node);
-}
-
-/////////////////////////////////////////////////
-std::string SelectionBuffer::SelectedVisualName(
-    int _x,
-    int _y)
-{
-  auto visual =
-      this->OnSelectionClick(_x, _y);
-
-  if (!visual)
-    return "";
-
-  return visual->Name();
+  return visuallySelected;
 }

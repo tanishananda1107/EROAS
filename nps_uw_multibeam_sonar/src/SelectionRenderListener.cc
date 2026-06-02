@@ -1,50 +1,33 @@
-<<<<<<< HEAD
-/*
- * Copyright (C) 2012 Open Source Robotics Foundation
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
-*/
-#include "selection_buffer/SelectionRenderListener.hh"
-#include "selection_buffer/MaterialSwitcher.hh"
+#include <gz/rendering/Camera.hh>
+#include <gz/rendering/Scene.hh>
+#include <gz/rendering/Visual.hh>
+#include <gz/math/Vector2.hh>
 
-using namespace gazebo;
-using namespace rendering;
-
-/////////////////////////////////////////////////
-SelectionRenderListener::SelectionRenderListener(MaterialSwitcher *_switcher)
-  : materialListener(_switcher)
+// Example method inside your custom Sonar Plugin
+gz::rendering::VisualPtr IdentifySonarTarget(gz::rendering::CameraPtr _camera, int _screenX, int _y)
 {
-}
+  if (!_camera)
+    return nullptr;
 
-/////////////////////////////////////////////////
-SelectionRenderListener::~SelectionRenderListener()
-{
-}
+  // 1. Check boundaries against current rendering viewport dimensions
+  unsigned int width = _camera->ImageWidth();
+  unsigned int height = _camera->ImageHeight();
 
-/////////////////////////////////////////////////
-void SelectionRenderListener::preRenderTargetUpdate(
-    const Ogre::RenderTargetEvent &/*_evt*/)
-{
-  Ogre::MaterialManager::getSingleton().addListener(this->materialListener);
-}
+  if (_screenX < 0 || _y < 0 || _screenX >= static_cast<int>(width) || _y >= static_cast<int>(height))
+  {
+    return nullptr;
+  }
 
-/////////////////////////////////////////////////
-void SelectionRenderListener::postRenderTargetUpdate(
-    const Ogre::RenderTargetEvent &/*_evt*/)
-{
-  Ogre::MaterialManager::getSingleton().removeListener(this->materialListener);
+  // 2. Fetch the modern visual pointer directly using the native visual selection pass
+  // This automatically handles what the old SelectionRenderListener used to do!
+  gz::rendering::VisualPtr pickedVisual = _camera->VisualAt(gz::math::Vector2i(_screenX, _y));
+
+  if (pickedVisual)
+  {
+    // You can now extract the object name, IDs, or geometry features for your sonar calculations
+    // gzmsg << "Sonar hit object: " << pickedVisual->Name() << "\n";
+    return pickedVisual;
+  }
+
+  return nullptr;
 }
-=======
-  // namespace gz
->>>>>>> bde8874 (Remove unused directories from navigator_auv)
