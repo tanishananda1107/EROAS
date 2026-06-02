@@ -19,6 +19,6 @@
   <!-- Instead we use ros_gz_bridge / ros_gz_sim at runtime -->
 
   <export>
-    <!-- ROS2 does NOT use gazebo_ros plugin export anymore -->
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

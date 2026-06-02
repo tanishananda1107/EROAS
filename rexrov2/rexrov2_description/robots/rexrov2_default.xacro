@@ -43,14 +43,6 @@
       </plugin>
     </gazebo>
   </xacro:rexrov2_base>
-  
-  <gazebo>
-      <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
-        <robotNamespace>/$(arg namespace)</robotNamespace>
-        <robotParam>/$(arg namespace)/robot_description</robotParam>
-      </plugin>
-  </gazebo>
-
   <!-- Joint state publisher plugin -->
   <xacro:default_joint_state_publisher namespace="$(arg namespace)" update_rate="50"/>
 

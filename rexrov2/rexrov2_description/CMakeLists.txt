@@ -13,6 +13,7 @@ install(
   DIRECTORY meshes robots urdf launch
   DESTINATION share/${PROJECT_NAME}
   PATTERN "*~" EXCLUDE
+  PATTERN "*.launch" EXCLUDE
 )
 
 # (Removed duplicate install block - was redundant in ROS1 version)

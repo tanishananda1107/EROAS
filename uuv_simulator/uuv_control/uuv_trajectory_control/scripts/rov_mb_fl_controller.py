@@ -27,6 +27,7 @@ class ROVMBFLController(
 
         DPPIDControllerBase.__init__(
             self,
+            self,
             True
         )
 

@@ -16,8 +16,13 @@
 #include <uuv_gazebo_plugins/ThrusterConversionFcn.hh>
 #include <uuv_gazebo_plugins/Def.hh>
 
-namespace gz {
-namespace sim {
+namespace uuv_gz_plugins
+{
+
+std::map<double, double> ConversionFunction::GetTable()
+{
+  return {};
+}
 
 /////////////////////////////////////////////////
 ConversionFunction* ConversionFunctionFactory::CreateConversionFunction(
@@ -85,7 +90,7 @@ double ConversionFunctionBasic::convert(double _cmd)
   return this->rotorConstant * std::abs(_cmd) * _cmd;
 }
 
-bool ConversionFunctionBasic::GetParam(std::string _tag, double &_output)
+bool ConversionFunctionBasic::GetParam(const std::string &_tag, double &_output)
 {
   _output = 0.0;
   if (_tag != "rotor_constant") return false;
@@ -156,7 +161,7 @@ ConversionFunctionBessa::ConversionFunctionBessa(
         << "\t- deltaR: "         << deltaR          << "\n";
 }
 
-bool ConversionFunctionBessa::GetParam(std::string _tag, double &_output)
+bool ConversionFunctionBessa::GetParam(const std::string &_tag, double &_output)
 {
   _output = 0.0;
   if      (_tag == "rotor_constant_l") _output = this->rotorConstantL;
@@ -244,7 +249,7 @@ ConversionFunctionLinearInterp::ConversionFunctionLinearInterp(
   std::cout << "\n";
 }
 
-bool ConversionFunctionLinearInterp::GetParam(std::string /*_tag*/,
+bool ConversionFunctionLinearInterp::GetParam(const std::string &/*_tag*/,
                                               double      &/*_output*/)
 {
   return false;
@@ -255,5 +260,4 @@ std::map<double, double> ConversionFunctionLinearInterp::GetTable()
   return this->lookupTable;
 }
 
-}  // namespace sim
-}  // namespace gz
+}  // namespace uuv_gz_plugins

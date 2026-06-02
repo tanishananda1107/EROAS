@@ -18,11 +18,19 @@
 //    beyond the include path.
 // ============================================================
 
-#include <gz/sim/System.hh>   // replaces <gazebo/gazebo.hh>
+#include <cmath>
+#include <iostream>
+
 #include <uuv_gazebo_plugins/Dynamics.hh>
 
-namespace gz {
-namespace sim {
+namespace uuv_gz_plugins
+{
+
+/////////////////////////////////////////////////
+Dynamics::Dynamics()
+{
+  this->Reset();
+}
 
 /////////////////////////////////////////////////
 void Dynamics::Reset()
@@ -200,5 +208,4 @@ ThrusterDynamicsBessa::ThrusterDynamicsBessa(
     double _Jmsp, double _Kv1, double _Kv2, double _Kt, double _Rm)
   : Dynamics(), Jmsp(_Jmsp), Kv1(_Kv1), Kv2(_Kv2), Kt(_Kt), Rm(_Rm) {}
 
-}  // namespace sim
-}  // namespace gz
+}  // namespace uuv_gz_plugins

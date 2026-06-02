@@ -24,7 +24,7 @@ def generate_launch_description():
     return LaunchDescription([
 
         # ── mirrors <arg name="timeout" default="0"/> ─────────────────────────
-        DeclareLaunchArgument('timeout', default_value='0',
+        DeclareLaunchArgument('timeout', default_value='0.0',
                               description='Delay before unpausing simulation (seconds)'),
 
         # ── mirrors <node> + <rosparam> ───────────────────────────────────────

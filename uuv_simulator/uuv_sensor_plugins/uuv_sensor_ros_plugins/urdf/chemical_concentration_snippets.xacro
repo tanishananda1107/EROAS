@@ -31,7 +31,7 @@
       salinity_unit="ppt"
       update_rate="10"
       gain="1.0"
-      gamma="0.001"
+      gamma_value="0.001"
       noise_sigma="0"
       noise_amplitude="0"
       radius="3.0">
@@ -74,7 +74,7 @@
       salinity_output_topic="salinity"
       salinity_unit="ppt"
       update_rate="10"
-      gamma="0.001"
+      gamma_value="0.001"
       gain="1.0"
       noise_sigma="0"
       noise_amplitude="0"
@@ -85,7 +85,7 @@
 
   <xacro:macro name="chemical_concentration_sensor_macro"
     params="namespace parent_link *origin suffix input_topic output_topic
-            gamma radius update_rate reference_frame water_salinity_value plume_salinity_value
+            gamma_value radius update_rate reference_frame water_salinity_value plume_salinity_value
             salinity_output_topic salinity_unit gain noise_sigma noise_amplitude">
     <!-- Sensor link -->
    <link name="${namespace}/cc_sensor_link">
@@ -104,28 +104,6 @@
      <limit upper="0" lower="0" effort="0" velocity="0" />
    </joint>
 
-   <gazebo>
-     <plugin filename="libuuv_gazebo_ros_cpc_plugin.so"
-       name="particle_concentration{suffix}_sensor">
-       <robot_namespace>${namespace}</robot_namespace>
-       <link_name>${namespace}/cc_sensor_link</link_name>
-       <plume_topic>${input_topic}</plume_topic>
-       <sensor_topic>${output_topic}</sensor_topic>
-       <update_rate>${update_rate}</update_rate>
-       <gamma>${gamma}</gamma>
-       <radius>${radius}</radius>
-       <enable_gazebo_messages>false</enable_gazebo_messages>
-       <enable_local_ned_frame>false</enable_local_ned_frame>
-       <static_reference_frame>${reference_frame}</static_reference_frame>
-       <water_salinity_value>${water_salinity_value}</water_salinity_value>
-       <plume_salinity_value>${plume_salinity_value}</plume_salinity_value>
-       <salinity_output_topic>${salinity_output_topic}</salinity_output_topic>
-       <salinity_unit>${salinity_unit}</salinity_unit>
-       <gain>${gain}</gain>
-       <noise_sigma>${noise_sigma}</noise_sigma>
-       <noise_amplitude>${noise_amplitude}</noise_amplitude>
-     </plugin>
-   </gazebo>
   </xacro:macro>
 
 

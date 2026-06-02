@@ -70,14 +70,6 @@
           </noise>
         </ray>
 
-        <plugin name="ray_sonar_sensor" filename="libgazebo_ros_velodyne_gpu_laser.so">
-           <topicName>multibeam_sonar_point_cloud</topicName>
-           <static_reference_frame>forward_sonar_optical_link</static_reference_frame>
-           <organize_cloud>true</organize_cloud>
-           <min_range>0.2</min_range>
-           <max_range>20.0</max_range>
-        </plugin>
-
         <plugin filename="libnps_multibeam_sonar_ray_ros_plugin.so" name="forward_sonar">
           <!-- Sonar properties -->
           <verticalFOV>20</verticalFOV>

@@ -27,6 +27,7 @@ class ROVUnderActuatedPIDController(
         )
 
         DPControllerBase.__init__(
+            self,
             self
         )
 

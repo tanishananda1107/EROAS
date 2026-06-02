@@ -37,7 +37,7 @@
   <depend>gz_transport_vendor</depend>  <!-- gz-transport13   -->
   <depend>gz_utils_vendor</depend>      <!-- gz-utils2        -->
   <depend>gz_cmake_vendor</depend>      <!-- gz-cmake3        -->
-  <depend>sdformat_vendor</depend>      <!-- sdformat13       -->
+  <depend>sdformat_vendor</depend>      <!-- sdformat14       -->
 
   <!-- ── Third-party ────────────────────────────────────────────────────── -->
   <depend>libeigen3-dev</depend>

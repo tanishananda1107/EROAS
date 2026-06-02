@@ -44,10 +44,10 @@ import tf2_ros
 
 from geometry_msgs.msg import WrenchStamped, PoseStamped, TwistStamped, \
     Vector3, Quaternion, Pose
-from std_msgs.msg import Time
+from builtin_interfaces.msg import Time
 from nav_msgs.msg import Odometry
 from uuv_control_interfaces.vehicle import Vehicle
-from tf_quaternion.transformations import euler_from_quaternion, \
+from tf_transformations import euler_from_quaternion, \
     quaternion_multiply, quaternion_matrix, quaternion_conjugate, \
     quaternion_inverse
 from uuv_control_msgs.msg import Trajectory, TrajectoryPoint
@@ -126,10 +126,10 @@ class DPControllerBase(object):
         )
 
         self._control_saturation = 5000
-        self._node.declare_parameter('saturation', -1.0)
+        self._node.declare_parameter('saturation', -1)
         _sat = (
             self._node.get_parameter('saturation')
-            .get_parameter_value().double_value
+            .value
         )
         if _sat > 0:
             self._control_saturation = _sat
@@ -199,8 +199,8 @@ class DPControllerBase(object):
         # ------------------------------------------------------------------
         # Services  (rospy.Service → node.create_service)
         # ------------------------------------------------------------------
-        self._services = dict()
-        self._services['reset'] = self._node.create_service(
+        self._controller_services = dict()
+        self._controller_services['reset'] = self._node.create_service(
             ResetController, 'reset_controller', self.reset_controller_callback
         )
 
@@ -322,6 +322,7 @@ class DPControllerBase(object):
         if self._vehicle_model is not None:
             del self._vehicle_model
         self._vehicle_model = Vehicle(
+            self._node,
             inertial_frame_id=self._local_planner.inertial_frame_id
         )
 

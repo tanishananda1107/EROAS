@@ -1,19 +1,21 @@
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, Node
+from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 import os
 
 def generate_launch_description():
 
     gazebo = FindPackageShare('rexrov2_gazebo').find('rexrov2_gazebo')
+    worlds = FindPackageShare('uuv_gazebo_worlds').find('uuv_gazebo_worlds')
     desc = FindPackageShare('rexrov2_description').find('rexrov2_description')
     control = FindPackageShare('rexrov2_control').find('rexrov2_control')
 
     return LaunchDescription([
 
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(gazebo, 'launch', 'ocean_waves.launch.py'))
+            PythonLaunchDescriptionSource(os.path.join(worlds, 'launch', 'ocean_waves.launch.py'))
         ),
 
         IncludeLaunchDescription(

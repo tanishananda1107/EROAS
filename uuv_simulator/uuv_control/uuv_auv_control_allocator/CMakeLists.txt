@@ -20,6 +20,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 ament_python_install_package(
     uuv_auv_actuator_interface
+    PACKAGE_DIR src/uuv_auv_actuator_interface
 )
 
 install(

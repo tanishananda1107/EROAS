@@ -69,7 +69,7 @@ from geometry_msgs.msg import Point
 
 import uuv_trajectory_generator
 import uuv_waypoints
-from tf_quaternion.transformations import (
+from tf_transformations import (
     quaternion_about_axis,
     quaternion_multiply,
     quaternion_inverse,
@@ -310,26 +310,26 @@ class DPControllerLocalPlanner(object):
         #   Signature: create_service(SrvType, name, callback)
         #   Callbacks: (request, response) → return response
         # ------------------------------------------------------------------
-        self._services = dict()
-        self._services['hold_vehicle'] = self._node.create_service(
+        self._controller_services = dict()
+        self._controller_services['hold_vehicle'] = self._node.create_service(
             Hold, 'hold_vehicle', self.hold_vehicle
         )
-        self._services['start_waypoint_list'] = self._node.create_service(
+        self._controller_services['start_waypoint_list'] = self._node.create_service(
             InitWaypointSet, 'start_waypoint_list', self.start_waypoint_list
         )
-        self._services['start_circular_trajectory'] = self._node.create_service(
+        self._controller_services['start_circular_trajectory'] = self._node.create_service(
             InitCircularTrajectory, 'start_circular_trajectory', self.start_circle
         )
-        self._services['start_helical_trajectory'] = self._node.create_service(
+        self._controller_services['start_helical_trajectory'] = self._node.create_service(
             InitHelicalTrajectory, 'start_helical_trajectory', self.start_helix
         )
-        self._services['init_waypoints_from_file'] = self._node.create_service(
+        self._controller_services['init_waypoints_from_file'] = self._node.create_service(
             InitWaypointsFromFile, 'init_waypoints_from_file', self.init_waypoints_from_file
         )
-        self._services['go_to'] = self._node.create_service(
+        self._controller_services['go_to'] = self._node.create_service(
             GoTo, 'go_to', self.go_to
         )
-        self._services['go_to_incremental'] = self._node.create_service(
+        self._controller_services['go_to_incremental'] = self._node.create_service(
             GoToIncremental, 'go_to_incremental', self.go_to_incremental
         )
 

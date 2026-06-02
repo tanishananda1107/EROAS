@@ -29,7 +29,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   DEPENDENCIES std_msgs
 )
 
-ament_python_install_package(uuv_thrusters)
+ament_python_install_package(uuv_thrusters PACKAGE_DIR src/uuv_thrusters)
 
 install(
   PROGRAMS
@@ -42,6 +42,7 @@ install(
     launch
     config
   DESTINATION share/${PROJECT_NAME}
+  PATTERN "*.launch" EXCLUDE
 )
 
 if(BUILD_TESTING)

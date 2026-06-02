@@ -2,7 +2,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.conditions import UnlessCondition, IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node, PushRosNamespace
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -12,6 +13,9 @@ def generate_launch_description():
     uuv_name=LaunchConfiguration("uuv_name")
     model_name=LaunchConfiguration("model_name")
     use_ned_frame=LaunchConfiguration("use_ned_frame")
+    output_dir=LaunchConfiguration("output_dir")
+    config_file=LaunchConfiguration("config_file")
+    tam_file=LaunchConfiguration("tam_file")
 
     thruster_launch=os.path.join(
         get_package_share_directory(
@@ -48,6 +52,35 @@ def generate_launch_description():
             default_value="false"
         ),
 
+        DeclareLaunchArgument(
+            "output_dir",
+            default_value=PathJoinSubstitution([
+                FindPackageShare("uuv_thruster_manager"),
+                "config",
+                model_name
+            ])
+        ),
+
+        DeclareLaunchArgument(
+            "config_file",
+            default_value=PathJoinSubstitution([
+                FindPackageShare("uuv_thruster_manager"),
+                "config",
+                model_name,
+                "thruster_manager.yaml"
+            ])
+        ),
+
+        DeclareLaunchArgument(
+            "tam_file",
+            default_value=PathJoinSubstitution([
+                FindPackageShare("uuv_thruster_manager"),
+                "config",
+                model_name,
+                "TAM.yaml"
+            ])
+        ),
+
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 thruster_launch
@@ -55,7 +88,10 @@ def generate_launch_description():
 
             launch_arguments={
                 "uuv_name":uuv_name,
-                "model_name":model_name
+                "model_name":model_name,
+                "output_dir":output_dir,
+                "config_file":config_file,
+                "tam_file":tam_file
             }.items()
         ),
 
@@ -68,7 +104,7 @@ def generate_launch_description():
             Node(
                 package="navigator_auv",
                 executable=
-                "sonar_reconstruction",
+                "sonar_reconstruction.py",
                 name=
                 "sonar_reconstruction"
             ),
@@ -78,7 +114,7 @@ def generate_launch_description():
                 "uuv_control_utils",
 
                 executable=
-                "trajectory_marker_publisher",
+                "trajectory_marker_publisher.py",
 
                 remappings=[
                     (
@@ -98,7 +134,7 @@ def generate_launch_description():
                 "uuv_trajectory_control",
 
                 executable=
-                "rov_pid_controller",
+                "rov_pid_controller.py",
 
                 name=
                 "rov_pid_controller",

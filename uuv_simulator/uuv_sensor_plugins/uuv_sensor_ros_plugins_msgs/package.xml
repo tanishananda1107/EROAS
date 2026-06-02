@@ -18,9 +18,14 @@
   <exec_depend>rosidl_default_runtime</exec_depend>
 
   <!-- Dependencies -->
+  <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
 
   <!-- Required for ROS2 interface packages -->
   <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 
 </package>

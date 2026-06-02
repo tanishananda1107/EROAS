@@ -11,7 +11,7 @@ from uuv_control_msgs.msg import (
 
 import geometry_msgs.msg as geometry_msgs
 
-from tf_quaternion.transformations import (
+from tf_transformations import (
     quaternion_from_euler,
     euler_from_quaternion,
     quaternion_matrix

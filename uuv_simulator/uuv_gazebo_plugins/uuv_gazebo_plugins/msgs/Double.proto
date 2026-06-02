@@ -1,3 +1,5 @@
+syntax = "proto2";
+
 // Copyright (c) 2016 The UUV Simulator Authors.
 // All rights reserved.
 //

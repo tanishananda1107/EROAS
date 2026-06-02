@@ -191,15 +191,14 @@ private:
     res->success = true;
   }
 };
+} // namespace uuv_simulator_ros
 
 GZ_ADD_PLUGIN(
-  UnderwaterCurrentROSPlugin,
+  uuv_simulator_ros::UnderwaterCurrentROSPlugin,
   gz::sim::System,
-  UnderwaterCurrentROSPlugin::ISystemConfigure,
-  UnderwaterCurrentROSPlugin::ISystemPreUpdate)
+  uuv_simulator_ros::UnderwaterCurrentROSPlugin::ISystemConfigure,
+  uuv_simulator_ros::UnderwaterCurrentROSPlugin::ISystemPreUpdate)
 
 GZ_ADD_PLUGIN_ALIAS(
-  UnderwaterCurrentROSPlugin,
+  uuv_simulator_ros::UnderwaterCurrentROSPlugin,
   "uuv_simulator_ros::UnderwaterCurrentROSPlugin")
-
-} // namespace uuv_simulator_ros

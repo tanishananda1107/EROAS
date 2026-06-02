@@ -9,6 +9,7 @@
 #include <gz/sim/components/JointForce.hh>
 #include <gz/sim/components/JointAxis.hh>
 #include <gz/sim/components/JointType.hh>
+#include <gz/sim/components/Joint.hh>
 #include <gz/sim/components/Name.hh>
 #include <gz/plugin/Register.hh>
 
@@ -57,11 +58,12 @@ void JointStatePublisher::Configure(
 
   // Collect moving joints
   movingJoints.clear();
-  model.ForEachJoint(_ecm, [&](const gz::sim::Entity &jointEntity) -> bool
+  for (const auto &jointEntity :
+       _ecm.ChildrenByComponents(this->modelEntity, gz::sim::components::Joint()))
   {
     auto jointType = _ecm.Component<gz::sim::components::JointType>(jointEntity);
     if (jointType && jointType->Data() == sdf::JointType::FIXED)
-      return true;
+      continue;
 
     auto axis = _ecm.Component<gz::sim::components::JointAxis>(jointEntity);
     if (axis)
@@ -69,7 +71,7 @@ void JointStatePublisher::Configure(
       double lower = axis->Data().Lower();
       double upper = axis->Data().Upper();
       if (lower == 0.0 && upper == 0.0)
-        return true;
+        continue;
     }
 
     auto name = _ecm.ComponentData<gz::sim::components::Name>(jointEntity);
@@ -82,8 +84,7 @@ void JointStatePublisher::Configure(
       _ecm.CreateComponent(jointEntity, gz::sim::components::JointVelocity());
       _ecm.CreateComponent(jointEntity, gz::sim::components::JointForce());
     }
-    return true;
-  });
+  }
 
   jointStatePub = node->create_publisher<sensor_msgs::msg::JointState>(
     robotNamespace + "/joint_states", 1);
@@ -111,10 +112,12 @@ void JointStatePublisher::PublishJointStates(
   sensor_msgs::msg::JointState msg;
   msg.header.stamp = rclcpp::Time(_info.simTime.count());
 
-  model.ForEachJoint(_ecm, [&](const gz::sim::Entity &jointEntity) -> bool
+  for (const auto &jointEntity :
+       _ecm.ChildrenByComponents(this->modelEntity, gz::sim::components::Joint()))
   {
     auto nameComp = _ecm.ComponentData<gz::sim::components::Name>(jointEntity);
-    if (!nameComp) return true;
+    if (!nameComp)
+      continue;
     const std::string &jName = *nameComp;
 
     double pos = 0.0, vel = 0.0, eff = 0.0;
@@ -133,8 +136,7 @@ void JointStatePublisher::PublishJointStates(
     msg.position.push_back(pos);
     msg.velocity.push_back(vel);
     msg.effort.push_back(eff);
-    return true;
-  });
+  }
 
   jointStatePub->publish(msg);
 }

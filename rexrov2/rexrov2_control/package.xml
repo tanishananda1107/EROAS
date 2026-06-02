@@ -37,4 +37,8 @@
   <exec_depend>uuv_thruster_manager</exec_depend>
   <exec_depend>uuv_trajectory_control</exec_depend>
 
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+
 </package>

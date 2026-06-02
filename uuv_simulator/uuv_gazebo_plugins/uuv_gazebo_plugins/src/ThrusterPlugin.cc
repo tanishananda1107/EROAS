@@ -41,8 +41,8 @@
 #include <uuv_gazebo_plugins/ThrusterPlugin.hh>
 #include <uuv_gazebo_plugins/Def.hh>
 
-namespace gz {
-namespace sim {
+namespace uuv_gz_plugins
+{
 
 /////////////////////////////////////////////////
 ThrusterPlugin::ThrusterPlugin()
@@ -69,12 +69,14 @@ void ThrusterPlugin::Configure(
     gz::sim::EventManager              & /*_eventMgr*/)
 {
   this->model = gz::sim::Model(_entity);
+  auto sdf = std::const_pointer_cast<sdf::Element>(_sdf);
 
   // Link name
   GZ_ASSERT(_sdf->HasElement("linkName"), "Could not find linkName.");
+  this->linkName = _sdf->Get<std::string>("linkName");
   this->thrusterLinkEntity = this->model.LinkByName(
-      _ecm, _sdf->Get<std::string>("linkName"));
-  GZ_ASSERT(this->thrusterLinkEntity != kNullEntity, "thruster link is invalid");
+      _ecm, this->linkName);
+  GZ_ASSERT(this->thrusterLinkEntity != gz::sim::kNullEntity, "thruster link is invalid");
 
   // Thruster ID
   GZ_ASSERT(_sdf->HasElement("thrusterID"), "Thruster ID not provided");
@@ -84,13 +86,13 @@ void ThrusterPlugin::Configure(
   GZ_ASSERT(_sdf->HasElement("dynamics"), "Could not find dynamics.");
   this->thrusterDynamics.reset(
       DynamicsFactory::GetInstance().CreateDynamics(
-          const_cast<sdf::ElementPtr>(_sdf->GetElement("dynamics"))));
+          sdf->GetElement("dynamics")));
 
   // Conversion function
   GZ_ASSERT(_sdf->HasElement("conversion"), "Could not find conversion.");
   this->conversionFunction.reset(
       ConversionFunctionFactory::GetInstance().CreateConversionFunction(
-          const_cast<sdf::ElementPtr>(_sdf->GetElement("conversion"))));
+          sdf->GetElement("conversion")));
 
   // Optional joint (visualisation)
   if (_sdf->HasElement("jointName"))
@@ -144,17 +146,18 @@ void ThrusterPlugin::Configure(
   std::string modelName = this->model.Name(_ecm);
   this->topicPrefix = "/" + modelName + "/thrusters/" +
                       std::to_string(this->thrusterID) + "/";
+  this->commandTopic = this->topicPrefix + "input";
+  this->thrustTopic = this->topicPrefix + "thrust";
 
   // Publish thrust
   this->thrustPub = this->node.Advertise<gz::msgs::Vector3d>(
-      this->topicPrefix + "thrust");
+      this->thrustTopic);
 
   // Subscribe to input
-  this->node.Subscribe(this->topicPrefix + "input",
-      &ThrusterPlugin::OnInput, this);
+  this->node.Subscribe(this->commandTopic, &ThrusterPlugin::OnInput, this);
 
   // Compute thruster axis from joint global axis in body frame
-  if (this->jointEntity != kNullEntity)
+  if (this->jointEntity != gz::sim::kNullEntity)
   {
     gz::sim::Joint joint(this->jointEntity);
     // axis in world frame at configure time (orientation may not be set yet;
@@ -209,7 +212,7 @@ void ThrusterPlugin::PreUpdate(
   link.AddWorldForce(_ecm, forceWorld);
 
   // Spin joint
-  if (this->jointEntity != kNullEntity)
+  if (this->jointEntity != gz::sim::kNullEntity)
   {
     auto *velCmd = _ecm.Component<gz::sim::components::JointVelocityCmd>(
         this->jointEntity);
@@ -239,11 +242,10 @@ void ThrusterPlugin::Reset()
   this->thrusterDynamics->Reset();
 }
 
-}  // namespace sim
-}  // namespace gz
+}  // namespace uuv_gz_plugins
 
-GZ_ADD_PLUGIN(gz::sim::ThrusterPlugin,
+GZ_ADD_PLUGIN(uuv_gz_plugins::ThrusterPlugin,
               gz::sim::System,
-              gz::sim::ThrusterPlugin::ISystemConfigure,
-              gz::sim::ThrusterPlugin::ISystemPreUpdate)
-GZ_ADD_PLUGIN_ALIAS(gz::sim::ThrusterPlugin, "gz::sim::ThrusterPlugin")
+              uuv_gz_plugins::ThrusterPlugin::ISystemConfigure,
+              uuv_gz_plugins::ThrusterPlugin::ISystemPreUpdate)
+GZ_ADD_PLUGIN_ALIAS(uuv_gz_plugins::ThrusterPlugin, "uuv_gz_plugins::ThrusterPlugin")

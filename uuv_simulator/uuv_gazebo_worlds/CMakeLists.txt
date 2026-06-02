@@ -10,6 +10,7 @@ install(DIRECTORY
   models
   DESTINATION share/${PROJECT_NAME}
   PATTERN "*~" EXCLUDE
+  PATTERN "*.launch" EXCLUDE
 )
 
 ament_package()

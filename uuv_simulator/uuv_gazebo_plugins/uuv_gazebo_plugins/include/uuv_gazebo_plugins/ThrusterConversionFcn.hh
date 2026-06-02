@@ -6,6 +6,8 @@
 #include <vector>
 #include <memory>
 
+#include <sdf/sdf.hh>
+
 namespace uuv_gz_plugins
 {
 
@@ -19,68 +21,87 @@ public:
   virtual bool GetParam(const std::string &_tag,
                         double &_out) = 0;
 
-  virtual std::map<double, double> GetTable()
-  {
-    return {};
-  }
+  virtual std::map<double, double> GetTable();
 
-  virtual double Convert(double _cmd) = 0;
+  virtual double convert(double _cmd) = 0;
 };
+
+using ConversionFunctionCreator = ConversionFunction* (*)(sdf::ElementPtr);
+
+class ConversionFunctionFactory
+{
+public:
+  ConversionFunction* CreateConversionFunction(sdf::ElementPtr _sdf);
+
+  static ConversionFunctionFactory& GetInstance();
+
+  bool RegisterCreator(const std::string &_identifier,
+                       ConversionFunctionCreator _creator);
+
+private:
+  std::map<std::string, ConversionFunctionCreator> creators_;
+};
+
+#define REGISTER_CONVERSIONFUNCTION_CREATOR(classname, creator) \
+  static bool classname##_registered = \
+    ConversionFunctionFactory::GetInstance().RegisterCreator( \
+      classname::IDENTIFIER, creator);
 
 class ConversionFunctionBasic : public ConversionFunction
 {
 public:
-  ConversionFunctionBasic(double _k)
-  : rotorConstant(_k) {}
+  explicit ConversionFunctionBasic(double _rotorConstant);
 
-  std::string GetType() override { return "basic"; }
+  static const std::string IDENTIFIER;
 
-  bool GetParam(const std::string &_tag, double &_out) override
-  {
-    if (_tag == "rotor_constant")
-    {
-      _out = rotorConstant;
-      return true;
-    }
-    return false;
-  }
+  std::string GetType() override { return IDENTIFIER; }
+  bool GetParam(const std::string &_tag, double &_out) override;
+  double convert(double _cmd) override;
 
-  double Convert(double _cmd) override
-  {
-    return rotorConstant * _cmd * std::abs(_cmd);
-  }
+  static ConversionFunction* create(sdf::ElementPtr _sdf);
 
 protected:
-  double rotorConstant;
+  double rotorConstant{0.0};
 };
 
 class ConversionFunctionBessa : public ConversionFunction
 {
 public:
-  ConversionFunctionBessa(double _l, double _r,
-                          double _dl, double _dr)
-  : rotorConstantL(_l), rotorConstantR(_r),
-    deltaL(_dl), deltaR(_dr) {}
+  ConversionFunctionBessa(double _rotorConstantL, double _rotorConstantR,
+                          double _deltaL, double _deltaR);
 
-  std::string GetType() override { return "bessa"; }
+  static const std::string IDENTIFIER;
 
-  bool GetParam(const std::string &_tag, double &_out) override
-  {
-    return false;
-  }
+  std::string GetType() override { return IDENTIFIER; }
+  bool GetParam(const std::string &_tag, double &_out) override;
+  double convert(double _cmd) override;
 
-  double Convert(double _cmd) override
-  {
-    if (_cmd < 0)
-      return rotorConstantL * (_cmd + deltaL);
-    return rotorConstantR * (_cmd - deltaR);
-  }
+  static ConversionFunction* create(sdf::ElementPtr _sdf);
 
 protected:
-  double rotorConstantL;
-  double rotorConstantR;
-  double deltaL;
-  double deltaR;
+  double rotorConstantL{0.0};
+  double rotorConstantR{0.0};
+  double deltaL{0.0};
+  double deltaR{0.0};
+};
+
+class ConversionFunctionLinearInterp : public ConversionFunction
+{
+public:
+  ConversionFunctionLinearInterp(const std::vector<double> &_input,
+                                 const std::vector<double> &_output);
+
+  static const std::string IDENTIFIER;
+
+  std::string GetType() override { return IDENTIFIER; }
+  bool GetParam(const std::string &_tag, double &_out) override;
+  std::map<double, double> GetTable() override;
+  double convert(double _cmd) override;
+
+  static ConversionFunction* create(sdf::ElementPtr _sdf);
+
+protected:
+  std::map<double, double> lookupTable;
 };
 
 } // namespace uuv_gz_plugins

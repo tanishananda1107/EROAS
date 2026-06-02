@@ -19,7 +19,7 @@ from uuv_waypoints import (
     WaypointSet
 )
 
-from tf_quaternion.transformations import (
+from tf_transformations import (
     quaternion_multiply,
     quaternion_inverse,
     quaternion_conjugate,

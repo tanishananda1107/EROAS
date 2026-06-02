@@ -7,6 +7,7 @@ import os
 def generate_launch_description():
 
     gazebo = FindPackageShare('rexrov2_gazebo').find('rexrov2_gazebo')
+    worlds = FindPackageShare('uuv_gazebo_worlds').find('uuv_gazebo_worlds')
     desc = FindPackageShare('rexrov2_description').find('rexrov2_description')
     control = FindPackageShare('rexrov2_control').find('rexrov2_control')
 
@@ -17,7 +18,7 @@ def generate_launch_description():
         DeclareLaunchArgument('z', default_value='-25'),
 
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(gazebo, 'launch', 'empty_underwater_world.launch.py'))
+            PythonLaunchDescriptionSource(os.path.join(worlds, 'launch', 'empty_underwater_world.launch.py'))
         ),
 
         IncludeLaunchDescription(

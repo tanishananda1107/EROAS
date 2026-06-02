@@ -7,8 +7,10 @@ import os
 def generate_launch_description():
 
     gazebo = FindPackageShare('rexrov2_gazebo').find('rexrov2_gazebo')
+    worlds = FindPackageShare('uuv_gazebo_worlds').find('uuv_gazebo_worlds')
     desc = FindPackageShare('rexrov2_description').find('rexrov2_description')
-    sim = FindPackageShare('uuv_simulation_wrapper').find('uuv_simulation_wrapper')
+    sim = FindPackageShare('uuv_assistants').find('uuv_assistants')
+    control = FindPackageShare('rexrov2_control').find('rexrov2_control')
 
     return LaunchDescription([
 
@@ -18,7 +20,7 @@ def generate_launch_description():
         DeclareLaunchArgument('yaw', default_value='2'),
 
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(gazebo, 'launch', 'ocean_waves.launch.py'))
+            PythonLaunchDescriptionSource(os.path.join(worlds, 'launch', 'ocean_waves.launch.py'))
         ),
 
         IncludeLaunchDescription(
@@ -30,6 +32,6 @@ def generate_launch_description():
         ),
 
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(gazebo, 'launch', 'start_pid_controller.launch.py'))
+            PythonLaunchDescriptionSource(os.path.join(control, 'launch', 'start_pid_controller.launch.py'))
         )
     ])

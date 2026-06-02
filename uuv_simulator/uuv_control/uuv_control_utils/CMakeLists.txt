@@ -31,6 +31,7 @@ install(
     config
 
   DESTINATION share/${PROJECT_NAME}
+  PATTERN "*.launch" EXCLUDE
 )
 
 ament_package()

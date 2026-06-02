@@ -19,7 +19,7 @@ import uuv_control_msgs.msg as uuv_control_msgs
 
 from uuv_waypoints import WaypointSet
 
-from tf_quaternion.transformations import (
+from tf_transformations import (
     euler_from_quaternion
 )
 

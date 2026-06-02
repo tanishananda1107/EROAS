@@ -37,14 +37,7 @@ class ThrusterManager(Node):
 
                 self.namespace += "/"
 
-        self.declare_parameter(
-            "thruster_manager",
-            {}
-        )
-
-        self.config = self.get_parameter(
-            "thruster_manager"
-        ).value
+        self.config = self._load_config()
 
         if len(self.config) == 0:
 
@@ -100,7 +93,7 @@ class ThrusterManager(Node):
             ).replace(
                 "//",
                 "/"
-            )
+            ).lstrip("/")
 
             source = (
                 self.namespace +
@@ -108,7 +101,7 @@ class ThrusterManager(Node):
             ).replace(
                 "//",
                 "/"
-            )
+            ).lstrip("/")
 
             tf_msg = self.tf_buffer.lookup_transform(
                 target,
@@ -179,12 +172,15 @@ class ThrusterManager(Node):
 
         self.declare_parameter(
             "tam",
-            []
+            ""
         )
 
         tam = self.get_parameter(
             "tam"
         ).value
+
+        if isinstance(tam, str) and tam.strip():
+            tam = yaml.safe_load(tam)
 
         if len(tam) > 0:
 
@@ -299,6 +295,75 @@ class ThrusterManager(Node):
             "ThrusterManager ready"
         )
 
+    def _get_or_declare_parameter(
+        self,
+        name,
+        default_value
+    ):
+
+        if not self.has_parameter(
+            name
+        ):
+            self.declare_parameter(
+                name,
+                default_value
+            )
+
+        return self.get_parameter(
+            name
+        ).value
+
+    def _load_config(
+        self
+    ):
+
+        prefix = "thruster_manager."
+
+        return {
+            "tf_prefix": self._get_or_declare_parameter(
+                prefix + "tf_prefix",
+                self.get_namespace().strip("/") or "rexrov"
+            ),
+            "base_link": self._get_or_declare_parameter(
+                prefix + "base_link",
+                "base_link"
+            ),
+            "thruster_topic_prefix": self._get_or_declare_parameter(
+                prefix + "thruster_topic_prefix",
+                "thrusters/"
+            ),
+            "thruster_topic_suffix": self._get_or_declare_parameter(
+                prefix + "thruster_topic_suffix",
+                "/input"
+            ),
+            "thruster_frame_base": self._get_or_declare_parameter(
+                prefix + "thruster_frame_base",
+                "thruster_"
+            ),
+            "max_thrust": self._get_or_declare_parameter(
+                prefix + "max_thrust",
+                0.0
+            ),
+            "timeout": self._get_or_declare_parameter(
+                prefix + "timeout",
+                -1.0
+            ),
+            "update_rate": self._get_or_declare_parameter(
+                prefix + "update_rate",
+                50
+            ),
+            "conversion_fcn": self._get_or_declare_parameter(
+                prefix + "conversion_fcn",
+                "proportional"
+            ),
+            "conversion_fcn_params": {
+                "gain": self._get_or_declare_parameter(
+                    prefix + "conversion_fcn_params.gain",
+                    1.0
+                )
+            }
+        }
+
     def parse_urdf(
         self,
         urdf
@@ -388,7 +453,7 @@ class ThrusterManager(Node):
                 "base_link"
             ]
 
-        )
+        ).lstrip("/")
 
         self.thrusters = []
 
@@ -410,7 +475,7 @@ class ThrusterManager(Node):
 
                 str(i)
 
-            )
+            ).lstrip("/")
 
             try:
 

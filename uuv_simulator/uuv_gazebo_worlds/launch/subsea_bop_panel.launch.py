@@ -14,7 +14,7 @@ def generate_launch_description():
     world_file = os.path.join(
         world_pkg,
         "worlds",
-        "subsea_bop_panel.sdf"   # recommended (or keep .world if not migrated yet)
+        "subsea_bop_panel.world"
     )
 
     return LaunchDescription([

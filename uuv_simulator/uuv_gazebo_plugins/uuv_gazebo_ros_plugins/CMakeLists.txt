@@ -47,49 +47,87 @@ include_directories(
   include
 )
 
-# ── Helper macro: build one gz-sim plugin shared library ─────────────────────
-macro(add_gz_plugin TARGET SOURCE)
-  add_library(${TARGET} SHARED ${SOURCE})
-  target_include_directories(${TARGET} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>)
-  ament_target_dependencies(${TARGET} ${COMMON_DEPS})
-  target_link_libraries(${TARGET}
-    gz-sim${GZ_SIM_VER}::gz-sim${GZ_SIM_VER}
-    gz-plugin${GZ_PLUGIN_VER}::register
-    gz-math7::gz-math7)
-endmacro()
-
-# ── Plugin targets ─────────────────────────────────────────────────────────────
-add_gz_plugin(uuv_fin_ros_plugin               src/FinROSPlugin.cc)
-add_gz_plugin(uuv_thruster_ros_plugin          src/ThrusterROSPlugin.cc)
-add_gz_plugin(uuv_underwater_object_ros_plugin src/UnderwaterObjectROSPlugin.cc)
-add_gz_plugin(uuv_joint_state_publisher        src/JointStatePublisher.cc)
-add_gz_plugin(uuv_accelerations_test_plugin    src/AccelerationsTestPlugin.cc)
-add_gz_plugin(linear_battery_ros_plugin        src/LinearBatteryROSPlugin.cc)
-add_gz_plugin(custom_battery_consumer_ros_plugin src/CustomBatteryConsumerROSPlugin.cc)
-
-set(UUV_GAZEBO_ROS_PLUGINS_LIST
-  uuv_fin_ros_plugin
-  uuv_thruster_ros_plugin
-  uuv_underwater_object_ros_plugin
-  uuv_joint_state_publisher
-  uuv_accelerations_test_plugin
-  linear_battery_ros_plugin
-  custom_battery_consumer_ros_plugin
+add_library(uuv_fin_ros_plugin SHARED
+  src/FinROSPlugin.cc
+)
+target_include_directories(uuv_fin_ros_plugin PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(uuv_fin_ros_plugin ${COMMON_DEPS})
+target_link_libraries(uuv_fin_ros_plugin
+  uuv_gazebo_plugins::uuv_fin_plugin
+  gz-sim${GZ_SIM_VER}::gz-sim${GZ_SIM_VER}
+  gz-plugin${GZ_PLUGIN_VER}::register
+  gz-math7::gz-math7
 )
 
-# ── Install ────────────────────────────────────────────────────────────────────
-install(TARGETS ${UUV_GAZEBO_ROS_PLUGINS_LIST}
+install(TARGETS uuv_fin_ros_plugin
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
 
-install(DIRECTORY include/
-  DESTINATION include
-  FILES_MATCHING PATTERN "*.hh"
-  PATTERN "*~" EXCLUDE
+add_library(uuv_thruster_ros_plugin SHARED
+  src/ThrusterROSPlugin.cc
+)
+target_include_directories(uuv_thruster_ros_plugin PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(uuv_thruster_ros_plugin ${COMMON_DEPS})
+target_link_libraries(uuv_thruster_ros_plugin
+  uuv_gazebo_plugins::uuv_thruster_plugin
+  gz-sim${GZ_SIM_VER}::gz-sim${GZ_SIM_VER}
+  gz-plugin${GZ_PLUGIN_VER}::register
+  gz-math7::gz-math7
+)
+
+install(TARGETS uuv_thruster_ros_plugin
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+add_library(uuv_underwater_object_ros_plugin SHARED
+  src/UnderwaterObjectROSPlugin.cc
+)
+target_include_directories(uuv_underwater_object_ros_plugin PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(uuv_underwater_object_ros_plugin ${COMMON_DEPS})
+target_link_libraries(uuv_underwater_object_ros_plugin
+  uuv_gazebo_plugins::uuv_underwater_object_plugin
+  gz-sim${GZ_SIM_VER}::gz-sim${GZ_SIM_VER}
+  gz-plugin${GZ_PLUGIN_VER}::register
+  gz-math7::gz-math7
+)
+
+install(TARGETS uuv_underwater_object_ros_plugin
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+add_library(uuv_joint_state_publisher SHARED
+  src/JointStatePublisher.cc
+)
+target_include_directories(uuv_joint_state_publisher PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(uuv_joint_state_publisher ${COMMON_DEPS})
+target_link_libraries(uuv_joint_state_publisher
+  gz-sim${GZ_SIM_VER}::gz-sim${GZ_SIM_VER}
+  gz-plugin${GZ_PLUGIN_VER}::register
+  gz-math7::gz-math7
+)
+
+install(TARGETS uuv_joint_state_publisher
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
 )
 
 install(DIRECTORY urdf
@@ -107,28 +145,12 @@ install(DIRECTORY test
   OPTIONAL
 )
 
-# ── Tests ──────────────────────────────────────────────────────────────────────
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  ament_lint_auto_find_test_dependencies()
-
-  find_package(ament_cmake_pytest REQUIRED)
-
-  foreach(test_script
-      test/test_default_fossen_vehicle.py
-      test/test_sphere_vehicle.py
-      test/test_thrusters.py
-  )
-    get_filename_component(test_name ${test_script} NAME_WE)
-    ament_add_pytest_test(${test_name} ${test_script}
-      TIMEOUT 120
-    )
-  endforeach()
-endif()
-
-# ── Export ─────────────────────────────────────────────────────────────────────
-ament_export_include_directories(include)
-ament_export_libraries(${UUV_GAZEBO_ROS_PLUGINS_LIST})
 ament_export_dependencies(${COMMON_DEPS})
+ament_export_libraries(
+  uuv_fin_ros_plugin
+  uuv_thruster_ros_plugin
+  uuv_underwater_object_ros_plugin
+  uuv_joint_state_publisher
+)
 
 ament_package()

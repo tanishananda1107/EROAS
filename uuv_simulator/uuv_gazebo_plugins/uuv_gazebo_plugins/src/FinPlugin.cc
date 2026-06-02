@@ -40,8 +40,8 @@
 #include <uuv_gazebo_plugins/FinPlugin.hh>
 #include <uuv_gazebo_plugins/Def.hh>
 
-namespace gz {
-namespace sim {
+namespace uuv_gz_plugins
+{
 
 /////////////////////////////////////////////////
 FinPlugin::FinPlugin()
@@ -57,6 +57,7 @@ void FinPlugin::Configure(
     gz::sim::EventManager              & /*_eventMgr*/)
 {
   this->model = gz::sim::Model(_entity);
+  auto sdf = std::const_pointer_cast<sdf::Element>(_sdf);
 
   // Fin ID
   GZ_ASSERT(_sdf->HasElement("fin_id"), "Could not find fin_id parameter.");
@@ -72,28 +73,30 @@ void FinPlugin::Configure(
       _sdf->Get<std::string>("input_topic")  : this->topicPrefix + "input";
   std::string outputTopic = _sdf->HasElement("output_topic") ?
       _sdf->Get<std::string>("output_topic") : this->topicPrefix + "output";
+  this->commandTopic = inputTopic;
+  this->angleTopic = outputTopic;
 
   // Link
   GZ_ASSERT(_sdf->HasElement("link_name"), "Could not find link_name.");
-  this->linkEntity = this->model.LinkByName(_ecm,
-      _sdf->Get<std::string>("link_name"));
-  GZ_ASSERT(this->linkEntity != kNullEntity, "link is invalid");
+  this->linkName = _sdf->Get<std::string>("link_name");
+  this->linkEntity = this->model.LinkByName(_ecm, this->linkName);
+  GZ_ASSERT(this->linkEntity != gz::sim::kNullEntity, "link is invalid");
 
   // Joint
   GZ_ASSERT(_sdf->HasElement("joint_name"), "Could not find joint_name.");
   this->jointEntity = this->model.JointByName(_ecm,
       _sdf->Get<std::string>("joint_name"));
-  GZ_ASSERT(this->jointEntity != kNullEntity, "joint is invalid");
+  GZ_ASSERT(this->jointEntity != gz::sim::kNullEntity, "joint is invalid");
 
   // Dynamics model
   GZ_ASSERT(_sdf->HasElement("dynamics"), "Could not find dynamics.");
   this->dynamics.reset(DynamicsFactory::GetInstance().CreateDynamics(
-      const_cast<sdf::ElementPtr>(_sdf->GetElement("dynamics"))));
+      sdf->GetElement("dynamics")));
 
   // Lift/drag model
   GZ_ASSERT(_sdf->HasElement("liftdrag"), "Could not find liftdrag.");
   this->liftdrag.reset(LiftDragFactory::GetInstance().CreateLiftDrag(
-      const_cast<sdf::ElementPtr>(_sdf->GetElement("liftdrag"))));
+      sdf->GetElement("liftdrag")));
 
   // Subscribe to current velocity
   GZ_ASSERT(_sdf->HasElement("current_velocity_topic"),
@@ -126,11 +129,11 @@ void FinPlugin::PreUpdate(
   // Get joint limits
   double upperLimit =  1e6;
   double lowerLimit = -1e6;
-  auto posLimits = joint.PositionLimits(_ecm, 0);
-  if (posLimits)
+  auto axes = joint.Axis(_ecm);
+  if (axes && !axes->empty())
   {
-    lowerLimit = posLimits->first;
-    upperLimit = posLimits->second;
+    lowerLimit = axes->front().Lower();
+    upperLimit = axes->front().Upper();
   }
 
   this->inputCommand = std::min(upperLimit, this->inputCommand);
@@ -189,12 +192,11 @@ void FinPlugin::OnCurrentVelocity(const gz::msgs::Vector3d &_msg)
   this->currentVelocity.Z(_msg.z());
 }
 
-}  // namespace sim
-}  // namespace gz
+}  // namespace uuv_gz_plugins
 
 // Register the plugin with gz-sim 8
-GZ_ADD_PLUGIN(gz::sim::FinPlugin,
+GZ_ADD_PLUGIN(uuv_gz_plugins::FinPlugin,
               gz::sim::System,
-              gz::sim::FinPlugin::ISystemConfigure,
-              gz::sim::FinPlugin::ISystemPreUpdate)
-GZ_ADD_PLUGIN_ALIAS(gz::sim::FinPlugin, "gz::sim::FinPlugin")
+              uuv_gz_plugins::FinPlugin::ISystemConfigure,
+              uuv_gz_plugins::FinPlugin::ISystemPreUpdate)
+GZ_ADD_PLUGIN_ALIAS(uuv_gz_plugins::FinPlugin, "uuv_gz_plugins::FinPlugin")

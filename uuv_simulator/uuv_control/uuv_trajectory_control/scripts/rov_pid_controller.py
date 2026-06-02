@@ -16,6 +16,7 @@ class ROVPIDController(Node, DPPIDControllerBase):
 
         DPPIDControllerBase.__init__(
             self,
+            self,
             False,
             None,
             True
