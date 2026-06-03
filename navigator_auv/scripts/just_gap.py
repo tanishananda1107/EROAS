@@ -19,9 +19,14 @@ class SonarHeadingNode(Node):
 
         self.cmd_vel_pub = self.create_publisher(Twist, '/rexrov2/cmd_vel_1', 10)
 
-        self.create_subscription(ProjectedSonarImage,
-            '/rexrov2/blueview_p900/sonar_image_raw', self.sonar_image_raw_callback, 10)
-        self.create_subscription(Float64, '/rexrov2/global_angle', self.global_angle_callback, 10)
+        self._subscriptions = [
+            self.create_subscription(
+                ProjectedSonarImage,
+                '/rexrov2/blueview_p900/sonar_image_raw',
+                self.sonar_image_raw_callback,
+                10),
+            self.create_subscription(Float64, '/rexrov2/global_angle', self.global_angle_callback, 10),
+        ]
 
         self.beam_directions = []
         self.ranges = []

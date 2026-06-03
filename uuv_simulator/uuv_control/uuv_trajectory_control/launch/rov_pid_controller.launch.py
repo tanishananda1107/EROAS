@@ -91,7 +91,8 @@ def generate_launch_description():
                 "model_name":model_name,
                 "output_dir":output_dir,
                 "config_file":config_file,
-                "tam_file":tam_file
+                "tam_file":tam_file,
+                "timeout":"-1.0"
             }.items()
         ),
 

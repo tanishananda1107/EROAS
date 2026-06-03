@@ -1,0 +1,277 @@
+<?xml version="1.0"?>
+<sdf version="1.10">
+  <world name="coral_reef_ocean">
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <physics name="ocean_physics" default="true" type="ode">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>500</real_time_update_rate>
+    </physics>
+
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>56.71897669633431</latitude_deg>
+      <longitude_deg>3.515625</longitude_deg>
+      <elevation>0</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
+    <scene>
+      <ambient>0.02 0.18 0.28 1</ambient>
+      <background>0.00 0.04 0.07 1</background>
+      <shadows>true</shadows>
+      <fog>
+        <type>linear</type>
+        <color>0.01 0.18 0.25 1</color>
+        <start>10</start>
+        <end>85</end>
+        <density>0.045</density>
+      </fog>
+    </scene>
+
+    <gui fullscreen="0">
+      <camera name="underwater_inspection_camera">
+        <pose>-10 -10 3 0 0.52 0.78</pose>
+        <view_controller>orbit</view_controller>
+        <projection_type>perspective</projection_type>
+      </camera>
+    </gui>
+
+    <light name="filtered_sunlight" type="directional">
+      <pose>-20 -35 80 0.4 0.2 0</pose>
+      <diffuse>0.34 0.62 0.72 1</diffuse>
+      <specular>0.05 0.09 0.10 1</specular>
+      <direction>0.25 0.45 -1</direction>
+      <cast_shadows>false</cast_shadows>
+    </light>
+
+    <model name="sand_seabed">
+      <static>true</static>
+      <pose>0 0 -8 0 0 0</pose>
+      <link name="seabed_link">
+        <collision name="seabed_collision">
+          <geometry>
+            <box>
+              <size>180 140 0.4</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="seabed_visual">
+          <geometry>
+            <box>
+              <size>180 140 0.4</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.36 0.32 0.24 1</ambient>
+            <diffuse>0.48 0.43 0.31 1</diffuse>
+            <specular>0.02 0.02 0.02 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <include>
+      <uri>model://ned_frame</uri>
+      <name>world_ned_frame</name>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://nerf/Blue_Terrain</uri>
+      <name>uuv_blue_coral_terrain_1</name>
+      <pose>14 -12 -11 1.51 0 -5.55</pose>
+      <static>true</static>
+    </include>
+
+    <include>
+      <uri>model://nerf/Blue_Terrain</uri>
+      <name>uuv_blue_coral_terrain_2</name>
+      <pose>26 8 -11 1.51 0 -2.96</pose>
+      <static>true</static>
+    </include>
+
+    <include>
+      <uri>model://nerf/tunnel</uri>
+      <name>uuv_reef_tunnel</name>
+      <pose>18 5 -10 -1.67 -0.03 -2.66</pose>
+      <static>true</static>
+    </include>
+
+    <include>
+      <uri>model://rod_target</uri>
+      <name>sonar_rod_target</name>
+      <pose>-8 8 -4 0 0 0.2</pose>
+      <static>true</static>
+    </include>
+
+    <include>
+      <uri>model://plate_target</uri>
+      <name>sonar_plate_target</name>
+      <pose>10 10 -4 0 0 0.9</pose>
+      <static>true</static>
+    </include>
+
+    <model name="navigation_waypoints">
+      <static>true</static>
+      <link name="waypoints_link">
+        <visual name="wp_start">
+          <pose>-8 -6 -3 0 0 0</pose>
+          <geometry><sphere><radius>0.75</radius></sphere></geometry>
+          <material><ambient>0.0 0.9 0.35 1</ambient><diffuse>0.0 0.9 0.35 1</diffuse></material>
+        </visual>
+        <visual name="wp_reef_gap">
+          <pose>4 0 -3 0 0 0</pose>
+          <geometry><sphere><radius>0.75</radius></sphere></geometry>
+          <material><ambient>1.0 0.86 0.1 1</ambient><diffuse>1.0 0.86 0.1 1</diffuse></material>
+        </visual>
+        <visual name="wp_goal">
+          <pose>14 8 -3 0 0 0</pose>
+          <geometry><sphere><radius>0.75</radius></sphere></geometry>
+          <material><ambient>0.1 0.55 1.0 1</ambient><diffuse>0.1 0.55 1.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="rexrov2_spawn_marker">
+      <static>true</static>
+      <pose>0 0 -3 0 0 0</pose>
+      <link name="spawn_marker_link">
+        <visual name="spawn_ring">
+          <geometry>
+            <cylinder>
+              <radius>2.5</radius>
+              <length>0.06</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.0 0.7 0.9 1</ambient>
+            <diffuse>0.0 0.8 1.0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="reef_rocks_and_corals">
+      <static>true</static>
+      <link name="reef_link">
+        <collision name="rock_wall_left_collision">
+          <pose>-10 -4 -8.5 0.1 0.18 0.35</pose>
+          <geometry><box><size>6 4 5.5</size></box></geometry>
+        </collision>
+        <visual name="rock_wall_left_visual">
+          <pose>-10 -4 -8.5 0.1 0.18 0.35</pose>
+          <geometry><box><size>6 4 5.5</size></box></geometry>
+          <material><ambient>0.19 0.17 0.15 1</ambient><diffuse>0.29 0.26 0.22 1</diffuse></material>
+        </visual>
+
+        <collision name="rock_wall_right_collision">
+          <pose>8 4 -8.1 -0.2 0.1 -0.2</pose>
+          <geometry><box><size>6 4 6.0</size></box></geometry>
+        </collision>
+        <visual name="rock_wall_right_visual">
+          <pose>8 4 -8.1 -0.2 0.1 -0.2</pose>
+          <geometry><box><size>6 4 6.0</size></box></geometry>
+          <material><ambient>0.17 0.18 0.17 1</ambient><diffuse>0.27 0.29 0.27 1</diffuse></material>
+        </visual>
+
+        <collision name="coral_column_collision">
+          <pose>-1 -10 -7.8 0 0 0</pose>
+          <geometry><cylinder><radius>1.2</radius><length>8.5</length></cylinder></geometry>
+        </collision>
+        <visual name="coral_column_visual">
+          <pose>-1 -10 -7.8 0 0 0</pose>
+          <geometry><cylinder><radius>1.2</radius><length>8.5</length></cylinder></geometry>
+          <material><ambient>0.86 0.28 0.20 1</ambient><diffuse>0.95 0.38 0.28 1</diffuse></material>
+        </visual>
+
+        <collision name="purple_coral_head_collision">
+          <pose>12 -8 -9.2 0 0 0</pose>
+          <geometry><sphere><radius>2.8</radius></sphere></geometry>
+        </collision>
+        <visual name="purple_coral_head_visual">
+          <pose>12 -8 -9.2 0 0 0</pose>
+          <geometry><sphere><radius>2.8</radius></sphere></geometry>
+          <material><ambient>0.58 0.22 0.50 1</ambient><diffuse>0.78 0.32 0.66 1</diffuse></material>
+        </visual>
+
+        <collision name="green_coral_left_collision">
+          <pose>-6 8 -8.7 0 0 0.35</pose>
+          <geometry><box><size>2 8 5.2</size></box></geometry>
+        </collision>
+        <visual name="green_coral_left_visual">
+          <pose>-6 8 -8.7 0 0 0.35</pose>
+          <geometry><box><size>2 8 5.2</size></box></geometry>
+          <material><ambient>0.12 0.36 0.30 1</ambient><diffuse>0.20 0.52 0.42 1</diffuse></material>
+        </visual>
+
+        <collision name="green_coral_right_collision">
+          <pose>6 8 -8.7 0 0 0.35</pose>
+          <geometry><box><size>2 8 5.2</size></box></geometry>
+        </collision>
+        <visual name="green_coral_right_visual">
+          <pose>6 8 -8.7 0 0 0.35</pose>
+          <geometry><box><size>2 8 5.2</size></box></geometry>
+          <material><ambient>0.12 0.36 0.30 1</ambient><diffuse>0.20 0.52 0.42 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="uuv_simulator_demo_body">
+      <pose>6 0 -3 0 0 0</pose>
+      <link name="base_link">
+        <gravity>false</gravity>
+        <inertial>
+          <mass>120</mass>
+          <inertia>
+            <ixx>45</ixx>
+            <iyy>125</iyy>
+            <izz>125</izz>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyz>0</iyz>
+          </inertia>
+        </inertial>
+        <collision name="body_collision">
+          <pose>0 0 0 0 1.57079632679 0</pose>
+          <geometry><cylinder><radius>0.65</radius><length>4.5</length></cylinder></geometry>
+        </collision>
+        <visual name="body_visual">
+          <pose>0 0 0 0 1.57079632679 0</pose>
+          <geometry><cylinder><radius>0.65</radius><length>4.5</length></cylinder></geometry>
+          <material>
+            <ambient>0.95 0.72 0.08 1</ambient>
+            <diffuse>1.0 0.82 0.16 1</diffuse>
+            <specular>0.2 0.2 0.12 1</specular>
+          </material>
+        </visual>
+        <visual name="nose_visual">
+          <pose>2.55 0 0 0 0 0</pose>
+          <geometry><sphere><radius>0.68</radius></sphere></geometry>
+          <material>
+            <ambient>0.0 0.9 1.0 1</ambient>
+            <diffuse>0.0 0.9 1.0 1</diffuse>
+          </material>
+        </visual>
+        <visual name="tail_fin_vertical">
+          <pose>-2.2 0 0.75 0 0 0</pose>
+          <geometry><box><size>1.1 0.16 0.25</size></box></geometry>
+          <material>
+            <ambient>0.02 0.18 0.25 1</ambient>
+            <diffuse>0.06 0.34 0.44 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
+        <initial_linear>0 0 0</initial_linear>
+        <initial_angular>0 0 0</initial_angular>
+      </plugin>
+    </model>
+  </world>
+</sdf>

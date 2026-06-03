@@ -3,7 +3,6 @@
 import rclpy
 from rclpy.node import Node
 import numpy as np
-import cvxpy as cp
 from sensor_msgs.msg import PointCloud2
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -16,10 +15,12 @@ class ObstacleAvoidanceNode(Node):
     def __init__(self):
         super().__init__('obstacle_avoidance_node')
 
-        self.create_subscription(Twist,       '/rexrov2/cmd_vel_1',   self.vel_callback,  10)
-        self.create_subscription(PointCloud2, '/rexrov2/point_cloud', self.pc_callback,   10)
-        self.create_subscription(Odometry,    '/rexrov2/pose_gt',     self.pose_callback, 10)
-        self.create_subscription(Float64,     '/rexrov2/sonar/moving',self.sonar_cb,      10)
+        self._subscriptions = [
+            self.create_subscription(Twist,       '/rexrov2/cmd_vel_1',   self.vel_callback,  10),
+            self.create_subscription(PointCloud2, '/rexrov2/point_cloud', self.pc_callback,   10),
+            self.create_subscription(Odometry,    '/rexrov2/pose_gt',     self.pose_callback, 10),
+            self.create_subscription(Float64,     '/rexrov2/sonar/moving', self.sonar_cb,     10),
+        ]
 
         self.cmd_pub = self.create_publisher(Twist,   '/rexrov2/cmd_vel',       10)
         self.h_pub   = self.create_publisher(Float64, '/rexrov2/current_h',     10)
@@ -37,7 +38,8 @@ class ObstacleAvoidanceNode(Node):
         self.closest_obstacle_distance = float('inf')
         self.closest_point   = None
         self.v_alg           = Twist()
-        self.xy_cbf = self.xz_cbf = self.sonar_moving = False
+        self.xy_cbf = True
+        self.xz_cbf = self.sonar_moving = False
 
     # ---- state callbacks ----
     def sonar_cb(self, msg):
@@ -116,30 +118,34 @@ class ObstacleAvoidanceNode(Node):
         gy = lx*np.sin(self.yaw) + ly*np.cos(self.yaw)
         return gx, gy
 
+    def _project_to_cbf_constraint(self, desired, gradient, margin):
+        norm_sq = float(gradient @ gradient)
+        if norm_sq < 1e-9:
+            return desired
+
+        constraint_value = float(gradient @ desired + margin)
+        if constraint_value >= 0.0:
+            return desired
+
+        return desired + (-constraint_value / norm_sq) * gradient
+
     def _opt_xy(self, v):
-        vx, vy = cp.Variable(), cp.Variable()
         dgx, dgy = self._tf_l2g_xy(v.linear.x, v.linear.y)
-        obj  = cp.Minimize(cp.square(vx-dgx) + cp.square(vy-dgy))
-        con  = [self._h_dot_xy(vx,vy) + self.kappa*(self.current_h-0.5) >= 0]
-        prob = cp.Problem(obj, con)
-        try:
-            prob.solve()
-            if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-                return np.array(list(self._tf_g2l_xy(vx.value, vy.value)))
-        except Exception: pass
-        return np.array([0.0, 0.0])
+        desired = np.array([dgx, dgy], dtype=float)
+        gradient = np.array([
+            2*(self.vehicle_pose.x - self.closest_point[0]),
+            2*(self.vehicle_pose.y - self.closest_point[1]),
+        ], dtype=float)
+        margin = self.kappa * (self.current_h - 0.5)
+        safe = self._project_to_cbf_constraint(desired, gradient, margin)
+        return np.array(self._tf_g2l_xy(safe[0], safe[1]))
 
     def _opt_xz(self, v):
-        vx, vz = cp.Variable(), cp.Variable()
-        obj  = cp.Minimize(cp.square(vx-v.linear.x) + cp.square(vz-v.linear.z))
-        con  = [self._h_dot_xz(vx,vz) + self.kappa1*(self.current_h-0.5) >= 0]
-        prob = cp.Problem(obj, con)
-        try:
-            prob.solve()
-            if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-                return np.array([vx.value, vz.value])
-        except Exception: pass
-        return np.array([0.0, 0.0])
+        desired = np.array([v.linear.x, v.linear.z], dtype=float)
+        local_closest = self._global_to_local(self.closest_point)
+        gradient = np.array([-2*local_closest[0], -2*local_closest[2]], dtype=float)
+        margin = self.kappa1 * (self.current_h - 0.5)
+        return self._project_to_cbf_constraint(desired, gradient, margin)
 
     def process_data(self, v):
         if self.xy_cbf:

@@ -3,9 +3,17 @@ project(rexrov2_gazebo)
 
 find_package(ament_cmake REQUIRED)
 
-install(DIRECTORY launch
+install(DIRECTORY
+        launch
+        worlds
+        models
+        urdf
+        xacro
+        meshes
+        config
         DESTINATION share/${PROJECT_NAME}
+        OPTIONAL
         PATTERN "*~" EXCLUDE
-        PATTERN "*.launch" EXCLUDE)
+        PATTERN "__pycache__" EXCLUDE)
 
 ament_package()

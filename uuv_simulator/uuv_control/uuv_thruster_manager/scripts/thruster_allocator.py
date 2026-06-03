@@ -253,7 +253,7 @@ class ThrusterAllocatorNode(
             self.config
         )
 
-        self.ready = False
+        self._ready = False
 
         self.config[
             'base_link'
@@ -377,7 +377,7 @@ class ThrusterAllocatorNode(
         msg
     ):
 
-        if not self.ready:
+        if not self._ready:
             return
 
         force = np.array(
@@ -424,7 +424,7 @@ class ThrusterAllocatorNode(
         msg
     ):
 
-        if not self.ready:
+        if not self._ready:
             return
 
         force = np.array(

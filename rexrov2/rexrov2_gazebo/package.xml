@@ -15,10 +15,26 @@
 
   <exec_depend>rexrov2_description</exec_depend>
   <exec_depend>rexrov2_control</exec_depend>
+  <exec_depend>uuv_gazebo_worlds</exec_depend>
+  <exec_depend>uuv_gazebo_ros_plugins</exec_depend>
+  <exec_depend>uuv_world_ros_plugins</exec_depend>
+  <exec_depend>uuv_assistants</exec_depend>
+  <exec_depend>navigator_auv</exec_depend>
+  <exec_depend>nps_uw_multibeam_sonar</exec_depend>
+  <exec_depend>marine_acoustic_msgs</exec_depend>
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>xacro</exec_depend>
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>image_transport</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

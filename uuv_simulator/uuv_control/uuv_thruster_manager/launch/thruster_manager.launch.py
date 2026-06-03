@@ -42,7 +42,7 @@ def generate_launch_description():
 
         DeclareLaunchArgument(
             'timeout',
-            default_value='-1'
+            default_value='-1.0'
         ),
 
         DeclareLaunchArgument(

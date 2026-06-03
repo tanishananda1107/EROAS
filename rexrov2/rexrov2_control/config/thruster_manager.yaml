@@ -7,7 +7,7 @@
       thruster_topic_suffix: /input
       thruster_frame_base: thruster_
       max_thrust: 1540.0
-      timeout: -1
+      timeout: -1.0
       update_rate: 50
       conversion_fcn: proportional
       conversion_fcn_params:
