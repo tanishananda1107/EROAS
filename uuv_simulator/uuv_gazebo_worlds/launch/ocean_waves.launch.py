@@ -1,9 +1,13 @@
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 import os
+
+
+BLUE_BLOCK_WORLD = "obstacle_avoidance.world"
 
 
 def generate_launch_description():
@@ -11,15 +15,20 @@ def generate_launch_description():
     gz_pkg = FindPackageShare("ros_gz_sim").find("ros_gz_sim")
     world_pkg = FindPackageShare("uuv_gazebo_worlds").find("uuv_gazebo_worlds")
 
-    world_file = os.path.join(world_pkg, "worlds", "ocean_waves.world")
+    world_file = os.path.join(world_pkg, "worlds", BLUE_BLOCK_WORLD)
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            "gz_args",
+            default_value=f"--physics-engine gz-physics-bullet-featherstone-plugin -r {world_file}",
+            description="Gazebo arguments; defaults to the Blue Block World",
+        ),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(gz_pkg, "launch", "gz_sim.launch.py")
             ),
-            launch_arguments={"gz_args": f"-r {world_file}"}.items()
+            launch_arguments={"gz_args": LaunchConfiguration("gz_args")}.items()
         ),
 
         Node(

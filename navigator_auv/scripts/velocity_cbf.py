@@ -3,7 +3,6 @@
 import rclpy
 from rclpy.node import Node
 import numpy as np
-import cvxpy as cp
 from sensor_msgs.msg import PointCloud2
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -16,18 +15,29 @@ class ObstacleAvoidanceNode(Node):
     def __init__(self):
         super().__init__('obstacle_avoidance_node')
 
-        self.create_subscription(Twist,       '/rexrov2/cmd_vel_1',   self.vel_callback,  10)
-        self.create_subscription(PointCloud2, '/rexrov2/point_cloud', self.pc_callback,   10)
-        self.create_subscription(Odometry,    '/rexrov2/pose_gt',     self.pose_callback, 10)
-        self.create_subscription(Float64,     '/rexrov2/sonar/moving',self.sonar_cb,      10)
+        self._subscriptions = [
+            self.create_subscription(Twist,       '/rexrov2/cmd_vel_1',   self.vel_callback,  10),
+            self.create_subscription(PointCloud2, '/rexrov2/point_cloud', self.pc_callback,   10),
+            self.create_subscription(Odometry,    '/rexrov2/pose_gt',     self.pose_callback, 10),
+            self.create_subscription(Float64,     '/rexrov2/sonar/moving', self.sonar_cb,     10),
+        ]
 
         self.cmd_pub = self.create_publisher(Twist,   '/rexrov2/cmd_vel',       10)
         self.h_pub   = self.create_publisher(Float64, '/rexrov2/current_h',     10)
+
+        self.declare_parameter('target_depth', -60.0)
+        self.declare_parameter('depth_hold_kp', 0.18)
+        self.declare_parameter('max_vertical_speed', 0.45)
+        self.declare_parameter('control_rate', 10.0)
 
         self.R_o     = 2.0
         self.radius  = 15.0
         self.kappa   = 0.09
         self.kappa1  = 0.09
+        self.target_depth = float(self.get_parameter('target_depth').value)
+        self.depth_hold_kp = float(self.get_parameter('depth_hold_kp').value)
+        self.max_vertical_speed = float(self.get_parameter('max_vertical_speed').value)
+        self.control_rate = float(self.get_parameter('control_rate').value)
 
         self.filtered_points = np.empty((0,3))
         self.vehicle_pose    = None
@@ -37,7 +47,10 @@ class ObstacleAvoidanceNode(Node):
         self.closest_obstacle_distance = float('inf')
         self.closest_point   = None
         self.v_alg           = Twist()
-        self.xy_cbf = self.xz_cbf = self.sonar_moving = False
+        self.xy_cbf = True
+        self.xz_cbf = self.sonar_moving = False
+        self.control_timer = self.create_timer(
+            1.0 / self.control_rate, self.control_loop)
 
     # ---- state callbacks ----
     def sonar_cb(self, msg):
@@ -116,41 +129,61 @@ class ObstacleAvoidanceNode(Node):
         gy = lx*np.sin(self.yaw) + ly*np.cos(self.yaw)
         return gx, gy
 
+    def _project_to_cbf_constraint(self, desired, gradient, margin):
+        norm_sq = float(gradient @ gradient)
+        if norm_sq < 1e-9:
+            return desired
+
+        constraint_value = float(gradient @ desired + margin)
+        if constraint_value >= 0.0:
+            return desired
+
+        return desired + (-constraint_value / norm_sq) * gradient
+
+    def _depth_hold_velocity(self):
+        if self.vehicle_pose is None:
+            return 0.0
+        error = self.target_depth - self.vehicle_pose.z
+        cmd = self.depth_hold_kp * error
+        return float(np.clip(cmd, -self.max_vertical_speed, self.max_vertical_speed))
+
     def _opt_xy(self, v):
-        vx, vy = cp.Variable(), cp.Variable()
         dgx, dgy = self._tf_l2g_xy(v.linear.x, v.linear.y)
-        obj  = cp.Minimize(cp.square(vx-dgx) + cp.square(vy-dgy))
-        con  = [self._h_dot_xy(vx,vy) + self.kappa*(self.current_h-0.5) >= 0]
-        prob = cp.Problem(obj, con)
-        try:
-            prob.solve()
-            if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-                return np.array(list(self._tf_g2l_xy(vx.value, vy.value)))
-        except Exception: pass
-        return np.array([0.0, 0.0])
+        desired = np.array([dgx, dgy], dtype=float)
+        gradient = np.array([
+            2*(self.vehicle_pose.x - self.closest_point[0]),
+            2*(self.vehicle_pose.y - self.closest_point[1]),
+        ], dtype=float)
+        margin = self.kappa * (self.current_h - 0.5)
+        safe = self._project_to_cbf_constraint(desired, gradient, margin)
+        return np.array(self._tf_g2l_xy(safe[0], safe[1]))
 
     def _opt_xz(self, v):
-        vx, vz = cp.Variable(), cp.Variable()
-        obj  = cp.Minimize(cp.square(vx-v.linear.x) + cp.square(vz-v.linear.z))
-        con  = [self._h_dot_xz(vx,vz) + self.kappa1*(self.current_h-0.5) >= 0]
-        prob = cp.Problem(obj, con)
-        try:
-            prob.solve()
-            if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-                return np.array([vx.value, vz.value])
-        except Exception: pass
-        return np.array([0.0, 0.0])
+        desired = np.array([v.linear.x, v.linear.z], dtype=float)
+        local_closest = self._global_to_local(self.closest_point)
+        gradient = np.array([-2*local_closest[0], -2*local_closest[2]], dtype=float)
+        margin = self.kappa1 * (self.current_h - 0.5)
+        return self._project_to_cbf_constraint(desired, gradient, margin)
 
     def process_data(self, v):
         if self.xy_cbf:
             safe = self._opt_xy(v) if self.current_h != float('inf') else np.array([v.linear.x, v.linear.y])
-            tw = Twist(); tw.angular.z = v.angular.z; tw.linear.x = safe[0]; tw.linear.y = safe[1]
+            tw = Twist()
+            tw.angular.z = v.angular.z
+            tw.linear.x = safe[0]
+            tw.linear.y = safe[1]
+            tw.linear.z = self._depth_hold_velocity()
             self.cmd_pub.publish(tw)
         if self.xz_cbf:
             safe = self._opt_xz(v) if self.current_h != float('inf') else np.array([v.linear.x, v.linear.z])
             tw = Twist(); tw.linear.x = safe[0]; tw.linear.z = safe[1]
             self.h_pub.publish(Float64(data=float(self.current_h)))
             self.cmd_pub.publish(tw)
+
+    def control_loop(self):
+        if self.vehicle_pose is None:
+            return
+        self.process_data(self.v_alg)
 
 
 def main():
@@ -162,7 +195,8 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

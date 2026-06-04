@@ -2,6 +2,7 @@
 # ROS 2 port
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 import math
 import tf_transformations as tft
 import numpy as np
@@ -12,24 +13,35 @@ from sensor_msgs.msg import Image, PointCloud2, JointState
 from std_msgs.msg import Float64
 from marine_acoustic_msgs.msg import ProjectedSonarImage
 from cv_bridge import CvBridge
-from gz_msgs.srv import SpawnEntity          # gz-sim 8 replaces gazebo_msgs
 
 
 class SonarHeadingNode(Node):
     def __init__(self):
         super().__init__('sonar_heading_node')
 
-        self.cmd_vel_pub   = self.create_publisher(Twist,   '/rexrov2/cmd_vel_1',  10)
+        self.declare_parameter('cmd_vel_topic', '/rexrov2/cmd_vel_1')
+        self.declare_parameter('pose_topic', '/rexrov2/pose_gt')
+        self.declare_parameter('sonar_topic', '/rexrov2/blueview_p900/sonar_image_raw')
+        self.declare_parameter('waypoints', '29,97,-50;31,110,-55;30,90,-90;30,120,-40')
+        self.declare_parameter('sonar_timeout', 1.0)
+        self.declare_parameter('fallback_speed', 0.35)
+        self.declare_parameter('fallback_yaw_kp', 0.8)
+        self.declare_parameter('fallback_max_yaw_rate', 0.5)
+        self.declare_parameter('loop_waypoints', False)
+
+        cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
+        pose_topic = self.get_parameter('pose_topic').value
+        sonar_topic = self.get_parameter('sonar_topic').value
+
+        self.cmd_vel_pub   = self.create_publisher(Twist,   cmd_vel_topic,  10)
         self.img_pub       = self.create_publisher(Image,   '/rexrov2/detected_objects', 10)
         self.joint_pub     = self.create_publisher(Float64, '/rexrov2/sonar_joint_position_controller/command', 10)
         self.sonar_move_pub= self.create_publisher(Float64, '/rexrov2/sonar/moving', 10)
 
-        self.create_subscription(ProjectedSonarImage, '/rexrov2/blueview_p900/sonar_image_raw',
-                                 self.sonar_image_raw_callback, 10)
-        self.create_subscription(Odometry, '/rexrov2/pose_gt', self.pose_callback, 10)
-
-        # gz-sim 8 spawn service
-        self.spawn_cli = self.create_client(SpawnEntity, '/world/default/create')
+        self.create_subscription(ProjectedSonarImage, sonar_topic,
+                                 self.sonar_image_raw_callback,
+                                 qos_profile_sensor_data)
+        self.create_subscription(Odometry, pose_topic, self.pose_callback, 10)
 
         self.bridge = CvBridge()
         self.timer  = self.create_timer(1.0/8.0, self.run_once)  # 8 Hz
@@ -40,6 +52,7 @@ class SonarHeadingNode(Node):
         self.data_raw = None
         self.ping_info = None
         self.data_available = False
+        self.last_sonar_time = None
         self.global_angle = 0.0
         self.turn_around = False
         self.right_goal = self.left_goal = False
@@ -72,11 +85,29 @@ class SonarHeadingNode(Node):
         self.angle_z_goal = 0.0
         self.sonar_angle = 0
 
-        self.waypoints = [
-            (29, 97, -50), (31, 110, -55), (30, 90, -90), (30, 120, -40),
-        ]
+        self.waypoints = self._parse_waypoints(self.get_parameter('waypoints').value)
         self.current_goal_index = 0
         self.current_goal = self.waypoints[self.current_goal_index]
+        self.sonar_timeout_ns = int(
+            float(self.get_parameter('sonar_timeout').value) * 1e9)
+        self.fallback_speed = float(self.get_parameter('fallback_speed').value)
+        self.fallback_yaw_kp = float(self.get_parameter('fallback_yaw_kp').value)
+        self.fallback_max_yaw_rate = float(
+            self.get_parameter('fallback_max_yaw_rate').value)
+        self.loop_waypoints = bool(self.get_parameter('loop_waypoints').value)
+        self.fallback_announced = False
+
+    def _parse_waypoints(self, value):
+        waypoints = []
+        for item in str(value).split(';'):
+            item = item.strip()
+            if not item:
+                continue
+            fields = [float(v.strip()) for v in item.split(',')]
+            if len(fields) != 3:
+                raise ValueError(f'Invalid waypoint "{item}", expected x,y,z')
+            waypoints.append(tuple(fields))
+        return waypoints or [(29, 97, -50), (31, 110, -55), (30, 90, -90), (30, 120, -40)]
 
     # ------------------------------------------------------------------ #
     #  Callbacks                                                           #
@@ -119,6 +150,8 @@ class SonarHeadingNode(Node):
         if self.beam_directions and self.ranges and data.image.data and self.ping_info:
             self.data_raw = np.frombuffer(data.image.data, dtype=np.uint8)
             self.data_available = True
+            self.last_sonar_time = self.get_clock().now()
+            self.fallback_announced = False
 
     # ------------------------------------------------------------------ #
     #  Goal management                                                     #
@@ -128,6 +161,10 @@ class SonarHeadingNode(Node):
             self.current_goal_index += 1
             self.current_goal = self.waypoints[self.current_goal_index]
             self.get_logger().info('Next waypoint')
+        elif self.loop_waypoints:
+            self.current_goal_index = 0
+            self.current_goal = self.waypoints[self.current_goal_index]
+            self.get_logger().info('Restarting waypoint loop')
         else:
             self.get_logger().info('All waypoints reached.')
 
@@ -343,6 +380,32 @@ class SonarHeadingNode(Node):
         tw.linear.z = lz
         self.cmd_vel_pub.publish(tw)
 
+    def publish_waypoint_fallback(self):
+        if self.pose is None:
+            return
+
+        position = self.pose.position
+        orientation = self.pose.orientation
+        _, _, yaw = tft.euler_from_quaternion([
+            orientation.x, orientation.y, orientation.z, orientation.w])
+        target_x, target_y, _ = self.current_goal
+        target_yaw = math.atan2(target_y - position.y, target_x - position.x)
+        yaw_error = math.atan2(
+            math.sin(target_yaw - yaw), math.cos(target_yaw - yaw))
+
+        tw = Twist()
+        tw.angular.z = float(np.clip(
+            self.fallback_yaw_kp * yaw_error,
+            -self.fallback_max_yaw_rate,
+            self.fallback_max_yaw_rate))
+        tw.linear.x = self.fallback_speed * max(0.0, math.cos(yaw_error))
+        self.cmd_vel_pub.publish(tw)
+
+        if not self.fallback_announced:
+            self.get_logger().warning(
+                'No fresh sonar frames; following waypoints using pose fallback')
+            self.fallback_announced = True
+
     # ------------------------------------------------------------------ #
     #  Main timer                                                          #
     # ------------------------------------------------------------------ #
@@ -350,7 +413,14 @@ class SonarHeadingNode(Node):
         if self.rospy_first_time:
             self.stop_data_collection()
             self.rospy_first_time = False
-        if not self.data_available:
+        now = self.get_clock().now()
+        sonar_is_fresh = (
+            self.data_available and
+            self.last_sonar_time is not None and
+            (now - self.last_sonar_time).nanoseconds <= self.sonar_timeout_ns
+        )
+        if not sonar_is_fresh:
+            self.publish_waypoint_fallback()
             return
         if self.z_motion_ongoing:
             self.sonar_move_pub.publish(Float64(data=1.0))
@@ -379,7 +449,8 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

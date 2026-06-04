@@ -28,7 +28,7 @@
 
     <xacro:macro name="rexrov2_hydro_model" params="namespace">
         <link name="${namespace}/base_link">
-            <neutrally_buoyant>0</neutrally_buoyant>
+            <neutrally_buoyant>1</neutrally_buoyant>
             <volume>${volume}</volume>
             <box>
                 <width>1.5</width>

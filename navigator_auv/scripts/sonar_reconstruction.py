@@ -2,6 +2,7 @@
 # ROS 2 port of sonar_reconstruction.py
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 import math
 import numpy as np
 from std_msgs.msg import Float64
@@ -9,24 +10,37 @@ from sensor_msgs.msg import PointCloud2, JointState
 from nav_msgs.msg import Odometry
 from marine_acoustic_msgs.msg import ProjectedSonarImage
 from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
-from message_filters import Subscriber, ApproximateTimeSynchronizer
 
 
 class SonarReconstructionNode(Node):
     def __init__(self):
         super().__init__('sonar_intensity_publisher')
 
-        # Synchronised subscribers
-        js_sub    = Subscriber(self, JointState,
-                               '/rexrov2/joint_states')
-        pose_sub  = Subscriber(self, Odometry,
-                               '/rexrov2/pose_gt')
-        sonar_sub = Subscriber(self, ProjectedSonarImage,
-                               '/rexrov2/blueview_p900/sonar_image_raw')
+        self.declare_parameter('joint_states_topic', '/rexrov2/joint_states')
+        self.declare_parameter('joint_command_topic', '/rexrov2/sonar_joint_position_controller/command')
+        self.declare_parameter('pose_topic', '/rexrov2/pose_gt')
+        self.declare_parameter('sonar_topic', '/rexrov2/blueview_p900/sonar_image_raw')
 
-        self.sync = ApproximateTimeSynchronizer(
-            [js_sub, pose_sub, sonar_sub], queue_size=100, slop=1.0)
-        self.sync.registerCallback(self.synchronized_callback)
+        self.create_subscription(
+            JointState,
+            self.get_parameter('joint_states_topic').value,
+            self.joint_state_callback,
+            10)
+        self.create_subscription(
+            Float64,
+            self.get_parameter('joint_command_topic').value,
+            self.joint_command_callback,
+            10)
+        self.create_subscription(
+            Odometry,
+            self.get_parameter('pose_topic').value,
+            self.pose_callback,
+            10)
+        self.create_subscription(
+            ProjectedSonarImage,
+            self.get_parameter('sonar_topic').value,
+            self.sonar_callback,
+            qos_profile_sensor_data)
 
         # Publishers
         self.pc_pub = self.create_publisher(
@@ -41,24 +55,29 @@ class SonarReconstructionNode(Node):
         self.translation_vector = [0.0, 0.0, 0.0]
 
     # ------------------------------------------------------------------ #
-    def synchronized_callback(self, js_msg, height_msg, sonar_msg):
+    def joint_state_callback(self, msg):
+        if 'rexrov2/sonar_vertical_joint' in msg.name:
+            idx = msg.name.index('rexrov2/sonar_vertical_joint')
+            self.pivot_angle = msg.position[idx]
+
+    def joint_command_callback(self, msg):
+        self.pivot_angle = msg.data
+
+    def pose_callback(self, msg):
+        self.x_position = msg.pose.pose.position.x
+        self.y_position = msg.pose.pose.position.y
+        self.z_position = msg.pose.pose.position.z
+        self.quat = msg.pose.pose.orientation
+        self.translation_vector = [
+            self.x_position, self.y_position, self.z_position]
+
+    def sonar_callback(self, msg):
+        if self.quat is None:
+            return
         try:
-            # Joint angle
-            if 'rexrov2/sonar_vertical_joint' in js_msg.name:
-                idx = js_msg.name.index('rexrov2/sonar_vertical_joint')
-                self.pivot_angle = js_msg.position[idx]
-
-            # Pose
-            self.x_position = height_msg.pose.pose.position.x
-            self.y_position = height_msg.pose.pose.position.y
-            self.z_position = height_msg.pose.pose.position.z
-            self.quat       = height_msg.pose.pose.orientation
-            self.translation_vector = [
-                self.x_position, self.y_position, self.z_position]
-
-            self.process_sonar_data(sonar_msg)
+            self.process_sonar_data(msg)
         except Exception as e:
-            self.get_logger().error(f'synchronized_callback error: {e}')
+            self.get_logger().error(f'sonar_callback error: {e}')
 
     # ------------------------------------------------------------------ #
     def polar_to_cartesian(self, i, j, max_beams, max_bins):
