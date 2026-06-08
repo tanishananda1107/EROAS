@@ -77,19 +77,19 @@
         <visual name="eroas_green_wake">
           <origin xyz="-4.8 0 0.05" rpy="0 1.57079632679 0"/>
           <geometry>
-            <cylinder radius="0.78" length="8.6"/>
+            <cylinder radius="0.08" length="8.6"/>
           </geometry>
           <material name="eroas_wake_green">
-            <color rgba="0.0 0.85 0.45 0.95"/>
+            <color rgba="0.0 1.0 0.3 0.3"/>
           </material>
         </visual>
         <visual name="eroas_green_wake_cap">
           <origin xyz="-9.1 0 0.05" rpy="0 0 0"/>
           <geometry>
-            <sphere radius="0.78"/>
+            <sphere radius="0.08"/>
           </geometry>
           <material name="eroas_wake_green">
-            <color rgba="0.0 0.85 0.45 0.95"/>
+            <color rgba="0.0 1.0 0.3 0.3"/>
           </material>
         </visual>
       </xacro:if>

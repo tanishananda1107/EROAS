@@ -24,6 +24,7 @@ class SonarHeadingNode(Node):
         self.declare_parameter('sonar_topic', '/rexrov2/blueview_p900/sonar_image_raw')
         self.declare_parameter('waypoints', '29,97,-50;31,110,-55;30,90,-90;30,120,-40')
         self.declare_parameter('sonar_timeout', 1.0)
+        self.declare_parameter('cruise_speed', 0.55)
         self.declare_parameter('fallback_speed', 0.35)
         self.declare_parameter('fallback_yaw_kp', 0.8)
         self.declare_parameter('fallback_max_yaw_rate', 0.5)
@@ -90,6 +91,7 @@ class SonarHeadingNode(Node):
         self.current_goal = self.waypoints[self.current_goal_index]
         self.sonar_timeout_ns = int(
             float(self.get_parameter('sonar_timeout').value) * 1e9)
+        self.cruise_speed = float(self.get_parameter('cruise_speed').value)
         self.fallback_speed = float(self.get_parameter('fallback_speed').value)
         self.fallback_yaw_kp = float(self.get_parameter('fallback_yaw_kp').value)
         self.fallback_max_yaw_rate = float(
@@ -245,30 +247,52 @@ class SonarHeadingNode(Node):
             if not hit:
                 obs_free.append(i)
 
+        # 1. Gap finding
+        ok = False
+        beam = None
         if obs_free:
             ok, beam = self.check_for_10_degree_coverage(obs_free)
-            if ok:
-                self.publish_heading(beam, 1); return
+        if ok:
+            self.publish_heading(beam, 1)
+            return
+
+        # 2. Check For Boundedness
+        bn = 4
+        if obs_free:
             bn = self.check_for_boundedness(obs_free)
-            if   bn == 1 and self.right_goal: self.publish_heading(10,  1)
-            elif bn == 1 and self.left_goal:  self.publish_heading(500, 1)
-            elif bn == 2 and self.left_goal:  self.publish_heading(10,  1)
-            elif bn == 2 and self.right_goal: self.publish_heading(500, 1)
+        
+        if bn == 1 and self.right_goal:
+            self.publish_heading(10, 1)
+            return
+        elif bn == 1 and self.left_goal:
+            self.publish_heading(500, 1)
+            return
+        elif bn == 2 and self.left_goal:
+            self.publish_heading(10, 1)
+            return
+        elif bn == 2 and self.right_goal:
+            self.publish_heading(500, 1)
+            return
+
+        # 3. Check for Convergence
+        pts = [self.polar_to_cartesian(i, j, beam_count, range_count) for i, j in contour]
+        if pts:
+            xs, ys = zip(*pts)
+            self.a_poly = None
+            self.find_and_plot_curve(xs, ys)
+            
+            # 4. Pivoting the Sonar
+            if self.a_poly is not None and self.a_poly < 0.02:
+                if not self.xy_called:
+                    self.check_verti_go = True
+                    self.navigate_3d(True)
             else:
-                pts = [self.polar_to_cartesian(i,j,beam_count,range_count) for i,j in contour]
-                if pts:
-                    xs, ys = zip(*pts)
-                    self.a_poly = None
-                    self.find_and_plot_curve(xs, ys)
-                    if self.a_poly is not None and self.a_poly < 0.02:
-                        if not self.xy_called:
-                            self.check_verti_go = True
-                            self.navigate_3d(True)
-                    else:
-                        if self.left_goal:  self.publish_heading(self.avg_left_slope,  2)
-                        elif self.right_goal: self.publish_heading(self.avg_right_slope, 2)
+                if self.left_goal:
+                    self.publish_heading(self.avg_left_slope, 2)
+                elif self.right_goal:
+                    self.publish_heading(self.avg_right_slope, 2)
         else:
-            self.get_logger().info('no gap')
+            self.get_logger().info('no contour and no gap')
 
     def publish_heading(self, beam_number, move):
         if self.turn_around:
@@ -279,7 +303,8 @@ class SonarHeadingNode(Node):
             rad = math.radians(deg)
             tw.angular.z = 0.12 * rad
             if move == 1:
-                tw.linear.x = 0.35 * (1.6 - abs(rad))
+                tw.linear.x = self.cruise_speed * max(
+                    0.0, 1.0 - abs(rad) / 1.6)
         elif move == 2:
             tw.angular.z = 0.1 * beam_number
         self.cmd_vel_pub.publish(tw)
@@ -363,11 +388,7 @@ class SonarHeadingNode(Node):
             self.publish_heading(self._global_angle_to_beam(self.global_angle), 3)
 
     def avoidance(self):
-        if not self.in_z_bound:
-            self.check_verti_go = True
-            self.navigate_3d(False)
-        else:
-            self.process_data()
+        self.process_data()
 
     def move_in_z(self):
         if not self.closest_to_target_vertical:

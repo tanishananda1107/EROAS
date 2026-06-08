@@ -46,11 +46,14 @@ BLUE_BLOCK_WORLD = {
 WORLD_A = {
     'package': 'rexrov2_gazebo',
     'file': 'eroas_world_a.sdf',
-    'spawn': ('30', '52', '-56', '1.5708'),
+    # Main blue blocks are centered at z=-56; the higher block pair is z=-54.
+    'spawn': ('24', '55', '-56', '1.5708'),
     'waypoints': (
-        '29,50,-56;42,66,-56;55,87,-54;35,70,-56;29,45,-56'
+        '24,55,-56;27,65,-54;55,88,-54;43,68,-54;24,55,-56'
     ),
     'target_depth': '-56.0',
+    'cruise_speed': 0.85,
+    'green_wake': 'true',
 }
 
 WORLD_CONFIGS = {
@@ -75,10 +78,10 @@ def _camera_follow_actions():
         'track_mode: FOLLOW_LOOK_AT '
         'follow_target: {name: "rexrov2" type: MODEL} '
         'track_target: {name: "rexrov2" type: MODEL} '
-        'follow_offset: {x: -8 y: 0 z: 4.5} '
+        'follow_offset: {x: 0 y: -10 z: 4.5} '
         'track_offset: {x: 0 y: 0 z: 0.5} '
-        'follow_pgain: 1.25 '
-        'track_pgain: 1.25'
+        'follow_pgain: 1.8 '
+        'track_pgain: 1.8'
     )
     track_cmd = [
         'gz', 'topic',
@@ -100,7 +103,7 @@ def _camera_follow_actions():
         '--reqtype', 'gz.msgs.Vector3d',
         '--reptype', 'gz.msgs.Boolean',
         '--timeout', '2000',
-        '--req', 'x: -8 y: 0 z: 4.5',
+        '--req', 'x: 0 y: -10 z: 4.5',
     ]
 
     actions = []
@@ -147,6 +150,7 @@ def _setup(context, *args, **kwargs):
     y = auto_value('y', spawn_y)
     z = auto_value('z', spawn_z)
     yaw = auto_value('yaw', spawn_yaw)
+    green_wake = auto_value('green_wake', cfg.get('green_wake', 'false'))
     gui = LaunchConfiguration('gui').perform(context).lower() in ('1', 'true', 'yes', 'on')
     physics_args = '--physics-engine gz-physics-bullet-featherstone-plugin'
     gz_args = f'{physics_args} -r {world_path}' if gui else f'-s {physics_args} -r {world_path}'
@@ -196,7 +200,7 @@ def _setup(context, *args, **kwargs):
             launch_arguments={
                 'namespace': 'rexrov2',
                 'hover_mode': 'true',
-                'green_wake': LaunchConfiguration('green_wake'),
+                'green_wake': green_wake,
                 'x': x,
                 'y': y,
                 'z': z,
@@ -251,9 +255,10 @@ def _setup(context, *args, **kwargs):
                 'pose_topic': '/rexrov2/pose_gt',
                 'sonar_topic': '/rexrov2/blueview_p900/sonar_image_raw',
                 'loop_waypoints': world_name == 'world_a',
-                'fallback_speed': 1.2 if world_name == 'world_a' else 0.35,
-                'fallback_yaw_kp': 1.45 if world_name == 'world_a' else 0.8,
-                'fallback_max_yaw_rate': 1.25 if world_name == 'world_a' else 0.5,
+                'cruise_speed': cfg.get('cruise_speed', 0.35),
+                'fallback_speed': cfg.get('cruise_speed', 0.35),
+                'fallback_yaw_kp': 1.2 if world_name == 'world_a' else 0.8,
+                'fallback_max_yaw_rate': 0.9 if world_name == 'world_a' else 0.5,
             }],
             output='screen',
             condition=IfCondition(LaunchConfiguration('start_navigator')),
@@ -299,21 +304,44 @@ def _setup(context, *args, **kwargs):
             condition=IfCondition(LaunchConfiguration('start_sonar_reconstruction')),
         ),
 
-        Node(
-            package='navigator_auv',
-            executable='spawner.py',
-            name='eroas_trail_spawner',
-            parameters=[{
-                'use_sim_time': True,
-                'world_name': GZ_WORLD_NAME,
-                'pose_topic': '/rexrov2/pose_gt',
-                'distance_threshold': 0.35,
-                'marker_radius': 0.7,
-                'initial_delay': 0.3,
-            }],
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('start_trail')),
-        ),
+        *([
+            Node(
+                package='navigator_auv',
+                executable='trail_marker.py',
+                name='rexrov2_green_trail',
+                parameters=[{
+                    'use_sim_time': True,
+                    'pose_topic': '/rexrov2/pose_gt',
+                    'marker_topic': '/rexrov2/trail_marker',
+                    'frame_id': 'world',
+                    'max_points': 45,
+                    'max_length': 10.0,
+                    'min_distance': 0.18,
+                    'line_width': 0.18,
+                    'publish_rate': 12.0,
+                }],
+                output='screen',
+                condition=IfCondition(LaunchConfiguration('start_trail')),
+            ),
+        ] if world_name == 'world_a' else []),
+
+        *([
+            Node(
+                package='navigator_auv',
+                executable='spawner.py',
+                name='eroas_trail_spawner',
+                parameters=[{
+                    'use_sim_time': True,
+                    'world_name': GZ_WORLD_NAME,
+                    'pose_topic': '/rexrov2/pose_gt',
+                    'distance_threshold': 0.35,
+                    'marker_radius': 0.25,
+                    'initial_delay': 0.3,
+                }],
+                output='screen',
+                condition=IfCondition(LaunchConfiguration('start_gazebo_trail')),
+            ),
+        ] if world_name == 'world_a' else []),
 
         Node(
             package='navigator_auv',
@@ -346,13 +374,14 @@ def generate_launch_description():
         DeclareLaunchArgument('yaw', default_value='auto'),
         DeclareLaunchArgument('waypoints', default_value='auto',
                               description='Semicolon-separated x,y,z waypoint list'),
-        DeclareLaunchArgument('start_navigator', default_value='false'),
-        DeclareLaunchArgument('start_hover_hold', default_value='true'),
-        DeclareLaunchArgument('start_cbf', default_value='false'),
+        DeclareLaunchArgument('start_navigator', default_value='true'),
+        DeclareLaunchArgument('start_hover_hold', default_value='false'),
+        DeclareLaunchArgument('start_cbf', default_value='true'),
         DeclareLaunchArgument('start_pid_controller', default_value='false'),
         DeclareLaunchArgument('start_sonar_reconstruction', default_value='false'),
-        DeclareLaunchArgument('start_trail', default_value='false'),
-        DeclareLaunchArgument('green_wake', default_value='false'),
+        DeclareLaunchArgument('start_trail', default_value='true'),
+        DeclareLaunchArgument('start_gazebo_trail', default_value='false'),
+        DeclareLaunchArgument('green_wake', default_value='auto'),
         DeclareLaunchArgument('auto_follow', default_value='true'),
         DeclareLaunchArgument('show_sonar_probe', default_value='false'),
         OpaqueFunction(function=_setup),

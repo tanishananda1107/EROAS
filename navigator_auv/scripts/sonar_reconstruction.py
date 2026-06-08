@@ -122,7 +122,7 @@ class SonarReconstructionNode(Node):
         global_pts = self._local_to_global(local_pts, R, self.translation_vector)
 
         header            = msg.header
-        header.frame_id   = 'rexrov2/base_link'
+        header.frame_id   = 'world'
         pc_msg            = create_cloud_xyz32(header, global_pts)
         self.pc_pub.publish(pc_msg)
 
@@ -135,22 +135,11 @@ class SonarReconstructionNode(Node):
 
         data   = np.array(data).reshape((range_bin, no_of_beams))
         points = []
-        hit    = False
 
-        for j in range(1, range_bin - 100, 5):
-            if hit:
-                break
-            # Left half
-            for i in range(10, 256, 10):
+        for i in range(10, 500, 5):
+            for j in range(10, range_bin - 100, 5):
                 if np.mean(data[j:j + range_window, i]) > threshold:
                     points.append((i, j))
-                    hit = True
-                    break
-            # Right half
-            for i in range(256, 500, 10):
-                if np.mean(data[j:j + range_window, i]) > threshold:
-                    points.append((i, j))
-                    hit = True
                     break
 
         return points

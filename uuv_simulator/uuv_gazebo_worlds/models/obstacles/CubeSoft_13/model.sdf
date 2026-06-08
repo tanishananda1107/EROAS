@@ -4,6 +4,14 @@
         <static>true</static>
         <link name="link">
             <pose>0 0 0 1.57 3.14159 0</pose>
+            <collision name="collision">
+                <pose>-8.985 0.0 24.0 0 0 0</pose>
+                <geometry>
+                    <box>
+                        <size>17.97 12.0 48.0</size>
+                    </box>
+                </geometry>
+            </collision>
             <visual name="visual">
                 <geometry>
                     <mesh>

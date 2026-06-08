@@ -57,7 +57,7 @@
           </save> -->
         </camera>
 
-        <plugin filename="libnps_multibeam_sonar_ros_plugin.so" name="${name}_sensor_controller">
+        <plugin filename="libnps_multibeam_sonar_ros_plugin.so" name="nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar">
           <!-- Sonar properties -->
           <verticalFOV>90</verticalFOV>
           <sonarFreq>900e3</sonarFreq>
@@ -136,7 +136,7 @@
           </noise>
         </ray>
 
-        <plugin filename="libnps_multibeam_sonar_ray_ros_plugin.so" name="${name}_sensor_controller">
+        <plugin filename="libnps_multibeam_sonar_ray_ros_plugin.so" name="nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay">
           <!-- Sonar properties -->
           <verticalFOV>90</verticalFOV>
           <sonarFreq>900e3</sonarFreq>

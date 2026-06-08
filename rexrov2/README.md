@@ -65,6 +65,52 @@ roslaunch rexrov2_gazebo start_demo_pid_controller.launch teleop_on:=true joy_id
 The teleoperation nodes are pre-configured per default for the XBox 360
 controller.
 
+## EROAS World A ROS 2 demo
+
+World A spawns RexROV2 at the center height of the blue box obstacles
+(`z=-56`) and keeps the vehicle there with the World A velocity/CBF depth
+holder. It also starts a rear-following camera and a short green trail marker.
+
+Build only the World A packages:
+
+```bash
+cd ~/TANISHA/eroas_ws
+source /opt/ros/jazzy/setup.bash
+colcon build --base-paths src/EROAS1_ros2 \
+  --packages-select navigator_auv rexrov2_description rexrov2_gazebo \
+  --build-base build_eroas1_worlda \
+  --install-base install_eroas1_worlda \
+  --symlink-install
+```
+
+Launch World A:
+
+```bash
+cd ~/TANISHA/eroas_ws
+source /opt/ros/jazzy/setup.bash
+source install_eroas1_worlda/setup.bash
+ros2 launch rexrov2_gazebo start_EROAS_demo.launch.py world_name:=world_a
+```
+
+Launch World A with keyboard teleop:
+
+```bash
+cd ~/TANISHA/eroas_ws
+source /opt/ros/jazzy/setup.bash
+source install_eroas1_worlda/setup.bash
+ros2 launch rexrov2_gazebo start_teleop_cbf.launch.py world_name:=world_a
+```
+
+World A topics:
+
+```text
+Odometry/pose: /rexrov2/pose_gt
+Odometry alias: /rexrov2/odom
+Control input before depth hold/CBF: /rexrov2/cmd_vel_1
+Gazebo velocity command: /rexrov2/cmd_vel
+Green trail marker: /rexrov2/trail_marker
+```
+
 ## License
 
 RexROV 2 package is open-sourced under the Apache-2.0 license. See the

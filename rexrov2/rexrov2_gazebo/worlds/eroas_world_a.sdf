@@ -390,7 +390,7 @@
         <scene>scene</scene>
         <ambient_light>0.35 0.45 0.55</ambient_light>
         <background_color>0.015 0.05 0.10</background_color>
-        <camera_pose>30 42 -51.0 0 0.42 1.5708</camera_pose>
+        <camera_pose>24 43 -51.5 0 0.38 1.5708</camera_pose>
       </plugin>
 
       <plugin filename="GzSceneManager" name="Scene Manager">
@@ -422,8 +422,8 @@
           <property key="showTitleBar" type="bool">false</property>
         </gz-gui>
         <follow_target>rexrov2</follow_target>
-        <follow_offset>-8 0 4.5</follow_offset>
-        <follow_pgain>1.25</follow_pgain>
+        <follow_offset>0 -10 4.5</follow_offset>
+        <follow_pgain>1.8</follow_pgain>
       </plugin>
 
       <plugin filename="WorldControl" name="World control">

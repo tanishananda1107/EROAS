@@ -24,6 +24,8 @@ install(PROGRAMS
   scripts/hover_hold.py
   scripts/pose_gt_to_odom.py
   scripts/spawner.py
+  scripts/trail_marker.py
+  scripts/hover_patrol.py
   scripts/velocity_cbf.py
   DESTINATION lib/${PROJECT_NAME}
 )
