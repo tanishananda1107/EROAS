@@ -26,6 +26,11 @@
             name="gz::sim::systems::Sensors">
       <render_engine>ogre2</render_engine>
     </plugin>
+    <!-- Apply velocity commands to any model that publishes on /model_name/cmd_vel -->
+    <plugin filename="gz-sim-velocity-control-system"
+            name="gz::sim::systems::VelocityControl">
+      <topic>/rexrov2/cmd_vel</topic>
+    </plugin>
 
     <physics name="default_physics" default="true" type="ode">
       <max_step_size>0.002</max_step_size>
@@ -379,7 +384,7 @@
 
     <plugin name="gazebo::SphericalCoordinatesROSInterfacePlugin" filename="libuuv_sc_ros_interface_plugin.so"/>
 
-    <gui fullscreen="0">
+    <gui fullscreen="1">
       <plugin filename="MinimalScene" name="3D View">
         <gz-gui>
           <title>World A - RexROV Blue Block Course</title>
@@ -390,7 +395,7 @@
         <scene>scene</scene>
         <ambient_light>0.35 0.45 0.55</ambient_light>
         <background_color>0.015 0.05 0.10</background_color>
-        <camera_pose>24 43 -51.5 0 0.38 1.5708</camera_pose>
+        <camera_pose>24 34 -47.5 0 0.45 1.5708</camera_pose>
       </plugin>
 
       <plugin filename="GzSceneManager" name="Scene Manager">
@@ -422,7 +427,7 @@
           <property key="showTitleBar" type="bool">false</property>
         </gz-gui>
         <follow_target>rexrov2</follow_target>
-        <follow_offset>0 -10 4.5</follow_offset>
+        <follow_offset>0 -18 8.0</follow_offset>
         <follow_pgain>1.8</follow_pgain>
       </plugin>
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from nav_msgs.msg import Odometry
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
 
@@ -20,7 +21,7 @@ def main():
     node = PoseGtToOdom()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

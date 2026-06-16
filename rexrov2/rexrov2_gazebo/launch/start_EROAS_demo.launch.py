@@ -5,7 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -49,17 +49,40 @@ WORLD_A = {
     # Main blue blocks are centered at z=-56; the higher block pair is z=-54.
     'spawn': ('24', '55', '-56', '1.5708'),
     'waypoints': (
-        '24,55,-56;27,65,-54;55,88,-54;43,68,-54;24,55,-56'
+        '24,55,-56;28,59,-56;34,62,-56;44,65,-56;'
+        '55,66,-56;62,75,-56;61,88,-56;55,92,-56'
     ),
     'target_depth': '-56.0',
-    'cruise_speed': 0.85,
+    'cruise_speed': 0.60,
+    'loop_waypoints': False,
     'green_wake': 'true',
+    'recovery_trigger_seconds': 3.0,
+    'safety_radius_xy': 1.05,
+    'safety_radius_xz': 1.00,
+    'safety_radius_sonar_pivot': 1.05,
 }
 
 WORLD_CONFIGS = {
     'blue_blocks': BLUE_BLOCK_WORLD,
     'world_a': WORLD_A,
+    'world_b': {
+        'package': 'rexrov2_gazebo',
+        'file': 'eroas_world_b.sdf',
+        # Spawn at origin facing +X, obstacle directly ahead at x=12
+        'spawn': ('0', '0', '-20', '0.0'),
+        'waypoints': '0,0,-20;30,0,-20',
+        'target_depth': '-20.0',
+        'cruise_speed': 0.45,
+        'loop_waypoints': False,
+        'green_wake': 'false',
+        'recovery_trigger_seconds': 3.0,
+        'safety_radius_xy': 1.05,
+        'safety_radius_xz': 1.00,
+        'safety_radius_sonar_pivot': 1.05,
+    },
 }
+
+TRUTHY_LAUNCH_VALUES = "('1', 'true', 'yes', 'on')"
 
 
 def _join_paths(paths):
@@ -73,15 +96,24 @@ def _without_snap_paths(value):
     )
 
 
+def _enabled_and_not_hover(enabled_name):
+    return PythonExpression([
+        "'", LaunchConfiguration(enabled_name),
+        "'.lower() in ", TRUTHY_LAUNCH_VALUES,
+        " and '", LaunchConfiguration('start_hover_hold'),
+        "'.lower() not in ", TRUTHY_LAUNCH_VALUES,
+    ])
+
+
 def _camera_follow_actions():
     track_msg = (
-        'track_mode: FOLLOW_LOOK_AT '
+        'track_mode: FOLLOW '
         'follow_target: {name: "rexrov2" type: MODEL} '
         'track_target: {name: "rexrov2" type: MODEL} '
-        'follow_offset: {x: 0 y: -10 z: 4.5} '
-        'track_offset: {x: 0 y: 0 z: 0.5} '
-        'follow_pgain: 1.8 '
-        'track_pgain: 1.8'
+        'follow_offset: {x: -16 y: 0 z: 8.5} '
+        'track_offset: {x: 0 y: 0 z: 1.2} '
+        'follow_pgain: 1.25 '
+        'track_pgain: 1.25'
     )
     track_cmd = [
         'gz', 'topic',
@@ -103,23 +135,20 @@ def _camera_follow_actions():
         '--reqtype', 'gz.msgs.Vector3d',
         '--reptype', 'gz.msgs.Boolean',
         '--timeout', '2000',
-        '--req', 'x: 0 y: -10 z: 4.5',
+        '--req', 'x: -16 y: 0 z: 8.5',
     ]
 
-    actions = []
-    for period in (4.0, 7.0, 10.0, 14.0, 20.0, 28.0):
-        actions.append(
-            TimerAction(
-                period=period,
-                actions=[
-                    ExecuteProcess(cmd=track_cmd, output='screen'),
-                    ExecuteProcess(cmd=follow_cmd, output='screen'),
-                    ExecuteProcess(cmd=offset_cmd, output='screen'),
-                ],
-                condition=IfCondition(LaunchConfiguration('auto_follow')),
-            )
+    return [
+        TimerAction(
+            period=4.0,
+            actions=[
+                ExecuteProcess(cmd=track_cmd, output='screen'),
+                ExecuteProcess(cmd=follow_cmd, output='screen'),
+                ExecuteProcess(cmd=offset_cmd, output='screen'),
+            ],
+            condition=IfCondition(LaunchConfiguration('auto_follow')),
         )
-    return actions
+    ]
 
 
 def _setup(context, *args, **kwargs):
@@ -152,8 +181,21 @@ def _setup(context, *args, **kwargs):
     yaw = auto_value('yaw', spawn_yaw)
     green_wake = auto_value('green_wake', cfg.get('green_wake', 'false'))
     gui = LaunchConfiguration('gui').perform(context).lower() in ('1', 'true', 'yes', 'on')
+    start_pid_thrusters = (
+        LaunchConfiguration('start_pid_thrusters').perform(context).lower()
+        in ('1', 'true', 'yes', 'on')
+    )
+    # In Gazebo Harmonic with hover_mode=true, the gz-sim VelocityControl
+    # plugin must always be active — it is the only actuator that works.
+    # The classic UUV thruster plugins (libuuv_thruster_ros_plugin.so) do not
+    # load in gz-sim, so the external ROS2 PID→thruster chain has no effect.
+    use_velocity_control_plugin = 'true'
     physics_args = '--physics-engine gz-physics-bullet-featherstone-plugin'
     gz_args = f'{physics_args} -r {world_path}' if gui else f'-s {physics_args} -r {world_path}'
+    sonar_points_gz_topic = (
+        f'/world/{GZ_WORLD_NAME}/model/rexrov2/link/rexrov2/sonar_link/'
+        'sensor/blueview_p900_sensor/scan/points'
+    )
 
     resource_paths = [
         pkg_gazebo,
@@ -201,6 +243,7 @@ def _setup(context, *args, **kwargs):
                 'namespace': 'rexrov2',
                 'hover_mode': 'true',
                 'green_wake': green_wake,
+                'use_velocity_control_plugin': use_velocity_control_plugin,
                 'x': x,
                 'y': y,
                 'z': z,
@@ -229,13 +272,23 @@ def _setup(context, *args, **kwargs):
             arguments=[
                 '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
                 '/rexrov2/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
-                '/rexrov2/pose_gt@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+                '/model/rexrov2/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
                 '/rexrov2/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
-                '/rexrov2/blueview_p900_point_cloud@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
+                f'{sonar_points_gz_topic}@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
                 '/world/oceans_waves/create@ros_gz_interfaces/srv/SpawnEntity',
+            ],
+            remappings=[
+                ('/model/rexrov2/odometry', '/rexrov2/pose_gt'),
+                (sonar_points_gz_topic, '/rexrov2/blueview_p900_point_cloud'),
             ],
             parameters=[{'use_sim_time': True}],
             output='screen',
+        ),
+
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(pkg_control, 'launch', 'start_velocity_control.launch.py')),
+            launch_arguments={'uuv_name': 'rexrov2'}.items(),
+            condition=IfCondition(LaunchConfiguration('start_pid_thrusters')),
         ),
 
         IncludeLaunchDescription(
@@ -246,24 +299,30 @@ def _setup(context, *args, **kwargs):
 
         Node(
             package='navigator_auv',
-            executable='only_gap.py',
+            executable='eroas_planner.py',
             name='sonar_heading_node',
             parameters=[{
                 'use_sim_time': True,
                 'waypoints': waypoints,
-                'cmd_vel_topic': '/rexrov2/cmd_vel_1',
-                'pose_topic': '/rexrov2/pose_gt',
-                'sonar_topic': '/rexrov2/blueview_p900/sonar_image_raw',
-                'loop_waypoints': world_name == 'world_a',
-                'cruise_speed': cfg.get('cruise_speed', 0.35),
-                'fallback_speed': cfg.get('cruise_speed', 0.35),
-                'fallback_yaw_kp': 1.2 if world_name == 'world_a' else 0.8,
-                'fallback_max_yaw_rate': 0.9 if world_name == 'world_a' else 0.5,
+                'cruise_speed': cfg.get('cruise_speed', 0.45),
+                'max_yaw_rate': 0.30,
+                'yaw_kp': 0.12,
+                'speed_gain': 0.35,
+                'sonar_fov_deg': 90.0,
+                'num_beams': 512,
+                'gap_min_beams': 100,
+                'intensity_threshold': 15,
+                'goal_tolerance': 5.0,
+                'max_vertical_speed': 0.30,
+                'pivot_climb_angle_deg': 20.0,
+                'sonar_max_range': 15.0,
             }],
             output='screen',
-            condition=IfCondition(LaunchConfiguration('start_navigator')),
+            condition=IfCondition(_enabled_and_not_hover('start_navigator')),
         ),
 
+        # Hover hold owns /rexrov2/cmd_vel directly, so it must be mutually
+        # exclusive with the navigator/CBF stack.
         Node(
             package='navigator_auv',
             executable='hover_hold.py',
@@ -287,12 +346,16 @@ def _setup(context, *args, **kwargs):
             name='obstacle_avoidance_node',
             parameters=[{
                 'use_sim_time': True,
+                'R_o': 4.0,
+                'kappa': 0.09,
+                'radius': 15.0,
                 'target_depth': float(cfg['target_depth']),
-                'depth_hold_kp': 0.18,
-                'max_vertical_speed': 0.45,
+                'depth_kp': 0.5,
+                'max_vertical_speed': 0.85,
+                'control_rate': 10.0,
             }],
             output='screen',
-            condition=IfCondition(LaunchConfiguration('start_cbf')),
+            condition=IfCondition(_enabled_and_not_hover('start_cbf')),
         ),
 
         Node(
@@ -377,6 +440,7 @@ def generate_launch_description():
         DeclareLaunchArgument('start_navigator', default_value='true'),
         DeclareLaunchArgument('start_hover_hold', default_value='false'),
         DeclareLaunchArgument('start_cbf', default_value='true'),
+        DeclareLaunchArgument('start_pid_thrusters', default_value='true'),
         DeclareLaunchArgument('start_pid_controller', default_value='false'),
         DeclareLaunchArgument('start_sonar_reconstruction', default_value='false'),
         DeclareLaunchArgument('start_trail', default_value='true'),

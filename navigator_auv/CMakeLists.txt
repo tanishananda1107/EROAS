@@ -20,6 +20,8 @@ install(PROGRAMS
   scripts/just_cbf.py
   scripts/obstacle_draw.py
   scripts/only_gap.py
+  scripts/eroas_planner.py
+  scripts/eroas_nav.py
   scripts/pose_plotter.py
   scripts/hover_hold.py
   scripts/pose_gt_to_odom.py

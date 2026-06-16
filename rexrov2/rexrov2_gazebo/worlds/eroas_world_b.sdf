@@ -1,0 +1,155 @@
+<?xml version="1.0" ?>
+<!-- World B: Single obstacle directly ahead of spawn for trajectory testing -->
+<sdf version="1.10">
+  <world name="oceans_waves">
+    <plugin filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <!-- VelocityControl for rexrov2 model -->
+    <plugin filename="gz-sim-velocity-control-system"
+            name="gz::sim::systems::VelocityControl">
+      <topic>/rexrov2/cmd_vel</topic>
+    </plugin>
+
+    <physics name="default_physics" default="true" type="ode">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>500</real_time_update_rate>
+    </physics>
+
+    <scene>
+      <ambient>0.2 0.3 0.4 1.0</ambient>
+      <background>0.01 0.04 0.08 1.0</background>
+      <shadows>1</shadows>
+    </scene>
+
+    <spherical_coordinates>
+      <latitude_deg>56.71897669633431</latitude_deg>
+      <longitude_deg>3.515625</longitude_deg>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
+    <!-- Lighting -->
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 100 0 0 0</pose>
+      <diffuse>0.6 0.6 0.6 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>0.3 0.3 -0.9</direction>
+    </light>
+
+    <!-- Seabed -->
+    <model name="seabed">
+      <static>true</static>
+      <pose>0 0 -70 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>200 200 1</size></box>
+          </geometry>
+          <material>
+            <ambient>0.3 0.25 0.15 1</ambient>
+          </material>
+        </visual>
+        <collision name="collision">
+          <geometry>
+            <box><size>200 200 1</size></box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <!-- OBSTACLE 1: Single large block directly ahead of spawn point -->
+    <!-- Spawn is at (0, 0, -20) facing +X, obstacle at (12, 0, -20) -->
+    <model name="obstacle_1">
+      <static>true</static>
+      <pose>12 0 -20 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>3 6 10</size></box>
+          </geometry>
+          <material>
+            <ambient>0.2 0.4 0.8 1</ambient>
+            <diffuse>0.3 0.5 0.9 1</diffuse>
+          </material>
+        </visual>
+        <collision name="collision">
+          <geometry>
+            <box><size>3 6 10</size></box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <!-- OBSTACLE 2: Second block offset to create a gap -->
+    <!-- Gap between obstacle_1 and obstacle_2 is ~4m wide (passable) -->
+    <model name="obstacle_2">
+      <static>true</static>
+      <pose>20 -5 -20 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>3 4 10</size></box>
+          </geometry>
+          <material>
+            <ambient>0.2 0.4 0.8 1</ambient>
+            <diffuse>0.3 0.5 0.9 1</diffuse>
+          </material>
+        </visual>
+        <collision name="collision">
+          <geometry>
+            <box><size>3 4 10</size></box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <!-- Goal marker (visual only) -->
+    <model name="goal_marker">
+      <static>true</static>
+      <pose>30 0 -20 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>1.0</radius></sphere>
+          </geometry>
+          <material>
+            <ambient>0 1 0 1</ambient>
+            <diffuse>0 1 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- GUI -->
+    <gui fullscreen="0">
+      <plugin filename="GzScene3D" name="3D View">
+        <gz-gui>
+          <title>3D View</title>
+          <property type="bool" key="showTitleBar">false</property>
+        </gz-gui>
+        <engine>ogre2</engine>
+        <scene>scene</scene>
+        <camera_pose>-5 -15 -10 0 0.3 1.2</camera_pose>
+      </plugin>
+      <plugin filename="WorldControl" name="World control">
+        <gz-gui>
+          <title>World control</title>
+          <property type="bool" key="showTitleBar">false</property>
+        </gz-gui>
+        <play_pause>true</play_pause>
+        <step>true</step>
+        <start_paused>false</start_paused>
+      </plugin>
+    </gui>
+
+  </world>
+</sdf>

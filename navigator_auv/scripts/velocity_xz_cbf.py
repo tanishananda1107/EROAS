@@ -73,7 +73,7 @@ class ObstacleAvoidanceXZ(Node):
     def _h_dot(self, vx, vz):
         g = np.array([2*(self.vehicle_pose.x - self.closest_point[0]),
                       2*(self.vehicle_pose.z - self.closest_point[2])])
-        return -g @ np.array([vx, vz])   # note: sign is (vehicle - obstacle)
+        return g @ np.array([vx, vz])
 
     def _opt(self, v):
         vx, vz = cp.Variable(), cp.Variable()
