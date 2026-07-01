@@ -37,29 +37,21 @@ standards (e.g. ISO 26262).
 
 ## Requirements
 
-To simulate the RexROV 2 vehicle, please refer to the [UUV Simulator](https://github.com/uuvsimulator/uuv_simulator)
-repository and follow the installation instructions of the package. Then you can clone
-this package in the `src` folder of you catkin workspace
-
-```
-cd ~/catkin_ws/src
-git clone https://github.com/uuvsimulator/rexrov2.git
-```
-
-and then build your catkin workspace
+This workspace is ROS 2 (Jazzy) with Gazebo Harmonic. Clone it into a colcon workspace and build with:
 
 ```bash
-cd ~/catkin_ws
-catkin_make # or <catkin build>, if you are using catkin_tools
+cd ~/eroas_ws/src/EROAS1_ros22
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install
+source install/setup.bash
 ```
 
 ## Example of usage
 
-To run a demonstration with the vehicle with teleoperation, you can run a UUV
-simulator Gazebo scenario, such as
+To run a demonstration with teleoperation:
 
 ```bash
-roslaunch rexrov2_gazebo start_demo_pid_controller.launch teleop_on:=true joy_id:=0
+ros2 launch rexrov2_gazebo start_demo_pid_controller.launch.py teleop_on:=true joy_id:=0
 ```
 
 The teleoperation nodes are pre-configured per default for the XBox 360

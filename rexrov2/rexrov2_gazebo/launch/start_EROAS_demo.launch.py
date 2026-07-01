@@ -9,8 +9,6 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
-GZ_WORLD_NAME = 'oceans_waves'
-
 SNAP_ENV_VARS = [
     'SNAP',
     'SNAP_NAME',
@@ -38,28 +36,120 @@ SNAP_ENV_VARS = [
 BLUE_BLOCK_WORLD = {
     'package': 'uuv_gazebo_worlds',
     'file': 'obstacle_avoidance.world',
-    'spawn': ('29', '33', '-60', '2.82'),
-    'waypoints': '29,45,-60;42,66,-58;55,87,-54;65,32,-60',
-    'target_depth': '-60.0',
+    'gz_world_name': 'eroas_world_a',
+    'spawn': ('29', '33', '-54', '2.82'),
+    'waypoints': '29,97,-50;31,110,-55;30,90,-90;30,120,-40',
+    'target_depth': '-54.0',
 }
 
 WORLD_A = {
-    'package': 'rexrov2_gazebo',
-    'file': 'eroas_world_a.sdf',
-    # Main blue blocks are centered at z=-56; the higher block pair is z=-54.
-    'spawn': ('24', '55', '-56', '1.5708'),
-    'waypoints': (
-        '24,55,-56;28,59,-56;34,62,-56;44,65,-56;'
-        '55,66,-56;62,75,-56;61,88,-56;55,92,-56'
-    ),
-    'target_depth': '-56.0',
-    'cruise_speed': 0.60,
+    'package': 'uuv_gazebo_worlds',
+    'file': 'obstacle_avoidance.world',
+    'gz_world_name': 'eroas_world_a',
+    # Paper Figure 8 / original EROAS World A: use the existing DAVE/UUV
+    # obstacle_avoidance.world course and goal-behind-obstacle route.  The
+    # planner holds the spawn depth until SPD2C explicitly enters vertical
+    # avoidance, then resumes the original waypoint progression.
+    'spawn': ('29', '33', '-54', '2.82'),
+    # Keep the original route; add 0.5 m only to the first vertical target so
+    # Harmonic's noisy top-face returns retain the paper's 2 m clearance.
+    'waypoints': '29,97,-49.5;31,110,-55;30,90,-90;30,120,-40',
+    'target_depth': '-54.0',
+    'cruise_speed': 0.5,
+    'fallback_speed': 0.35,
+    'waypoint_tolerance': 5.0,
+    'final_waypoint_tolerance': 5.0,
+    # XY progression while CBF/planner handle depth (Figure 8 dive segment).
+    'planar_waypoint_tolerance': True,
     'loop_waypoints': False,
-    'green_wake': 'true',
+    'green_wake': 'false',
+    'paper_controller': True,
+    'paper_k_t': 0.12,
+    'paper_k_v': 0.35,
+    'paper_psi_max': 1.5707963267948966,
+    'paper_vx_max': 1.0,
+    'paper_max_yaw_rate': 0.26,
+    'min_forward_speed': 0.18,
+    'max_vertical_speed': 0.5,
+    'collision_distance': 2.2,
+    'hard_stop_distance': 0.9,
+    'scan_yaw_rate': 0.35,
+    'use_point_cloud_obstacles': True,
+    # The paper's ST-CBF is driven by the closest obstacle retained by SCG,
+    # not by a preloaded map of analytical boxes.  Those boxes caused the
+    # Harmonic port to wall-slide around cube_7 while SPD2C saw a clear gap.
+    'use_analytical_obstacles': False,
+    # Use the synthesized BlueView sonar profile for SPD2C, matching the
+    # original implementation.  PointCloud2 remains enabled for ST-CBF in the
+    # safety-filter node, but the navigation decision itself must come from
+    # the FLS profile rather than a point-cloud shortcut.
+    'use_point_cloud_sonar': False,
+    'prefer_point_cloud_sonar': False,
+    'min_detection_range': 0.45,
+    'raw_sonar_self_echo_range': 0.90,
+    'point_cloud_min_range': 0.45,
+    'point_cloud_body_clearance_x': 0.60,
+    'point_cloud_body_clearance_y': 1.20,
+    'point_cloud_body_clearance_z': 1.00,
+    'point_cloud_max_abs_z': 2.50,
+    'xz_context_lateral_window': 2.0,
+    'hover_lock_enabled': False,
+    'depth_deadband': 0.15,
+    'depth_hold_kp': 0.35,
     'recovery_trigger_seconds': 3.0,
-    'safety_radius_xy': 1.05,
-    'safety_radius_xz': 1.00,
-    'safety_radius_sonar_pivot': 1.05,
+    'safety_radius_xy': 2.0,
+    'safety_radius_xz': 2.0,
+    'safety_radius_sonar_pivot': 2.0,
+    'max_active_constraints': 1,
+    # Algorithm 1 uses a complete elevation sweep and then accepts a vertical
+    # corridor only from a length-30 run.  Harmonic validation showed the
+    # paper-style World A gap sits above +0.7 rad, so keep the full 81-sample
+    # sweep but include the upward branch of the FLS pivot.
+    'pivot_min_angle': -0.8,
+    'pivot_max_angle': 1.57,
+    'pivot_sample_count': 81,
+    'pivot_sample_timeout': 5.0,
+    'pivot_sample_retries': 4,
+    'vertical_gap_run_length': 30,
+    # The 30-angle corridor is point-clear. Move to another valid midpoint
+    # 0.12 rad farther inside it so the full REXROV hull retains d_min=2 m.
+    'vertical_gap_safety_margin_rad': 0.12,
+    # Gazebo Harmonic's raw sonar image carries isolated weak speckle up to
+    # 117 intensity at the opening boundary; obstacle returns in this World A
+    # run are 165-255.  Keep the original sparse vertical test and calibrate
+    # only its sensor threshold so the physical opening yields the required
+    # 30 consecutive clear elevations deterministically.
+    'vertical_detection_threshold': 120.0,
+    # Hold position while Gazebo sensors and the FLS stream initialize.
+    'startup_hover_duration': 6.0,
+    'startup_sensor_wait_timeout': 15.0,
+    # ST-CBF should minimally project the SPD2C reference.  The additional
+    # fixed-speed wall-slide is reserved for an actual near-collision.
+    'barrier_slide_trigger_h': -1.0,
+    'barrier_slide_speed': 0.20,
+    'barrier_slide_enabled': False,
+    'vertical_escape_duration': 180.0,
+    # Finish the climb tightly around the first waypoint's safe depth.
+    'vertical_depth_tolerance': 0.2,
+    # The climb ends on the first waypoint's safe depth; the post-vertical
+    # route state then carries the vehicle beyond the obstacle footprint.
+    'vertical_escape_min_duration': 4.0,
+    'vertical_escape_min_planar_distance': 0.0,
+    # Resume only long enough to clear cube_7. A 180 s override suppressed the
+    # paper waterfall at the next horizontal body and drove into its collision
+    # geometry instead of allowing a new gap/convergence/pivot decision.
+    'post_vertical_resume_duration': 30.0,
+    # Figure 6 retains sonar obstacles spatially until they leave the local
+    # radius. The complete Harmonic pivot takes over two minutes, so a 7 s
+    # timeout erased cube_7 before the vertical CBF maneuver began.
+    'spatial_memory_timeout': 300.0,
+    'spatial_memory_radius': 15.0,
+    # Gazebo Classic used a low-level PID to keep the hovering AUV level.
+    # Harmonic's velocity system needs the equivalent roll/pitch rate loop.
+    'attitude_hold_enabled': True,
+    'attitude_hold_kp': 1.2,
+    'attitude_hold_max_rate': 0.45,
+    'attitude_recovery_tilt': 0.45,
 }
 
 WORLD_CONFIGS = {
@@ -68,6 +158,7 @@ WORLD_CONFIGS = {
     'world_b': {
         'package': 'rexrov2_gazebo',
         'file': 'eroas_world_b.sdf',
+        'gz_world_name': 'oceans_waves',
         # Spawn at origin facing +X, obstacle directly ahead at x=12
         'spawn': ('0', '0', '-20', '0.0'),
         'waypoints': '0,0,-20;30,0,-20',
@@ -164,6 +255,7 @@ def _setup(context, *args, **kwargs):
         raise RuntimeError(f'Unknown world_name "{world_name}". Valid values: {valid}')
 
     cfg = WORLD_CONFIGS[world_name]
+    gz_world_name = cfg.get('gz_world_name', 'oceans_waves')
     world_packages = {
         'rexrov2_gazebo': pkg_gazebo,
         'uuv_gazebo_worlds': pkg_worlds,
@@ -193,7 +285,7 @@ def _setup(context, *args, **kwargs):
     physics_args = '--physics-engine gz-physics-bullet-featherstone-plugin'
     gz_args = f'{physics_args} -r {world_path}' if gui else f'-s {physics_args} -r {world_path}'
     sonar_points_gz_topic = (
-        f'/world/{GZ_WORLD_NAME}/model/rexrov2/link/rexrov2/sonar_link/'
+        f'/world/{gz_world_name}/model/rexrov2/link/rexrov2/sonar_link/'
         'sensor/blueview_p900_sensor/scan/points'
     )
 
@@ -224,6 +316,7 @@ def _setup(context, *args, **kwargs):
 
     return [
         *[SetEnvironmentVariable(name, '') for name in SNAP_ENV_VARS],
+        SetEnvironmentVariable('PYTHONDONTWRITEBYTECODE', '1'),
         SetEnvironmentVariable('LD_LIBRARY_PATH', ld_library_path),
         SetEnvironmentVariable('GZ_SIM_RESOURCE_PATH', _join_paths(resource_paths)),
         SetEnvironmentVariable('IGN_GAZEBO_RESOURCE_PATH', _join_paths(resource_paths)),
@@ -257,7 +350,7 @@ def _setup(context, *args, **kwargs):
                 'sonar_image_raw_topic': 'rexrov2/blueview_p900/sonar_image_raw',
                 'plotScaler': '1',
                 'sensorGain': '0.04',
-                'ray_visual': 'false',
+                'ray_visual': 'true',
                 'writeLog': 'true',
                 'writeFrameInterval': '5',
             }.items(),
@@ -270,14 +363,17 @@ def _setup(context, *args, **kwargs):
             executable='parameter_bridge',
             name='eroas_gz_bridge',
             arguments=[
-                '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+                f'/world/{gz_world_name}/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
                 '/rexrov2/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
+                '/rexrov2/sonar_joint_position_controller/command'
+                '@std_msgs/msg/Float64]gz.msgs.Double',
                 '/model/rexrov2/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
                 '/rexrov2/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
                 f'{sonar_points_gz_topic}@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
-                '/world/oceans_waves/create@ros_gz_interfaces/srv/SpawnEntity',
+                f'/world/{gz_world_name}/create@ros_gz_interfaces/srv/SpawnEntity',
             ],
             remappings=[
+                (f'/world/{gz_world_name}/clock', '/clock'),
                 ('/model/rexrov2/odometry', '/rexrov2/pose_gt'),
                 (sonar_points_gz_topic, '/rexrov2/blueview_p900_point_cloud'),
             ],
@@ -299,23 +395,90 @@ def _setup(context, *args, **kwargs):
 
         Node(
             package='navigator_auv',
-            executable='eroas_planner.py',
+            executable='only_gap.py',
             name='sonar_heading_node',
             parameters=[{
                 'use_sim_time': True,
                 'waypoints': waypoints,
+                'cmd_vel_topic': '/rexrov2/cmd_vel_1',
+                'pose_topic': '/rexrov2/pose_gt',
+                'sonar_topic': '/rexrov2/blueview_p900/sonar_image_raw',
+                'point_cloud_topic': '/rexrov2/blueview_p900_point_cloud',
+                'use_raw_sonar': True,
+                'use_point_cloud_sonar': bool(
+                    cfg.get('use_point_cloud_sonar', False)),
+                'prefer_point_cloud_sonar': bool(
+                    cfg.get('prefer_point_cloud_sonar', False)),
+                'loop_waypoints': bool(cfg.get('loop_waypoints', False)),
                 'cruise_speed': cfg.get('cruise_speed', 0.45),
-                'max_yaw_rate': 0.30,
-                'yaw_kp': 0.12,
-                'speed_gain': 0.35,
-                'sonar_fov_deg': 90.0,
-                'num_beams': 512,
-                'gap_min_beams': 100,
-                'intensity_threshold': 15,
-                'goal_tolerance': 5.0,
-                'max_vertical_speed': 0.30,
-                'pivot_climb_angle_deg': 20.0,
-                'sonar_max_range': 15.0,
+                'fallback_speed': cfg.get('fallback_speed', 0.35),
+                'min_detection_range': cfg.get('min_detection_range', 0.45),
+                'raw_sonar_self_echo_range': cfg.get(
+                    'raw_sonar_self_echo_range', 0.90),
+                'point_cloud_body_clearance_x': cfg.get(
+                    'point_cloud_body_clearance_x', 0.60),
+                'point_cloud_body_clearance_y': cfg.get(
+                    'point_cloud_body_clearance_y', 1.20),
+                'point_cloud_body_clearance_z': cfg.get(
+                    'point_cloud_body_clearance_z', 1.00),
+                'point_cloud_max_abs_z': cfg.get(
+                    'point_cloud_max_abs_z', 2.50),
+                'waypoint_tolerance': cfg.get('waypoint_tolerance', 5.0),
+                'final_waypoint_tolerance': cfg.get('final_waypoint_tolerance', 5.0),
+                'planar_waypoint_tolerance': bool(
+                    cfg.get('planar_waypoint_tolerance', False)),
+                'collision_distance': cfg.get('collision_distance', 2.2),
+                'hard_stop_distance': cfg.get('hard_stop_distance', 0.9),
+                'min_forward_speed': cfg.get('min_forward_speed', 0.18),
+                'max_vertical_speed': cfg.get('max_vertical_speed', 0.30),
+                'scan_lateral_speed': cfg.get('scan_lateral_speed', 0.12),
+                'scan_yaw_rate': cfg.get('scan_yaw_rate', 0.35),
+                'yaw_kp': cfg.get('yaw_kp', 0.85),
+                'max_yaw_rate': cfg.get(
+                    'paper_max_yaw_rate',
+                    cfg.get('max_yaw_rate', 0.65)),
+                'max_yaw_delta': cfg.get('max_yaw_delta', 0.08),
+                'max_speed_delta': cfg.get('max_speed_delta', 0.12),
+                'recovery_lateral_speed': cfg.get('recovery_lateral_speed', 0.22),
+                'recovery_yaw_bias': cfg.get('recovery_yaw_bias', 0.18),
+                'recovery_speed_threshold': 0.06,
+                'recovery_timeout': 3.0,
+                'progress_recovery_distance': 0.25,
+                'progress_recovery_timeout': 3.0,
+                'progress_recovery_release_distance': 0.55,
+                'fallback_yaw_kp': cfg.get('fallback_yaw_kp', 0.8),
+                'fallback_max_yaw_rate': cfg.get('fallback_max_yaw_rate', 0.5),
+                'fallback_lateral_gain': cfg.get('fallback_lateral_gain', 0.65),
+                'fallback_min_forward_fraction': cfg.get(
+                    'fallback_min_forward_fraction', 0.20),
+                'paper_controller': bool(cfg.get('paper_controller', False)),
+                'paper_k_t': cfg.get('paper_k_t', 0.12),
+                'paper_k_v': cfg.get('paper_k_v', 0.35),
+                'paper_psi_max': cfg.get('paper_psi_max', 1.5707963267948966),
+                'paper_vx_max': cfg.get('paper_vx_max', 1.0),
+                'paper_max_yaw_rate': cfg.get('paper_max_yaw_rate', 0.26),
+                'pivot_min_angle': cfg.get('pivot_min_angle', -0.8),
+                'pivot_max_angle': cfg.get('pivot_max_angle', 0.8),
+                'pivot_sample_count': cfg.get('pivot_sample_count', 81),
+                'pivot_sample_timeout': cfg.get('pivot_sample_timeout', 2.0),
+                'pivot_sample_retries': cfg.get('pivot_sample_retries', 3),
+                'vertical_gap_run_length': cfg.get('vertical_gap_run_length', 30),
+                'vertical_gap_safety_margin_rad': cfg.get(
+                    'vertical_gap_safety_margin_rad', 0.0),
+                'vertical_escape_duration': cfg.get('vertical_escape_duration', 4.0),
+                'vertical_depth_tolerance': cfg.get('vertical_depth_tolerance', 0.5),
+                'vertical_escape_min_duration': cfg.get(
+                    'vertical_escape_min_duration', 0.0),
+                'vertical_escape_min_planar_distance': cfg.get(
+                    'vertical_escape_min_planar_distance', 0.0),
+                'post_vertical_resume_duration': cfg.get(
+                    'post_vertical_resume_duration', 35.0),
+                'vertical_detection_threshold': cfg.get(
+                    'vertical_detection_threshold', 15.0),
+                'startup_hover_duration': cfg.get(
+                    'startup_hover_duration', 0.0),
+                'startup_sensor_wait_timeout': cfg.get(
+                    'startup_sensor_wait_timeout', 0.0),
             }],
             output='screen',
             condition=IfCondition(_enabled_and_not_hover('start_navigator')),
@@ -346,12 +509,54 @@ def _setup(context, *args, **kwargs):
             name='obstacle_avoidance_node',
             parameters=[{
                 'use_sim_time': True,
+                'use_point_cloud_obstacles': bool(
+                    cfg.get('use_point_cloud_obstacles', False)),
+                'use_analytical_obstacles': bool(
+                    cfg.get('use_analytical_obstacles', True)),
                 'R_o': 4.0,
                 'kappa': 0.09,
                 'radius': 15.0,
                 'target_depth': float(cfg['target_depth']),
-                'depth_kp': 0.5,
-                'max_vertical_speed': 0.85,
+                'safety_radius_xy': cfg.get('safety_radius_xy', 1.35),
+                'safety_radius_xz': cfg.get('safety_radius_xz', 1.25),
+                'safety_radius_sonar_pivot': cfg.get(
+                    'safety_radius_sonar_pivot', 1.55),
+                'max_active_constraints': cfg.get('max_active_constraints', 1),
+                'scg_collision_distance': cfg.get('collision_distance', 2.2),
+                'spd2c_max_yaw_rate': cfg.get('paper_max_yaw_rate', 0.55),
+                'spd2c_min_forward_speed': cfg.get('min_forward_speed', 0.12),
+                'point_cloud_min_range': cfg.get('point_cloud_min_range', 2.25),
+                'point_cloud_body_clearance_x': cfg.get(
+                    'point_cloud_body_clearance_x', 0.60),
+                'point_cloud_body_clearance_y': cfg.get(
+                    'point_cloud_body_clearance_y', 1.20),
+                'point_cloud_body_clearance_z': cfg.get(
+                    'point_cloud_body_clearance_z', 1.00),
+                'point_cloud_max_abs_z': cfg.get(
+                    'point_cloud_max_abs_z', 2.50),
+                'xz_context_lateral_window': cfg.get(
+                    'xz_context_lateral_window', 2.0),
+                'spatial_memory_timeout': cfg.get(
+                    'spatial_memory_timeout', 7.0),
+                'spatial_memory_radius': cfg.get(
+                    'spatial_memory_radius', 7.0),
+                'recovery_trigger_seconds': cfg.get('recovery_trigger_seconds', 3.0),
+                'barrier_slide_trigger_h': cfg.get(
+                    'barrier_slide_trigger_h', -1.0),
+                'barrier_slide_speed': cfg.get('barrier_slide_speed', 0.20),
+                'barrier_slide_enabled': bool(
+                    cfg.get('barrier_slide_enabled', False)),
+                'hover_lock_enabled': bool(cfg.get('hover_lock_enabled', True)),
+                'depth_hold_kp': cfg.get('depth_hold_kp', 0.35),
+                'depth_deadband': cfg.get('depth_deadband', 0.25),
+                'max_vertical_speed': cfg.get('max_vertical_speed', 0.85),
+                'attitude_hold_enabled': bool(
+                    cfg.get('attitude_hold_enabled', True)),
+                'attitude_hold_kp': cfg.get('attitude_hold_kp', 1.2),
+                'attitude_hold_max_rate': cfg.get(
+                    'attitude_hold_max_rate', 0.45),
+                'attitude_recovery_tilt': cfg.get(
+                    'attitude_recovery_tilt', 0.45),
                 'control_rate': 10.0,
             }],
             output='screen',
@@ -395,7 +600,7 @@ def _setup(context, *args, **kwargs):
                 name='eroas_trail_spawner',
                 parameters=[{
                     'use_sim_time': True,
-                    'world_name': GZ_WORLD_NAME,
+                    'world_name': gz_world_name,
                     'pose_topic': '/rexrov2/pose_gt',
                     'distance_threshold': 0.35,
                     'marker_radius': 0.25,
@@ -429,7 +634,7 @@ def _setup(context, *args, **kwargs):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('world_name', default_value='world_a',
-                              description='World configuration: world_a or blue_blocks'),
+                              description='World configuration: world_a (paper Figure 8), blue_blocks, world_b'),
         DeclareLaunchArgument('gui', default_value='true'),
         DeclareLaunchArgument('x', default_value='auto'),
         DeclareLaunchArgument('y', default_value='auto'),
@@ -440,13 +645,15 @@ def generate_launch_description():
         DeclareLaunchArgument('start_navigator', default_value='true'),
         DeclareLaunchArgument('start_hover_hold', default_value='false'),
         DeclareLaunchArgument('start_cbf', default_value='true'),
-        DeclareLaunchArgument('start_pid_thrusters', default_value='true'),
+        DeclareLaunchArgument('start_pid_thrusters', default_value='false'),
         DeclareLaunchArgument('start_pid_controller', default_value='false'),
         DeclareLaunchArgument('start_sonar_reconstruction', default_value='false'),
         DeclareLaunchArgument('start_trail', default_value='true'),
         DeclareLaunchArgument('start_gazebo_trail', default_value='false'),
         DeclareLaunchArgument('green_wake', default_value='auto'),
-        DeclareLaunchArgument('auto_follow', default_value='true'),
+        # Keep the GUI camera fixed by default so vehicle motion is visible.
+        # Pass auto_follow:=true when a chase camera is desired.
+        DeclareLaunchArgument('auto_follow', default_value='false'),
         DeclareLaunchArgument('show_sonar_probe', default_value='false'),
         OpaqueFunction(function=_setup),
     ])

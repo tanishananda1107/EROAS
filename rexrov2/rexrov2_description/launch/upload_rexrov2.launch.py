@@ -74,7 +74,7 @@ def generate_launch_description():
         DeclareLaunchArgument('sonar_image_raw_topic', default_value='sonar_image_raw'),
         DeclareLaunchArgument('plotScaler', default_value='0'),
         DeclareLaunchArgument('sensorGain', default_value='0.04'),
-        DeclareLaunchArgument('ray_visual', default_value='false'),
+        DeclareLaunchArgument('ray_visual', default_value='true'),
         DeclareLaunchArgument('writeLog', default_value='false'),
         DeclareLaunchArgument('writeFrameInterval', default_value='5'),
 

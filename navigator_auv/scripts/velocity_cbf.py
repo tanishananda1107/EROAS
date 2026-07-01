@@ -1,242 +1,314 @@
 #!/usr/bin/env python3
-"""EROAS CBF Safety Filter + Kinematic Driver for Gazebo Harmonic.
-
-Since the gz-sim VelocityControl plugin does not load from URDF spawned models,
-this node directly moves the rexrov2 model by computing new poses kinematically
-from velocity commands. This matches hover_mode behavior (no gravity/drag).
-
-Architecture:
-  eroas_planner.py → /rexrov2/cmd_vel_1 → [THIS NODE] → moves model via gz set_pose
-"""
 import math
-import subprocess
-import threading
 
-import rclpy
-from rclpy.executors import ExternalShutdownException
-from rclpy.node import Node
+import cvxpy as cp
 import numpy as np
-from sensor_msgs.msg import PointCloud2
+import rclpy
+import sensor_msgs_py.point_cloud2 as pc2
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
 from std_msgs.msg import Float64
-import sensor_msgs_py.point_cloud2 as pc2
-import tf_transformations as tft
+
+
+POINT_CLOUD_TOPIC = '/rexrov2/blueview_p900_point_cloud'
+
+
+def euler_from_quaternion(q):
+    x, y, z, w = q
+    sinr_cosp = 2.0 * (w * x + y * z)
+    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+    sinp = 2.0 * (w * y - z * x)
+    pitch = math.copysign(math.pi / 2.0, sinp) if abs(sinp) >= 1.0 else math.asin(sinp)
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+    return roll, pitch, yaw
 
 
 class ObstacleAvoidanceNode(Node):
-    """CBF safety filter + kinematic model driver."""
-
     def __init__(self):
         super().__init__('obstacle_avoidance_node')
 
-        # Parameters
-        self.declare_parameter('R_o', 4.0)
-        self.declare_parameter('kappa', 0.09)
-        self.declare_parameter('radius', 15.0)
-        self.declare_parameter('target_depth', -20.0)
-        self.declare_parameter('depth_kp', 0.5)
-        self.declare_parameter('max_vertical_speed', 0.85)
-        self.declare_parameter('control_rate', 20.0)
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            durability=DurabilityPolicy.VOLATILE,
+        )
 
-        self.R_o = float(self.get_parameter('R_o').value)
-        self.kappa = float(self.get_parameter('kappa').value)
-        self.radius = float(self.get_parameter('radius').value)
-        self.target_depth = float(self.get_parameter('target_depth').value)
-        self.depth_kp = float(self.get_parameter('depth_kp').value)
-        self.max_vertical_speed = float(self.get_parameter('max_vertical_speed').value)
-        self.control_rate = float(self.get_parameter('control_rate').value)
-        self.dt = 1.0 / self.control_rate
+        self.create_subscription(Twist, '/rexrov2/cmd_vel_1', self.vel_callback, 10)
+        self.create_subscription(PointCloud2, POINT_CLOUD_TOPIC, self.point_cloud_callback, sensor_qos)
+        self.create_subscription(Odometry, '/rexrov2/pose_gt', self.pose_callback, 10)
+        self.create_subscription(Float64, '/rexrov2/sonar/moving', self.sonar_callback, 10)
+        self.h_pub = self.create_publisher(Float64, '/rexrov2/current_h', 10)
+        self.closest_publisher = self.create_publisher(PointCloud2, '/rexrov2/closest_point', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/rexrov2/cmd_vel', 10)
 
-        # State
-        self.position = np.array([0.0, 0.0, -20.0])
-        self.yaw = 0.0
-        self.quaternion = [0.0, 0.0, 0.0, 1.0]
-        self.pose_received = False
+        self.safe_distance = 0
+        self.R_o = 2
+        self.radius = 15
+        self.kappa = 0.09
+        self.kappa1 = 0.09
+
         self.filtered_points = np.empty((0, 3))
-        self.closest_point = None
-        self.closest_obstacle_distance = float('inf')
+        self.current_pose = None
+        self.current_vel = None
+        self.point_cloud = None
+        self.vehicle_pose = None
         self.current_h = float('inf')
+        self.sonar_moving = False
+        self.xy_cbf = False
+        self.xz_cbf = False
+        self.closest_points = []
+        self.quaternion = None
+        self.yaw = 0.0
+        self.closest_obstacle_distance = float('inf')
+        self.closest_point = None
         self.v_alg = Twist()
 
-        # Subscribers
-        self.create_subscription(Twist, '/rexrov2/cmd_vel_1', self._vel_cb, 10)
-        self.create_subscription(Odometry, '/rexrov2/pose_gt', self._pose_cb,
-                                 qos_profile_sensor_data)
-        self.create_subscription(PointCloud2, '/rexrov2/blueview_p900_point_cloud',
-                                 self._pc_cb, qos_profile_sensor_data)
-        self.create_subscription(Float64, '/rexrov2/sonar/moving', self._sonar_cb, 10)
+    def sonar_callback(self, msg):
+        sonar_state = msg.data
+        if sonar_state == 1:
+            self.sonar_moving = False
+            self.xy_cbf = False
+            self.xz_cbf = True
+            self.R_o = 2
+        if sonar_state == 2:
+            self.sonar_moving = True
+            self.xy_cbf = False
+            self.xz_cbf = False
+            self.R_o = 4
+        if sonar_state == 0:
+            self.sonar_moving = False
+            self.xy_cbf = True
+            self.xz_cbf = False
+            self.R_o = 4
 
-        # Publishers (for monitoring)
-        self.cmd_vel_pub = self.create_publisher(Twist, '/rexrov2/cmd_vel', 10)
-        self.h_pub = self.create_publisher(Float64, '/rexrov2/current_h', 10)
-
-        # Control timer — moves the model each tick
-        self.create_timer(self.dt, self._control_tick)
-
-        self.get_logger().info(f'[CBF] Kinematic driver started at {self.control_rate} Hz')
-
-    def _vel_cb(self, msg):
+    def vel_callback(self, msg):
         self.v_alg = msg
+        self.process_data(self.v_alg)
 
-    def _pose_cb(self, msg):
-        p = msg.pose.pose.position
-        o = msg.pose.pose.orientation
-        self.position = np.array([p.x, p.y, p.z])
-        self.quaternion = [o.x, o.y, o.z, o.w]
-        self.yaw = tft.euler_from_quaternion(self.quaternion)[2]
-        self.pose_received = True
+    def point_cloud_callback(self, msg):
+        self.last_h = self.current_h
+        if self.vehicle_pose is None:
+            self.get_logger().info('Vehicle pose not yet received')
+            return
 
-        # Find closest obstacle
-        if len(self.filtered_points) > 0:
-            dists = np.linalg.norm(self.filtered_points - self.position, axis=1)
-            idx = np.argmin(dists)
-            if dists[idx] <= self.radius:
-                self.closest_point = self.filtered_points[idx]
-                self.closest_obstacle_distance = dists[idx]
-                self.current_h = dists[idx]**2 - self.R_o**2
-            else:
-                self.closest_point = None
+        pc_data = list(pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True))
+        new_points_float = np.array(
+            [[float(pt[0]), float(pt[1]), float(pt[2])] for pt in pc_data],
+            dtype=np.float32,
+        )
+        if new_points_float.size == 0:
+            new_points = np.empty((0, 3))
+        else:
+            new_points = np.round(new_points_float).astype(int)
+
+        vx, vy, vz = self.vehicle_pose.x, self.vehicle_pose.y, self.vehicle_pose.z
+        if len(self.filtered_points) > 0 and len(new_points) > 0:
+            all_points = np.vstack((np.array(self.filtered_points), new_points))
+        elif len(new_points) > 0:
+            all_points = np.array(new_points)
+        elif len(self.filtered_points) > 0:
+            all_points = np.array(self.filtered_points)
+        else:
+            all_points = np.empty((0, 3))
+
+        if len(all_points) > 0:
+            all_points = np.unique(all_points, axis=0)
+            distances = np.linalg.norm(all_points - np.array([vx, vy, vz]), axis=1)
+            smallest_distance = np.min(distances) if distances.size > 0 else float('inf')
+            self.get_logger().info(f'Smallest distance: {smallest_distance} ')
+            if smallest_distance > self.radius:
+                smallest_distance = float('inf')
+            within_radius_mask = distances <= self.radius
+            self.filtered_points = all_points[within_radius_mask]
+        else:
+            self.filtered_points = np.empty((0, 3))
+
+    def pose_callback(self, msg):
+        if self.xy_cbf or self.xz_cbf or self.sonar_moving:
+            self.vehicle_pose = msg.pose.pose.position
+            orientation_q = msg.pose.pose.orientation
+            quaternion = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
+            self.quaternion = quaternion
+            _, _, self.yaw = euler_from_quaternion(quaternion)
+
+            vxx, vyy, vzz = self.vehicle_pose.x, self.vehicle_pose.y, self.vehicle_pose.z
+            filtered = np.array(self.filtered_points)
+            if filtered.size == 0:
                 self.closest_obstacle_distance = float('inf')
+                self.closest_point = None
                 self.current_h = float('inf')
-        else:
-            self.closest_point = None
-            self.closest_obstacle_distance = float('inf')
-            self.current_h = float('inf')
+                return
 
-    def _pc_cb(self, msg):
-        if not self.pose_received:
-            return
-        try:
-            pts = pc2.read_points_numpy(msg, field_names=('x', 'y', 'z'),
-                                        skip_nans=True, reshape_organized_cloud=False)
-            new_pts = np.round(np.asarray(pts, dtype=float).reshape((-1, 3)))
-        except Exception:
-            return
-        if new_pts.size == 0:
-            return
+            distance = np.linalg.norm(filtered - np.array([vxx, vyy, vzz]), axis=1)
+            if distance.size > 0:
+                smallest_distance = np.min(distance)
+                min_indices = np.where(distance == smallest_distance)[0]
+                self.closest_point = filtered[min_indices[0]]
+            else:
+                smallest_distance = float('inf')
+                self.closest_point = None
 
-        if len(self.filtered_points) > 0:
-            all_pts = np.vstack((self.filtered_points, new_pts))
-        else:
-            all_pts = new_pts
+            if smallest_distance > self.radius:
+                smallest_distance = float('inf')
+                self.closest_point = None
 
-        all_pts = np.unique(all_pts, axis=0)
-        dists = np.linalg.norm(all_pts - self.position, axis=1)
-        self.filtered_points = all_pts[dists <= self.radius]
+            self.closest_obstacle_distance = smallest_distance
+            self.current_h = (self.closest_obstacle_distance ** 2) - (self.R_o ** 2)
 
-    def _sonar_cb(self, msg):
-        s = msg.data
-        if s == 0 or s == 2:
-            self.R_o = 4.0
-        elif s == 1:
-            self.R_o = 2.0
-
-    def _control_tick(self):
-        """Apply CBF filter to planner command, then move the model."""
-        if not self.pose_received:
-            return
-
-        v = self.v_alg
-        # Apply CBF projection
-        safe_vx, safe_vy = self._cbf_filter_xy(v.linear.x, v.linear.y)
-
-        # Depth hold + vertical command passthrough
-        if abs(v.linear.z) > 0.01:
-            safe_vz = v.linear.z  # planner commands vertical (escape)
-        else:
-            error = self.target_depth - self.position[2]
-            safe_vz = float(np.clip(self.depth_kp * error,
-                                    -self.max_vertical_speed, self.max_vertical_speed))
-
-        # Yaw rate passed through unchanged (paper design)
-        wz = v.angular.z
-
-        # Publish for monitoring
-        tw = Twist()
-        tw.linear.x = safe_vx
-        tw.linear.y = safe_vy
-        tw.linear.z = safe_vz
-        tw.angular.z = wz
-        self.cmd_vel_pub.publish(tw)
-        self.h_pub.publish(Float64(data=float(self.current_h)))
-
-        # Kinematic integration: compute new pose
-        new_yaw = self.yaw + wz * self.dt
-        # Velocity in body frame → world frame
-        cos_y = math.cos(self.yaw)
-        sin_y = math.sin(self.yaw)
-        vx_world = safe_vx * cos_y - safe_vy * sin_y
-        vy_world = safe_vx * sin_y + safe_vy * cos_y
-        vz_world = safe_vz
-
-        new_x = self.position[0] + vx_world * self.dt
-        new_y = self.position[1] + vy_world * self.dt
-        new_z = self.position[2] + vz_world * self.dt
-
-        # Set pose in Gazebo
-        self._set_gz_pose(new_x, new_y, new_z, new_yaw)
-
-    def _cbf_filter_xy(self, vx, vy):
-        """Single half-plane CBF projection (paper Eq. 33-34)."""
-        if self.closest_point is None or self.current_h == float('inf'):
-            return vx, vy
-
-        # Transform to global
-        cos_y = math.cos(self.yaw)
-        sin_y = math.sin(self.yaw)
-        gx = vx * cos_y - vy * sin_y
-        gy = vx * sin_y + vy * cos_y
-
-        # Gradient
-        grad = np.array([
-            2.0 * (self.position[0] - self.closest_point[0]),
-            2.0 * (self.position[1] - self.closest_point[1])
+    def compute_h_dot_xy(self, vel_1, vel_2):
+        h_state_dot = np.array([
+            2 * (self.vehicle_pose.x - self.closest_point[0]),
+            2 * (self.vehicle_pose.y - self.closest_point[1]),
         ])
-        margin = self.kappa * (self.current_h - 0.5)
-        desired = np.array([gx, gy])
-        constraint = float(grad @ desired + margin)
+        self.h_dot_xy_t = np.dot(h_state_dot, np.transpose(np.array([vel_1, vel_2])))
+        return self.h_dot_xy_t
 
-        if constraint >= 0.0:
-            return vx, vy  # safe
+    def quaternion_to_rotation_matrix(self, quaternion):
+        x, y, z, w = quaternion
+        return np.array([
+            [1 - 2 * (y ** 2 + z ** 2), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x ** 2 + z ** 2), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x ** 2 + y ** 2)],
+        ])
 
-        norm_sq = float(grad @ grad)
-        if norm_sq < 1e-9:
-            return vx, vy
+    def global_to_local_3d(self, global_coord):
+        vehicle_position = self.vehicle_pose
+        orientation_q = self.quaternion
+        rotation_matrix = self.quaternion_to_rotation_matrix(orientation_q)
+        global_x, global_y, global_z = global_coord
+        vehicle_x, vehicle_y, vehicle_z = vehicle_position.x, vehicle_position.y, vehicle_position.z
+        shifted_global = np.array([global_x - vehicle_x, global_y - vehicle_y, global_z - vehicle_z])
+        return rotation_matrix.T @ shifted_global
 
-        safe_global = desired - (constraint / norm_sq) * grad
-        # Back to local
-        safe_lx = safe_global[0] * cos_y + safe_global[1] * sin_y
-        safe_ly = -safe_global[0] * sin_y + safe_global[1] * cos_y
-        return float(safe_lx), float(safe_ly)
+    def compute_h_dot_xz(self, vel_1, vel_2):
+        local_cordi = self.global_to_local_3d(self.closest_point)
+        h_state_dot = np.array([2 * (-local_cordi[0]), 2 * (-local_cordi[2])])
+        self.h_dot_xz_t = np.dot(h_state_dot, np.transpose(np.array([vel_1, vel_2])))
+        return self.h_dot_xz_t
 
-    def _set_gz_pose(self, x, y, z, yaw):
-        """Move rexrov2 model in Gazebo using gz service set_pose."""
-        quat = tft.quaternion_from_euler(0, 0, yaw)
-        req = (f'name: "rexrov2", position: {{x: {x}, y: {y}, z: {z}}}, '
-               f'orientation: {{x: {quat[0]}, y: {quat[1]}, z: {quat[2]}, w: {quat[3]}}}')
+    def transform_velocity_to_global_xy(self, local_velocity_x, local_velocity_y):
+        global_velocity_x = local_velocity_x * np.cos(self.yaw) - local_velocity_y * np.sin(self.yaw)
+        global_velocity_y = local_velocity_x * np.sin(self.yaw) + local_velocity_y * np.cos(self.yaw)
+        return global_velocity_x, global_velocity_y
+
+    def transform_velocity_to_global_xz(self, local_velocity_x, local_velocity_z):
+        global_velocity_x = local_velocity_x * np.cos(self.yaw)
+        return global_velocity_x, local_velocity_z
+
+    def transform_velocity_to_local_xy(self, global_velocity_x, global_velocity_y):
+        local_velocity_x = global_velocity_x * np.cos(self.yaw) + global_velocity_y * np.sin(self.yaw)
+        local_velocity_y = -global_velocity_x * np.sin(self.yaw) + global_velocity_y * np.cos(self.yaw)
+        return local_velocity_x, local_velocity_y
+
+    def transform_velocity_to_local_xz(self, global_velocity_x, global_velocity_z):
+        local_velocity_x = global_velocity_x * np.cos(self.yaw)
+        return local_velocity_x, global_velocity_z
+
+    def cbf_optimization_xy(self, velll):
+        linear_velocity_x = cp.Variable()
+        linear_velocity_y = cp.Variable()
+        desired_velocity_x, desired_velocity_y = self.transform_velocity_to_global_xy(velll.linear.x, velll.linear.y)
+        objective = cp.Minimize(cp.square(linear_velocity_x - desired_velocity_x) + cp.square(linear_velocity_y - desired_velocity_y))
+        constraint = self.compute_h_dot_xy(linear_velocity_x, linear_velocity_y) + self.kappa * (self.current_h - 0.5)
+        problem = cp.Problem(objective, [constraint >= 0])
         try:
-            subprocess.Popen(
-                ['gz', 'service', '-s', '/world/oceans_waves/set_pose',
-                 '--reqtype', 'gz.msgs.Pose', '--reptype', 'gz.msgs.Boolean',
-                 '--timeout', '100', '--req', req],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+            problem.solve()
+            if problem.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+                optimized_velocity_x, optimized_velocity_y = self.transform_velocity_to_local_xy(linear_velocity_x.value, linear_velocity_y.value)
+                safe_velocity = np.array([optimized_velocity_x, optimized_velocity_y])
+                h_dddot = self.compute_h_dot_xy(optimized_velocity_x, optimized_velocity_y)
+                optimal_constraint = h_dddot + self.kappa * (self.current_h - 0.5)
+                _ = optimal_constraint
+            else:
+                print('Optimization failed: No optimal solution found')
+                safe_velocity = np.array([0.0, 0.0])
+        except Exception as e:
+            print(f'An error occurred during optimization: {e}')
+            safe_velocity = np.array([0.0, 0.0])
+        return safe_velocity
+
+    def cbf_optimization_xz(self, velll):
+        self.get_logger().info('entered xz optimization')
+        linear_velocity_x = cp.Variable()
+        linear_velocity_z = cp.Variable()
+        desired_velocity_x, desired_velocity_z = velll.linear.x, velll.linear.z
+        objective = cp.Minimize(cp.square(linear_velocity_x - desired_velocity_x) + cp.square(linear_velocity_z - desired_velocity_z))
+        constraint = self.compute_h_dot_xz(linear_velocity_x, linear_velocity_z) + self.kappa1 * (self.current_h - 0.5)
+        problem = cp.Problem(objective, [constraint >= 0])
+        try:
+            problem.solve()
+            if problem.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+                optimized_velocity_x, optimized_velocity_z = linear_velocity_x.value, linear_velocity_z.value
+                safe_velocity = np.array([optimized_velocity_x, optimized_velocity_z])
+                h_dddot = self.compute_h_dot_xz(optimized_velocity_x, optimized_velocity_z)
+                optimal_constraint = h_dddot + self.kappa * (self.current_h - 0.5)
+                _ = optimal_constraint
+                self.get_logger().info(f'closest distance: {self.closest_obstacle_distance}')
+                self.get_logger().info(f'z alg :{self.v_alg.linear.z}')
+                self.get_logger().info(f'z opti :{optimized_velocity_z}')
+                self.get_logger().info(f'x alg :{self.v_alg.linear.x}')
+                self.get_logger().info(f'x opti :{optimized_velocity_x}')
+                print('Optimization successful')
+            else:
+                print('Optimization failed: No optimal solution found')
+                safe_velocity = np.array([0.0, 0.0])
+        except Exception as e:
+            print(f'An error occurred during optimization: {e}')
+            safe_velocity = np.array([0.0, 0.0])
+        return safe_velocity
+
+    def process_data(self, valg):
+        if self.xy_cbf:
+            if self.current_h != float('inf') and self.closest_point is not None and self.vehicle_pose is not None:
+                v_safe = self.cbf_optimization_xy(valg)
+                self.publish_safe_control_input_xy(v_safe)
+            else:
+                v_safe = np.array([valg.linear.x, valg.linear.y])
+                self.publish_safe_control_input_xy(v_safe)
+
+        if self.xz_cbf:
+            if self.current_h != float('inf') and self.closest_point is not None and self.vehicle_pose is not None:
+                v_safe = self.cbf_optimization_xz(valg)
+                self.publish_safe_control_input_xz(v_safe)
+            else:
+                v_safe = np.array([valg.linear.x, valg.linear.z])
+                self.publish_safe_control_input_xz(v_safe)
+
+    def publish_safe_control_input_xy(self, velocity):
+        commands = np.nan_to_num(np.array(velocity), nan=0.0, posinf=0.0, neginf=0.0).tolist()
+        twist = Twist()
+        twist.angular.z = self.v_alg.angular.z
+        twist.linear.x = float(commands[0])
+        twist.linear.y = float(commands[1])
+        self.cmd_vel_pub.publish(twist)
+
+    def publish_safe_control_input_xz(self, velocity):
+        commands = np.nan_to_num(np.array(velocity), nan=0.0, posinf=0.0, neginf=0.0).tolist()
+        twist = Twist()
+        self.h_pub.publish(Float64(data=float(np.nan_to_num(self.current_h, nan=0.0, posinf=0.0, neginf=0.0))))
+        twist.linear.x = float(commands[0])
+        twist.linear.z = float(commands[1])
+        self.cmd_vel_pub.publish(twist)
 
 
-def main():
-    rclpy.init()
+def main(args=None):
+    rclpy.init(args=args)
     node = ObstacleAvoidanceNode()
     try:
         rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException):
+    except KeyboardInterrupt:
         pass
     finally:
         node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':

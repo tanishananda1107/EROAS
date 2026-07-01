@@ -720,10 +720,9 @@ void NpsGazeboRosMultibeamSonarRay::OnPointCloud(
     new_cloud_available_      = true;
   }
 
-  // FIX-H: only publish when subscribers exist
-  if (point_cloud_pub_->get_subscription_count() > 0) {
-    point_cloud_pub_->publish(*_msg);
-  }
+  // The ROS/Gazebo bridge is the single source of this point-cloud topic in
+  // Harmonic.  Re-publishing the subscribed cloud on the same ROS topic creates
+  // an ownership loop and can starve the raw sonar image path.
 }
 
 // =========================================================================
