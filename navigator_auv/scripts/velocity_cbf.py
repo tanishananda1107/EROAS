@@ -104,10 +104,7 @@ class ObstacleAvoidanceNode(Node):
             [[float(pt[0]), float(pt[1]), float(pt[2])] for pt in pc_data],
             dtype=np.float32,
         )
-        if new_points_float.size == 0:
-            new_points = np.empty((0, 3))
-        else:
-            new_points = np.round(new_points_float).astype(int)
+        new_points = new_points_float
 
         vx, vy, vz = self.vehicle_pose.x, self.vehicle_pose.y, self.vehicle_pose.z
         if len(self.filtered_points) > 0 and len(new_points) > 0:
@@ -120,7 +117,13 @@ class ObstacleAvoidanceNode(Node):
             all_points = np.empty((0, 3))
 
         if len(all_points) > 0:
-            all_points = np.unique(all_points, axis=0)
+            # Dedup on a fine voxel grid (for bounded memory/CPU as scans repeat)
+            # while keeping the original float coordinates, so the closest-obstacle
+            # distance used by the CBF constraint isn't quantized to whole meters.
+            voxel_size = 0.1
+            voxel_keys = np.round(all_points / voxel_size).astype(np.int64)
+            _, unique_idx = np.unique(voxel_keys, axis=0, return_index=True)
+            all_points = all_points[unique_idx]
             distances = np.linalg.norm(all_points - np.array([vx, vy, vz]), axis=1)
             smallest_distance = np.min(distances) if distances.size > 0 else float('inf')
             self.get_logger().info(f'Smallest distance: {smallest_distance} ')

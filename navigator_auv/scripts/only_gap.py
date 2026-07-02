@@ -162,15 +162,27 @@ class SonarHeadingNode(Node):
         angular_error = angle_to_target - yaw
         self.global_angle = math.atan2(math.sin(angular_error), math.cos(angular_error))
 
+        # Goal is (near) directly behind the vehicle: the forward-looking sonar's
+        # 90-degree FOV can't see it and gap/contour steering can only bias
+        # left-right within that FOV, so it can't reorient the vehicle by itself.
+        # Spin in place (publish_heading's existing turn_around branch) until the
+        # goal swings back into the forward hemisphere. Hysteresis (150 vs 90 deg)
+        # avoids flickering in/out of the spin right at the boundary.
+        turn_around_enter = math.radians(150.0)
+        turn_around_exit = math.radians(90.0)
+        if self.turn_around:
+            if abs(self.global_angle) < turn_around_exit:
+                self.turn_around = False
+        else:
+            if abs(self.global_angle) > turn_around_enter:
+                self.turn_around = True
+
         if (-math.pi / 2.0) < self.global_angle < (math.pi / 2.0):
             self.global_angle = math.pi / 2.0 + self.global_angle
-            self.turn_around = False
         elif (math.pi / 2.0) < self.global_angle < math.pi:
             self.global_angle = 3.14
-            self.turn_around = False
         elif -math.pi < self.global_angle < -(math.pi / 2.0):
             self.global_angle = 0.0
-            self.turn_around = False
 
         self.in_z_bound = abs(z - self.target_z) <= 5.0
 
