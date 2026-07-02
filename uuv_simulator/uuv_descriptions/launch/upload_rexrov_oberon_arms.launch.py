@@ -49,10 +49,10 @@ def generate_launch_description():
         Node(
 
             package=
-            "gazebo_ros",
+            "ros_gz_sim",
 
             executable=
-            "spawn_entity.py",
+            "create",
 
             arguments=[
 

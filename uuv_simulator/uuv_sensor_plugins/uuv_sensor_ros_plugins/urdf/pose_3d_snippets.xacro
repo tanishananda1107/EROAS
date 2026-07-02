@@ -35,19 +35,6 @@
       <limit effort="0" lower="0" upper="0" velocity="0"/>
     </joint>
 
-    <gazebo>
-      <plugin name="pose_3d_plugin" filename="libuuv_gazebo_ros_pose_gt_plugin.so">
-        <robot_namespace>${namespace}</robot_namespace>
-        <link_name>${namespace}/base_link</link_name>
-        <sensor_topic>${topic}</sensor_topic>
-        <static_reference_frame>${reference_frame}</static_reference_frame>
-        <noise_sigma>${noise_sigma}</noise_sigma>
-        <noise_amplitude>${noise_amplitude}</noise_amplitude>
-        <update_rate>${update_rate}</update_rate>
-        <enable_gazebo_messages>false</enable_gazebo_messages>
-        <publish_ned_odom>${publish_ned_odom}</publish_ned_odom>
-      </plugin>
-    </gazebo>
   </xacro:macro>
 
   <xacro:macro name="pose_3d_sensor" params="namespace suffix parent_link

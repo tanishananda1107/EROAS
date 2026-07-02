@@ -18,7 +18,10 @@ find_package(visualization_msgs REQUIRED)
 find_package(uuv_control_msgs REQUIRED)
 find_package(uuv_assistants REQUIRED)
 
-ament_python_install_package(${PROJECT_NAME})
+ament_python_install_package(uuv_control_interfaces PACKAGE_DIR src/uuv_control_interfaces)
+ament_python_install_package(uuv_trajectory_generator PACKAGE_DIR src/uuv_trajectory_generator)
+ament_python_install_package(uuv_trajectory_generator.path_generator PACKAGE_DIR src/uuv_trajectory_generator/path_generator)
+ament_python_install_package(uuv_waypoints PACKAGE_DIR src/uuv_waypoints)
 
 install(
   PROGRAMS
@@ -40,6 +43,7 @@ install(
     launch
     config
   DESTINATION share/${PROJECT_NAME}
+  PATTERN "*.launch" EXCLUDE
 )
 
 if(BUILD_TESTING)

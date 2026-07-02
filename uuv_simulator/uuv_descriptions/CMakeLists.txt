@@ -15,29 +15,19 @@ find_package(ament_cmake REQUIRED)
 find_package(xacro REQUIRED)
 
 install(
-  PROGRAMS
-    scripts/spawn_model
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-install(
   DIRECTORY
     launch
     meshes
     robots
     urdf
   DESTINATION share/${PROJECT_NAME}
+  PATTERN "*.launch" EXCLUDE
 )
 
 if(BUILD_TESTING)
 
   find_package(
     ament_cmake_pytest
-    REQUIRED
-  )
-
-  find_package(
-    launch_testing
     REQUIRED
   )
 

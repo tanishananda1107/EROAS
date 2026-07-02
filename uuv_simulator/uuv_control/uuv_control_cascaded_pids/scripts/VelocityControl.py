@@ -12,7 +12,7 @@ from nav_msgs.msg import Odometry
 
 from tf_transformations import quaternion_matrix
 
-from uuv_control_cascaded_pid.pid import PIDRegulator
+from PID import PIDRegulator
 
 
 class VelocityControllerNode(Node):

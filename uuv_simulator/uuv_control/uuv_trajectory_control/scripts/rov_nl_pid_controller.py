@@ -27,6 +27,7 @@ class ROVNLPIDController(
 
         DPPIDControllerBase.__init__(
             self,
+            self,
             True
         )
 

@@ -13,6 +13,7 @@ install(
   DIRECTORY config launch rviz
   DESTINATION share/${PROJECT_NAME}
   PATTERN "*~" EXCLUDE
+  PATTERN "*.launch" EXCLUDE
 )
 
 # =========================

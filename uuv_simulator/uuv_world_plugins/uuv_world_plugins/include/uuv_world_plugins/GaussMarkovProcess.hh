@@ -10,68 +10,31 @@ namespace uuv_gz_sim
 class GaussMarkovProcess
 {
 public:
-  GaussMarkovProcess() { this->Reset(); }
+  GaussMarkovProcess();
 
-  void Reset()
-  {
-    this->var = this->mean;
-    this->lastUpdate = 0.0;
-  }
+  void Reset();
 
   bool SetModel(double _mean, double _min, double _max,
-                double _mu = 0.0, double _noise = 0.0)
-  {
-    if (_min > _max)
-      return false;
+                double _mu = 0.0, double _noise = 0.0);
 
-    mean = _mean;
-    min = _min;
-    max = _max;
-    mu = _mu;
-    noiseAmp = _noise;
+  bool SetMean(double _mean);
 
-    this->var = mean;
-    return true;
-  }
+  double Update(double _time);
 
-  bool SetMean(double _mean)
-  {
-    if (_mean < min || _mean > max)
-      return false;
-
-    mean = _mean;
-    return true;
-  }
-
-  double Update(double _time)
-  {
-    double dt = _time - lastUpdate;
-    lastUpdate = _time;
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::normal_distribution<double> dist(0.0, noiseAmp);
-
-    double noise = dist(gen);
-
-    var += mu * (mean - var) * dt + noise;
-
-    if (var > max) var = max;
-    if (var < min) var = min;
-
-    return var;
-  }
-
-  void Print() {}
+  void Print() const;
 
 public:
-  double var;
-  double mean;
-  double min;
-  double max;
-  double mu;
-  double noiseAmp;
-  double lastUpdate;
+  double var{0.0};
+  double mean{0.0};
+  double min{0.0};
+  double max{0.0};
+  double mu{0.0};
+  double noiseAmp{0.0};
+  double lastUpdate{0.0};
+
+private:
+  std::mt19937 rng;
+  std::uniform_real_distribution<double> dist;
 };
 
 } // namespace uuv_gz_sim

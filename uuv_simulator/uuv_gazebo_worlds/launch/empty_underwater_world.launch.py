@@ -11,7 +11,7 @@ def generate_launch_description():
     gz_pkg = FindPackageShare("ros_gz_sim").find("ros_gz_sim")
     world_pkg = FindPackageShare("uuv_gazebo_worlds").find("uuv_gazebo_worlds")
 
-    world_file = os.path.join(world_pkg, "worlds", "empty_underwater.sdf")
+    world_file = os.path.join(world_pkg, "worlds", "empty_underwater.world")
 
     return LaunchDescription([
 

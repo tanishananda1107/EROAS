@@ -38,9 +38,7 @@
 #include <iostream>
 #include <cmath>
 
-namespace gz
-{
-namespace sim
+namespace uuv_gz_plugins
 {
 
 /////////////////////////////////////////////////
@@ -176,5 +174,4 @@ void UmbilicalModelBerg::OnUpdate(
   link.AddWorldForce(_ecm, fWorld);
 }
 
-}  // namespace sim
-}  // namespace gz
+}  // namespace uuv_gz_plugins

@@ -28,7 +28,7 @@
   <xacro:property name="mass" value="1862.87"/>
 
   <xacro:macro name="rexrov2_base"
-    params="namespace *gazebo use_simplified_mesh inertial_reference_frame">
+    params="namespace *gazebo use_simplified_mesh inertial_reference_frame green_wake:=false">
     <!-- Defining base link according to ROS conventions: x forward, z up -->
     <link name="${namespace}/base_link">
       <inertial>
@@ -72,6 +72,27 @@
           </geometry>
         </visual>
       </xacro:unless>
+
+      <xacro:if value="${green_wake}">
+        <visual name="eroas_green_wake">
+          <origin xyz="-4.8 0 0.05" rpy="0 1.57079632679 0"/>
+          <geometry>
+            <cylinder radius="0.08" length="8.6"/>
+          </geometry>
+          <material name="eroas_wake_green">
+            <color rgba="0.0 1.0 0.3 0.3"/>
+          </material>
+        </visual>
+        <visual name="eroas_green_wake_cap">
+          <origin xyz="-9.1 0 0.05" rpy="0 0 0"/>
+          <geometry>
+            <sphere radius="0.08"/>
+          </geometry>
+          <material name="eroas_wake_green">
+            <color rgba="0.0 1.0 0.3 0.3"/>
+          </material>
+        </visual>
+      </xacro:if>
 
       <!-- bottom plate -->
       <collision>

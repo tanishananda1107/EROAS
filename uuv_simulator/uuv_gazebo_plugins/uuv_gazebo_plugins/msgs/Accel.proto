@@ -1,21 +1,13 @@
-#ifndef UUV_GZ_SIM_MSGS_ACCEL_HH_
-#define UUV_GZ_SIM_MSGS_ACCEL_HH_
+syntax = "proto2";
 
-#include <gz/msgs/vector3d.pb.h>
-#include <gz/msgs/time.pb.h>
+package uuv_gazebo_plugins_msgs.msgs;
 
-namespace uuv_gz_sim::msgs
+message Accel
 {
-
-/// Replacement for old Accel.proto in Gazebo Classic
-/// Used internally in gz-sim systems/plugins
-struct Accel
-{
-  gz::msgs::Vector3d linear;   // linear acceleration
-  gz::msgs::Vector3d angular;  // angular acceleration
-  gz::msgs::Time time;         // timestamp
-};
-
-} // namespace uuv_gz_sim::msgs
-
-#endif
+  optional double linear_x = 1 [default = 0.0];
+  optional double linear_y = 2 [default = 0.0];
+  optional double linear_z = 3 [default = 0.0];
+  optional double angular_x = 4 [default = 0.0];
+  optional double angular_y = 5 [default = 0.0];
+  optional double angular_z = 6 [default = 0.0];
+}

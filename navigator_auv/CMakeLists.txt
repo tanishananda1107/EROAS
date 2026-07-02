@@ -16,14 +16,19 @@ install(PROGRAMS
   scripts/euler_calculator.py
   scripts/move_obstacle.py
   scripts/cbf_implementation.py
+  scripts/just_gap.py
   scripts/just_cbf.py
   scripts/obstacle_draw.py
   scripts/only_gap.py
   scripts/pose_plotter.py
+  scripts/hover_hold.py
+  scripts/pose_gt_to_odom.py
   scripts/spawner.py
+  scripts/trail_marker.py
+  scripts/hover_patrol.py
+  scripts/velocity_cbf.py
   DESTINATION lib/${PROJECT_NAME}
 )
-
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

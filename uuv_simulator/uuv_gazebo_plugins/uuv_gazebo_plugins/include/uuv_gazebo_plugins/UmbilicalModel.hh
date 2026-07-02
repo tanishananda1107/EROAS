@@ -7,16 +7,13 @@
 
 #include <sdf/sdf.hh>
 
-#include <gz/physics/Model.hh>
-#include <gz/physics/Link.hh>
-
 #include <gz/math/Vector3.hh>
 
 #include <gz/sim/Model.hh>
 #include <gz/sim/Link.hh>
 #include <gz/sim/EntityComponentManager.hh>
 
-namespace uuv_gz_sim
+namespace uuv_gz_plugins
 {
 
 /// Base class for all tether / umbilical models (gz-sim8 compatible)
@@ -126,6 +123,6 @@ private:
   double rho{1000.0};
 };
 
-} // namespace uuv_gz_sim
+} // namespace uuv_gz_plugins
 
 #endif

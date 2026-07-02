@@ -22,9 +22,12 @@ install(
 
 install(
   PROGRAMS
+    scripts/publish_footprints
     scripts/publish_footprints.py
     scripts/publish_vehicle_footprint.py
+    scripts/publish_world_models
     scripts/publish_world_models.py
+    scripts/publish_world_ned_frame
     scripts/set_simulation_timer.py
     scripts/unpause_simulation.py
     scripts/create_new_robot_model

@@ -1,92 +1,61 @@
-// Copyright (c) 2016 The UUV Simulator Authors.
-// All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+#ifndef UUV_GAZEBO_ROS_PLUGINS_FIN_ROS_PLUGIN_HH_
+#define UUV_GAZEBO_ROS_PLUGINS_FIN_ROS_PLUGIN_HH_
 
-#ifndef __FIN_ROS_PLUGIN_HH__
-#define __FIN_ROS_PLUGIN_HH__
-
-#include <uuv_gazebo_plugins/FinPlugin.hh>
-
-#include <boost/scoped_ptr.hpp>
-#include <gazebo/common/Plugin.hh>
-#include <ros/ros.h>
-#include <uuv_gazebo_ros_plugins_msgs/FloatStamped.h>
-#include <uuv_gazebo_ros_plugins_msgs/GetListParam.h>
-#include <geometry_msgs/WrenchStamped.h>
+#include <chrono>
 #include <map>
+#include <memory>
+#include <string>
+
+#include <geometry_msgs/msg/wrench_stamped.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <uuv_gazebo_plugins/FinPlugin.hh>
+#include <uuv_gazebo_ros_plugins_msgs/msg/float_stamped.hpp>
+#include <uuv_gazebo_ros_plugins_msgs/srv/get_list_param.hpp>
 
 namespace uuv_simulator_ros
 {
-  class FinROSPlugin : public gazebo::FinPlugin
-  {
-    /// \brief Constrcutor.
-    public: FinROSPlugin();
 
-    /// \brief Destructor.
-    public: ~FinROSPlugin();
+class FinROSPlugin : public uuv_gz_plugins::FinPlugin
+{
+public:
+  FinROSPlugin();
+  ~FinROSPlugin() override;
 
-    /// \brief Load module and read parameters from SDF.
-    public: void Load(gazebo::physics::ModelPtr _parent, sdf::ElementPtr _sdf);
+  void Configure(const gz::sim::Entity &_entity,
+                 const std::shared_ptr<const sdf::Element> &_sdf,
+                 gz::sim::EntityComponentManager &_ecm,
+                 gz::sim::EventManager &_eventMgr) override;
 
-    /// \brief Publish state via ROS.
-    public: void RosPublishStates();
+  void PreUpdate(const gz::sim::UpdateInfo &_info,
+                 gz::sim::EntityComponentManager &_ecm) override;
 
-    /// \brief Set new set point.
-    public: void SetReference(
-        const uuv_gazebo_ros_plugins_msgs::FloatStamped::ConstPtr &_msg);
+  void RosPublishStates();
 
-    /// \brief Return the list of paramaters of the lift and drag model
-    public: bool GetLiftDragParams(
-      uuv_gazebo_ros_plugins_msgs::GetListParam::Request& _req,
-      uuv_gazebo_ros_plugins_msgs::GetListParam::Response& _res);  
+  void SetReference(
+      const uuv_gazebo_ros_plugins_msgs::msg::FloatStamped::SharedPtr &_msg);
 
-    /// \brief Return the ROS publish period.
-    public: gazebo::common::Time GetRosPublishPeriod();
+  bool GetLiftDragParams(
+      uuv_gazebo_ros_plugins_msgs::srv::GetListParam::Request::SharedPtr _req,
+      uuv_gazebo_ros_plugins_msgs::srv::GetListParam::Response::SharedPtr _res);
 
-    /// \brief Set the ROS publish frequency (Hz).
-    public: void SetRosPublishRate(double _hz);
+  std::chrono::nanoseconds GetRosPublishPeriod() const;
+  void SetRosPublishRate(double _hz);
 
-    /// \brief Initialize Module.
-    public: virtual void Init();
+private:
+  rclcpp::Node::SharedPtr rosNode;
+  rclcpp::Subscription<uuv_gazebo_ros_plugins_msgs::msg::FloatStamped>::SharedPtr
+      subReference;
+  rclcpp::Publisher<uuv_gazebo_ros_plugins_msgs::msg::FloatStamped>::SharedPtr
+      pubState;
+  rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr pubFinForce;
+  std::map<std::string,
+           rclcpp::Service<uuv_gazebo_ros_plugins_msgs::srv::GetListParam>::
+               SharedPtr> services;
 
-    /// \brief Reset Module.
-    public: virtual void Reset();
+  std::chrono::nanoseconds rosPublishPeriod;
+  std::chrono::steady_clock::time_point lastRosPublishTime;
+};
 
-    /// \brief Pointer to this ROS node's handle.
-    private: boost::scoped_ptr<ros::NodeHandle> rosNode;
-
-    /// \brief Subscriber reacting to new reference set points.
-    private: ros::Subscriber subReference;
-
-    /// \brief Publisher for current state.
-    private: ros::Publisher pubState;
-
-    /// \brief Publisher for current actual thrust.
-    private: ros::Publisher pubFinForce;
-
-    /// \brief Connection for callbacks on update world.
-    private: gazebo::event::ConnectionPtr rosPublishConnection;
-
-    /// \brief Period after which we should publish a message via ROS.
-    private: gazebo::common::Time rosPublishPeriod;
-
-    /// \brief Map of services
-    private: std::map<std::string, ros::ServiceServer> services;
-
-    /// \brief Last time we published a message via ROS.
-    private: gazebo::common::Time lastRosPublishTime;
-  };
-}
+}  // namespace uuv_simulator_ros
 
 #endif

@@ -15,10 +15,3 @@
 # limitations under the License.
 
 from .thruster_manager import ThrusterManager
-import rclpy
-from rclpy.node import Node
-
-class ThrusterManager(Node):
-    def __init__(self):
-        super().__init__('thruster_manager')
-

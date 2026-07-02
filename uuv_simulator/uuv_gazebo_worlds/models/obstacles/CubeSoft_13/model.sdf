@@ -5,11 +5,11 @@
         <link name="link">
             <pose>0 0 0 1.57 3.14159 0</pose>
             <collision name="collision">
+                <pose>-8.985 0.0 24.0 0 0 0</pose>
                 <geometry>
-                    <mesh>
-                        <uri>meshes/SemiCylinder_12x8.stl</uri>
-                        <scale>0.003 0.001 0.004</scale>
-                    </mesh>
+                    <box>
+                        <size>17.97 12.0 48.0</size>
+                    </box>
                 </geometry>
             </collision>
             <visual name="visual">
@@ -19,6 +19,11 @@
                         <scale>0.003 0.001 0.006</scale>
                     </mesh>
                 </geometry>
+                <material>
+                    <ambient>0.0 0.22 0.95 1</ambient>
+                    <diffuse>0.0 0.35 1.0 1</diffuse>
+                    <specular>0.08 0.12 0.20 1</specular>
+                </material>
             </visual>
         </link>
     </model>

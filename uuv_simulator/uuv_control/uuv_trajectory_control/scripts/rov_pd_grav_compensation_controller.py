@@ -25,6 +25,7 @@ class ROVPDGCompController(
 
         DPControllerBase.__init__(
             self,
+            self,
             is_model_based=True
         )
 

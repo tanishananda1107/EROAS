@@ -97,7 +97,11 @@
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <sensor_msgs/image_encodings.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
+#if __has_include(<cv_bridge/cv_bridge.hpp>)
 #include <cv_bridge/cv_bridge.hpp>
+#else
+#include <cv_bridge/cv_bridge.h>
+#endif
 
 // ---- marine_acoustic_msgs (ROS 2 package) --------------------------------
 #include <marine_acoustic_msgs/msg/projected_sonar_image.hpp>
@@ -136,7 +140,6 @@
 //     set_source_files_properties(this_file.cpp PROPERTIES LANGUAGE CUDA)
 //   or use cuda_add_library() / target_sources() with the CUDA language.
 #include <nps_uw_multibeam_sonar/sonar_calculation_cuda.cuh>
-#include <nps_uw_multibeam_sonar/gazebo_multibeam_sonar_raster_based.hh>
 
 namespace nps_uw_multibeam_sonar
 {
@@ -147,6 +150,29 @@ namespace nps_uw_multibeam_sonar
 namespace detail
 {
   inline constexpr double kPi = 3.14159265358979323846;
+
+  inline double VerticalFovFromCamera(const gz::rendering::CameraPtr & camera)
+  {
+    if (!camera)
+      return 0.0;
+
+    const double aspect = camera->AspectRatio();
+    if (aspect <= 0.0)
+      return camera->HFOV().Radian();
+
+    return 2.0 * std::atan(std::tan(camera->HFOV().Radian() / 2.0) / aspect);
+  }
+
+  inline unsigned int ImageDepthFromFormat(const std::string & format)
+  {
+    if (format.find("FLOAT32") != std::string::npos)
+      return 4;
+    if (format.find("RGBA") != std::string::npos || format.find("BGRA") != std::string::npos)
+      return 4;
+    if (format.find("RGB") != std::string::npos || format.find("BGR") != std::string::npos)
+      return 3;
+    return 1;
+  }
 }
 
 // =========================================================================
@@ -189,7 +215,7 @@ private:
 
   // FIX-F: variational-reflectivity RGB frame callback
   void OnNewImageFrame(
-    const unsigned char * _image,
+    const void * _image,
     unsigned int _width, unsigned int _height,
     unsigned int _depth, const std::string & _format);
 
@@ -629,7 +655,7 @@ void NpsGazeboRosMultibeamSonar::ConnectToDepthCamera(
   // Walk all loaded render engines to find the scene
   for (unsigned int eidx = 0; eidx < gz::rendering::engineCount(); ++eidx) {
     gz::rendering::RenderEngine * engine =
-      gz::rendering::engineAt(eidx);
+      gz::rendering::engine(eidx);
     if (!engine || engine->SceneCount() == 0) continue;
 
     for (unsigned int sidx = 0; sidx < engine->SceneCount(); ++sidx) {
@@ -668,8 +694,8 @@ void NpsGazeboRosMultibeamSonar::ConnectToDepthCamera(
   // ------------------------------------------------------------------
   width_  = depth_camera_->ImageWidth();
   height_ = depth_camera_->ImageHeight();
-  depth_  = depth_camera_->ImageDepth();    // FIX-D
   format_ = depth_camera_->ImageFormat();   // FIX-D
+  depth_  = detail::ImageDepthFromFormat(format_);
 
   if (width_ == 0 || height_ == 0) {
     RCLCPP_WARN(ros_node_->get_logger(),
@@ -827,7 +853,7 @@ void NpsGazeboRosMultibeamSonar::OnNewDepthFrame(
 // =========================================================================
 
 void NpsGazeboRosMultibeamSonar::OnNewImageFrame(
-  const unsigned char * /*_image*/,
+  const void * /*_image*/,
   unsigned int /*_width*/, unsigned int /*_height*/,
   unsigned int /*_depth*/, const std::string & /*_format*/)
 {
@@ -889,7 +915,7 @@ void NpsGazeboRosMultibeamSonar::UpdateReflectivityImage()
     CV_32FC1, cv::Scalar(mu));
 
   const double hfov  = depth_camera_->HFOV().Radian();
-  const double vfov  = depth_camera_->VFOV().Radian();
+  const double vfov  = detail::VerticalFovFromCamera(depth_camera_);
   const double fl_h  =
     static_cast<double>(width_)  / (2.0 * std::tan(hfov / 2.0));
   const double fl_v  =
@@ -913,7 +939,7 @@ void NpsGazeboRosMultibeamSonar::UpdateReflectivityImage()
 
       ray_query_->SetOrigin(cam_pos);
       ray_query_->SetDirection(ray_dir);
-      const gz::rendering::RayQueryPoint result = ray_query_->ClosestPoint();
+      const gz::rendering::RayQueryResult result = ray_query_->ClosestPoint();
 
       // gz::rendering::kNullEntity == 0; skip pixels with no hit
       if (result.objectId == 0) continue;
@@ -936,22 +962,19 @@ void NpsGazeboRosMultibeamSonar::UpdateReflectivityImage()
         double      roughness        = 0.0;
         std::string material         = "default";
 
-        // UserData returns std::optional<std::any>; handle gracefully
-        const auto * ud_b = vis->UserData("surface_props:biofouling_rating");
-        if (ud_b) {
-          try { biofoulingRating = std::any_cast<int>(*ud_b); }
-          catch (...) {}
-        }
-        const auto * ud_r = vis->UserData("surface_props:roughness");
-        if (ud_r) {
-          try { roughness = std::any_cast<double>(*ud_r); }
-          catch (...) {}
-        }
-        const auto * ud_m = vis->UserData("surface_props:material");
-        if (ud_m) {
-          try { material = std::any_cast<std::string>(*ud_m); }
-          catch (...) {}
-        }
+        const auto ud_b = vis->UserData("surface_props:biofouling_rating");
+        if (const auto * value = std::get_if<int>(&ud_b))
+          biofoulingRating = *value;
+
+        const auto ud_r = vis->UserData("surface_props:roughness");
+        if (const auto * value = std::get_if<double>(&ud_r))
+          roughness = *value;
+        else if (const auto * value = std::get_if<float>(&ud_r))
+          roughness = static_cast<double>(*value);
+
+        const auto ud_m = vis->UserData("surface_props:material");
+        if (const auto * value = std::get_if<std::string>(&ud_m))
+          material = *value;
 
         for (size_t k = 0; k < objectNames_.size(); ++k) {
           if (material == objectNames_[k]) {
@@ -1011,7 +1034,7 @@ void NpsGazeboRosMultibeamSonar::PublishCameraInfo(const rclcpp::Time & stamp)
   info.d = {0.0, 0.0, 0.0, 0.0, 0.0};
 
   const double hfov = depth_camera_->HFOV().Radian();
-  const double vfov = depth_camera_->VFOV().Radian();
+  const double vfov = detail::VerticalFovFromCamera(depth_camera_);
   const double fx   = static_cast<double>(width_)  / (2.0 * std::tan(hfov / 2.0));
   const double fy   = static_cast<double>(height_) / (2.0 * std::tan(vfov / 2.0));
   const double cx   = static_cast<double>(width_)  / 2.0;
@@ -1048,7 +1071,7 @@ void NpsGazeboRosMultibeamSonar::ComputeSonarImage(const float * /*_src*/)
   cv::Mat depth_image  = point_cloud_image_;
   cv::Mat normal_image = ComputeNormalImage(depth_image);
 
-  const double vFOV       = depth_camera_->VFOV().Radian();
+  const double vFOV       = detail::VerticalFovFromCamera(depth_camera_);
   const double hFOV       = depth_camera_->HFOV().Radian();
   const double vPixelSize = (height_ > 1)
     ? vFOV / static_cast<double>(height_ - 1) : vFOV;
@@ -1081,7 +1104,7 @@ void NpsGazeboRosMultibeamSonar::ComputeSonarImage(const float * /*_src*/)
   for (int i = 0; i < nBeams; ++i)
     beam_ptrs[i] = beamCorrector_[i].data();
 
-  CArray2D P_Beams = NpsGazeboSonar::sonar_calculation_wrapper(
+  NpsGazeboSonar::CArray2D P_Beams = NpsGazeboSonar::sonar_calculation_wrapper(
     depth_image,
     normal_image,
     rand_image_,
@@ -1187,7 +1210,7 @@ void NpsGazeboRosMultibeamSonar::ComputeSonarImage(const float * /*_src*/)
                      0.5 * static_cast<double>(width_), fl)));
     ping_info.rx_beamwidths.push_back(bw);
     ping_info.tx_beamwidths.push_back(
-      static_cast<float>(depth_camera_->VFOV().Radian()));
+      static_cast<float>(detail::VerticalFovFromCamera(depth_camera_)));
   }
   sonar_raw_msg.ping_info = ping_info;
 
@@ -1502,12 +1525,12 @@ cv::Mat NpsGazeboRosMultibeamSonar::ComputeNormalImage(cv::Mat & depth)
 // =========================================================================
 
 GZ_ADD_PLUGIN(
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar,
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar,
   gz::sim::System,
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar::ISystemConfigure,
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar::ISystemPreUpdate,
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar::ISystemPostUpdate)
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar::ISystemConfigure,
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar::ISystemPreUpdate,
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar::ISystemPostUpdate)
 
 GZ_ADD_PLUGIN_ALIAS(
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar,
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar,
   "nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar")

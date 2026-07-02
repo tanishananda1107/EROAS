@@ -14,28 +14,32 @@ class AccelerationControllerNode(Node):
         super().__init__('acceleration_control')
 
         self.declare_parameter('pid.mass',1.0)
-        self.declare_parameter(
-            'pid.inertial',
-            {
-                'ixx':1.0,
-                'ixy':0.0,
-                'ixz':0.0,
-                'iyy':1.0,
-                'iyz':0.0,
-                'izz':1.0
-            }
-        )
+        self.declare_parameter('pid.ixx', 1.0)
+        self.declare_parameter('pid.ixy', 0.0)
+        self.declare_parameter('pid.ixz', 0.0)
+        self.declare_parameter('pid.iyy', 1.0)
+        self.declare_parameter('pid.iyz', 0.0)
+        self.declare_parameter('pid.izz', 1.0)
 
         self.mass = self.get_parameter(
             'pid.mass').value
 
-        inertial = self.get_parameter(
-            'pid.inertial').value
-
         self.inertial_tensor=np.array([
-            [inertial['ixx'],inertial['ixy'],inertial['ixz']],
-            [inertial['ixy'],inertial['iyy'],inertial['iyz']],
-            [inertial['ixz'],inertial['iyz'],inertial['izz']]
+            [
+                self.get_parameter('pid.ixx').value,
+                self.get_parameter('pid.ixy').value,
+                self.get_parameter('pid.ixz').value
+            ],
+            [
+                self.get_parameter('pid.ixy').value,
+                self.get_parameter('pid.iyy').value,
+                self.get_parameter('pid.iyz').value
+            ],
+            [
+                self.get_parameter('pid.ixz').value,
+                self.get_parameter('pid.iyz').value,
+                self.get_parameter('pid.izz').value
+            ]
         ])
 
         self.mass_inertial_matrix=np.vstack((

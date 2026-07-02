@@ -25,6 +25,7 @@
   <exec_depend>uuv_gazebo_ros_plugins_msgs</exec_depend>
   <exec_depend>uuv_control_msgs</exec_depend>
   <exec_depend>uuv_trajectory_control</exec_depend>
+  <exec_depend>tf_transformations</exec_depend>
 
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-opencv</exec_depend>

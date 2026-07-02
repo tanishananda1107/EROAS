@@ -64,17 +64,14 @@ class Vehicle:
             [0.0,0.0,0.0]
         ).value
 
-        self._inertial = node.declare_parameter(
-            "inertial",
-            {
-                "ixx":0.0,
-                "iyy":0.0,
-                "izz":0.0,
-                "ixy":0.0,
-                "ixz":0.0,
-                "iyz":0.0
-            }
-        ).value
+        self._inertial = {
+            "ixx": node.declare_parameter("inertial.ixx", 0.0).value,
+            "iyy": node.declare_parameter("inertial.iyy", 0.0).value,
+            "izz": node.declare_parameter("inertial.izz", 0.0).value,
+            "ixy": node.declare_parameter("inertial.ixy", 0.0).value,
+            "ixz": node.declare_parameter("inertial.ixz", 0.0).value,
+            "iyz": node.declare_parameter("inertial.iyz", 0.0).value
+        }
 
         self._M=np.zeros((6,6))
 

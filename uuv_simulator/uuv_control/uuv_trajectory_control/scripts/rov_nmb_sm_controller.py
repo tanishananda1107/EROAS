@@ -27,6 +27,7 @@ class ROVNMBSMController(
 
         DPControllerBase.__init__(
             self,
+            self,
             is_model_based=False
         )
 

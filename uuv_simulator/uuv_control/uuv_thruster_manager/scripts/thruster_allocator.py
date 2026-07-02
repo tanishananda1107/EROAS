@@ -26,16 +26,10 @@ from uuv_thruster_manager.srv import (
 
 
 class ThrusterAllocatorNode(
-    ThrusterManager,
-    Node
+    ThrusterManager
 ):
 
     def __init__(self):
-
-        Node.__init__(
-            self,
-            'thruster_allocator'
-        )
 
         ThrusterManager.__init__(
             self

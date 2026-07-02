@@ -10,7 +10,7 @@ find_package(ament_cmake REQUIRED)
 # Gazebo Harmonic (gz-sim8)
 find_package(gz-sim8 REQUIRED)
 find_package(gz-plugin2 REQUIRED)
-find_package(gz-transport12 REQUIRED)
+find_package(gz-transport13 REQUIRED)
 find_package(gz-msgs10 REQUIRED)
 find_package(gz-math7 REQUIRED)
 
@@ -30,7 +30,7 @@ add_library(uuv_underwater_current_plugin SHARED
 target_link_libraries(uuv_underwater_current_plugin
   gz-sim8::gz-sim8
   gz-plugin2::gz-plugin2
-  gz-transport12::gz-transport12
+  gz-transport13::gz-transport13
   gz-msgs10::gz-msgs10
   gz-math7::gz-math7
   ${Boost_LIBRARIES}

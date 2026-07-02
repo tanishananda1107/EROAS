@@ -1,35 +1,10 @@
 cmake_minimum_required(VERSION 3.8)
-project(uuv_sensor_ros_plugins_msgs)
+project(uuv_sensor_ros_plugins)
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-# Find dependencies
 find_package(ament_cmake REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
 
-# Declare message and service files
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/DVL.msg"
-  "msg/DVLBeam.msg"
-  "msg/PositionWithCovariance.msg"
-  "msg/PositionWithCovarianceStamped.msg"
-  "msg/ChemicalParticleConcentration.msg"
-  "msg/Salinity.msg"
-  "srv/ChangeSensorState.srv"
-  DEPENDENCIES
-    geometry_msgs
-    std_msgs
-)
-
-ament_export_dependencies(rosidl_default_runtime)
-
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  ament_lint_auto_find_test_dependencies()
-endif()
+install(DIRECTORY urdf meshes
+  DESTINATION share/${PROJECT_NAME}
+  PATTERN "*~" EXCLUDE)
 
 ament_package()

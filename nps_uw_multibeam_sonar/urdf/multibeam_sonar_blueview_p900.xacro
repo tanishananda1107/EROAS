@@ -57,7 +57,7 @@
           </save> -->
         </camera>
 
-        <plugin filename="libnps_multibeam_sonar_ros_plugin.so" name="${name}_sensor_controller">
+        <plugin filename="libnps_multibeam_sonar_ros_plugin.so" name="nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonar">
           <!-- Sonar properties -->
           <verticalFOV>90</verticalFOV>
           <sonarFreq>900e3</sonarFreq>
@@ -96,11 +96,15 @@
                maxDistance raySkips plotScaler sensorGain writeLog writeFrameInterval
                gaussian_noise_mean gaussian_noise_stddev fidelity debug">
     <gazebo reference="${sensor_link}">
-      <sensor name="${name}_sensor" type="gpu_ray">
-        <visualize>false</visualize>
+      <!-- Gazebo Harmonic uses the GPU lidar sensor/component path.  Keep the
+           historical "ray" macro name for launch compatibility, but generate
+           Harmonic SDF so the NPS plugin can attach to GpuLidarSensor. -->
+      <sensor name="${name}_sensor" type="gpu_lidar">
+        <visualize>true</visualize>
         <always_on>true</always_on>
         <update_rate>10</update_rate>
-        <ray>
+        <lidar>
+          <visualize>true</visualize>
           <scan>
             <!-- Set horizontal FOV by setting image height -->
             <!-- 512 beams with 90 degrees horizontal FOV (M900-90) -->
@@ -134,17 +138,9 @@
             <mean>${gaussian_noise_mean}</mean>
             <stddev>${gaussian_noise_stddev}</stddev>
           </noise>
-        </ray>
+        </lidar>
 
-        <plugin name="${name}_ray_sonar_sensor" filename="libgazebo_ros_velodyne_gpu_laser.so">
-           <topicName>${name}_point_cloud</topicName>
-           <!-- <frameName>${name}_forward_sonar_optical_link</frameName> -->
-           <organize_cloud>true</organize_cloud>
-           <min_range>0.2</min_range>
-           <max_range>${maxDistance}</max_range>
-        </plugin>
-
-        <plugin filename="libnps_multibeam_sonar_ray_ros_plugin.so" name="${name}_sensor_controller">
+        <plugin filename="libnps_multibeam_sonar_ray_ros_plugin.so" name="nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay">
           <!-- Sonar properties -->
           <verticalFOV>90</verticalFOV>
           <sonarFreq>900e3</sonarFreq>
@@ -152,6 +148,10 @@
           <soundSpeed>1500</soundSpeed>
           <sourceLevel>220</sourceLevel>
           <maxDistance>${maxDistance}</maxDistance>
+          <!-- Harmonic's GpuLidar can return the sonar housing / RexROV hull
+               while the vertical joint is pivoted.  Reject only that
+               near-field self-occlusion before synthesizing the sonar image. -->
+          <pointCloudCutoff>0.30</pointCloudCutoff>
           <raySkips>${raySkips}</raySkips>
           <sensorGain>${sensorGain}</sensorGain>
           <plotScaler>${plotScaler}</plotScaler>
@@ -194,14 +194,17 @@
 
   <xacro:macro name="multibeam_blueview_p900_visual_ray" params="name ray_visual">
     <gazebo reference="${name}_visual_ray_link">
-      <sensor type="ray" name="multibeam_ray">
+      <sensor type="gpu_lidar" name="multibeam_ray">
         <pose>0 0 0 0 0 0</pose>
-        <update_rate>5</update_rate>
+        <update_rate>8</update_rate>
         <visualize>${ray_visual}</visualize>
-        <ray>
+        <always_on>true</always_on>
+        <topic>/rexrov2/sonar_visual_rays</topic>
+        <lidar>
+          <visualize>${ray_visual}</visualize>
           <scan>
             <horizontal>
-              <samples>100</samples>
+              <samples>120</samples>
               <resolution>1</resolution>
               <min_angle>-0.785398</min_angle>
               <max_angle>0.785398</max_angle>
@@ -218,7 +221,7 @@
             <max>60</max>
             <resolution>0.01</resolution>
           </range>
-        </ray>
+        </lidar>
       </sensor>
     </gazebo>
 

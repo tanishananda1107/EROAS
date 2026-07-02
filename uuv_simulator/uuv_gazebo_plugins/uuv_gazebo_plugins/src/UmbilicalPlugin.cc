@@ -49,9 +49,7 @@
 #include <iostream>
 #include <mutex>
 
-namespace gz
-{
-namespace sim
+namespace uuv_gz_plugins
 {
 
 /////////////////////////////////////////////////
@@ -162,18 +160,17 @@ void UmbilicalPlugin::PreUpdate(
   this->dataPtr->umbilical->OnUpdate(_info, flow, _ecm);
 }
 
-}  // namespace sim
-}  // namespace gz
+}  // namespace uuv_gz_plugins
 
 // Register with gz-sim plugin system.
 // First arg  = fully-qualified class name
 // Second arg = interface(s) this plugin satisfies (comma-separated)
 GZ_ADD_PLUGIN(
-    gz::sim::UmbilicalPlugin,
+    uuv_gz_plugins::UmbilicalPlugin,
     gz::sim::System,
-    gz::sim::UmbilicalPlugin::ISystemConfigure,
-    gz::sim::UmbilicalPlugin::ISystemPreUpdate)
+    uuv_gz_plugins::UmbilicalPlugin::ISystemConfigure,
+    uuv_gz_plugins::UmbilicalPlugin::ISystemPreUpdate)
 
 // Optional alias so the plugin can be referenced without the namespace prefix
 // in the SDF <plugin filename="..."> tag.
-GZ_ADD_PLUGIN_ALIAS(gz::sim::UmbilicalPlugin, "gz::sim::UmbilicalPlugin")
+GZ_ADD_PLUGIN_ALIAS(uuv_gz_plugins::UmbilicalPlugin, "uuv_gz_plugins::UmbilicalPlugin")

@@ -37,33 +37,71 @@ standards (e.g. ISO 26262).
 
 ## Requirements
 
-To simulate the RexROV 2 vehicle, please refer to the [UUV Simulator](https://github.com/uuvsimulator/uuv_simulator)
-repository and follow the installation instructions of the package. Then you can clone
-this package in the `src` folder of you catkin workspace
-
-```
-cd ~/catkin_ws/src
-git clone https://github.com/uuvsimulator/rexrov2.git
-```
-
-and then build your catkin workspace
+This workspace is ROS 2 (Jazzy) with Gazebo Harmonic. Clone it into a colcon workspace and build with:
 
 ```bash
-cd ~/catkin_ws
-catkin_make # or <catkin build>, if you are using catkin_tools
+cd ~/eroas_ws/src/EROAS1_ros22
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install
+source install/setup.bash
 ```
 
 ## Example of usage
 
-To run a demonstration with the vehicle with teleoperation, you can run a UUV
-simulator Gazebo scenario, such as
+To run a demonstration with teleoperation:
 
 ```bash
-roslaunch rexrov2_gazebo start_demo_pid_controller.launch teleop_on:=true joy_id:=0
+ros2 launch rexrov2_gazebo start_demo_pid_controller.launch.py teleop_on:=true joy_id:=0
 ```
 
 The teleoperation nodes are pre-configured per default for the XBox 360
 controller.
+
+## EROAS World A ROS 2 demo
+
+World A spawns RexROV2 at the center height of the blue box obstacles
+(`z=-56`) and keeps the vehicle there with the World A velocity/CBF depth
+holder. It also starts a rear-following camera and a short green trail marker.
+
+Build only the World A packages:
+
+```bash
+cd ~/TANISHA/eroas_ws
+source /opt/ros/jazzy/setup.bash
+colcon build --base-paths src/EROAS1_ros2 \
+  --packages-select navigator_auv rexrov2_description rexrov2_gazebo \
+  --build-base build_eroas1_worlda \
+  --install-base install_eroas1_worlda \
+  --symlink-install
+```
+
+Launch World A:
+
+```bash
+cd ~/TANISHA/eroas_ws
+source /opt/ros/jazzy/setup.bash
+source install_eroas1_worlda/setup.bash
+ros2 launch rexrov2_gazebo start_EROAS_demo.launch.py world_name:=world_a
+```
+
+Launch World A with keyboard teleop:
+
+```bash
+cd ~/TANISHA/eroas_ws
+source /opt/ros/jazzy/setup.bash
+source install_eroas1_worlda/setup.bash
+ros2 launch rexrov2_gazebo start_teleop_cbf.launch.py world_name:=world_a
+```
+
+World A topics:
+
+```text
+Odometry/pose: /rexrov2/pose_gt
+Odometry alias: /rexrov2/odom
+Control input before depth hold/CBF: /rexrov2/cmd_vel_1
+Gazebo velocity command: /rexrov2/cmd_vel
+Green trail marker: /rexrov2/trail_marker
+```
 
 ## License
 

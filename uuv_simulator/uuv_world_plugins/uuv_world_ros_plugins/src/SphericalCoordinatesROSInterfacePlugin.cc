@@ -203,14 +203,13 @@ private:
     res->success = true;
   }
 };
+} // namespace gazebo
 
 GZ_ADD_PLUGIN(
-  SphericalCoordinatesROSInterfacePlugin,
+  gazebo::SphericalCoordinatesROSInterfacePlugin,
   gz::sim::System,
-  SphericalCoordinatesROSInterfacePlugin::ISystemConfigure)
+  gazebo::SphericalCoordinatesROSInterfacePlugin::ISystemConfigure)
 
 GZ_ADD_PLUGIN_ALIAS(
-  SphericalCoordinatesROSInterfacePlugin,
+  gazebo::SphericalCoordinatesROSInterfacePlugin,
   "gazebo::SphericalCoordinatesROSInterfacePlugin")
-
-} // namespace gazebo

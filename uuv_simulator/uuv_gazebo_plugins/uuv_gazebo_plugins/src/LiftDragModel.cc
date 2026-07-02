@@ -19,8 +19,8 @@
 
 #include <uuv_gazebo_plugins/LiftDragModel.hh>
 
-namespace gz {
-namespace sim {
+namespace uuv_gz_plugins
+{
 
 /////////////////////////////////////////////////
 bool LiftDrag::CheckForElement(sdf::ElementPtr _sdf,
@@ -125,7 +125,7 @@ gz::math::Vector3d LiftDragQuadratic::compute(
   return lift * liftDir + drag * dragDir.Normalize();
 }
 
-bool LiftDragQuadratic::GetParam(std::string _tag, double &_output)
+bool LiftDragQuadratic::GetParam(const std::string &_tag, double &_output)
 {
   _output = 0.0;
   if (_tag == "drag_constant")       _output = this->dragConstant;
@@ -217,7 +217,7 @@ gz::math::Vector3d LiftDragTwoLines::compute(
   return lift * liftDir + drag * dragDir.Normalize();
 }
 
-bool LiftDragTwoLines::GetParam(std::string _tag, double &_output)
+bool LiftDragTwoLines::GetParam(const std::string &_tag, double &_output)
 {
   _output = 0.0;
   if      (_tag == "area")          _output = this->area;
@@ -246,5 +246,4 @@ std::map<std::string, double> LiftDragTwoLines::GetListParams()
           {"cda_stall",    this->cdaStall}};
 }
 
-}  // namespace sim
-}  // namespace gz
+}  // namespace uuv_gz_plugins

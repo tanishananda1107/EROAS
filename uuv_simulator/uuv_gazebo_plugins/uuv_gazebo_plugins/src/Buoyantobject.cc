@@ -39,8 +39,8 @@
 
 #include <uuv_gazebo_plugins/BuoyantObject.hh>
 
-namespace gz {
-namespace sim {
+namespace uuv_gz_plugins
+{
 
 /////////////////////////////////////////////////
 BuoyantObject::BuoyantObject(gz::sim::Entity _linkEntity,
@@ -282,5 +282,4 @@ void BuoyantObject::StoreVector(std::string _tag, gz::math::Vector3d _vec)
 bool BuoyantObject::IsSubmerged()      { return this->isSubmerged; }
 bool BuoyantObject::IsNeutrallyBuoyant(){ return this->neutrallyBuoyant; }
 
-}  // namespace sim
-}  // namespace gz
+}  // namespace uuv_gz_plugins

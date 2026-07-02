@@ -20,38 +20,93 @@
   <xacro:arg name="namespace" default="rexrov2"/>
   <xacro:arg name="use_simplified_mesh" default="false"/>
   <xacro:arg name="inertial_reference_frame" default="world"/>
+  <xacro:arg name="hover_mode" default="false"/>
+  <xacro:arg name="green_wake" default="false"/>
+  <xacro:arg name="use_velocity_control_plugin" default="true"/>
   <!-- Include the ROV macro file -->
   <xacro:include filename="$(find rexrov2_description)/urdf/rexrov2_base.xacro"/>
   <xacro:include filename="$(find rexrov2_description)/urdf/rexrov2.gazebo.xacro"/>
+
+  <xacro:macro name="disable_link_gravity" params="link_name">
+    <gazebo reference="${link_name}">
+      <gravity>false</gravity>
+    </gazebo>
+  </xacro:macro>
 
   <!-- Create the rexrov2 -->
   <xacro:rexrov2_base
     namespace="$(arg namespace)"
     use_simplified_mesh="$(arg use_simplified_mesh)"
-    inertial_reference_frame="$(arg inertial_reference_frame)">
+    inertial_reference_frame="$(arg inertial_reference_frame)"
+    green_wake="$(arg green_wake)">
     <!--
       The underwater object plugin is given as an input block parameter to
       allow the addition of external models of manipulator units
     -->
     <gazebo>
-      <plugin name="uuv_plugin" filename="libuuv_underwater_object_ros_plugin.so">
-        <fluid_density>1028.0</fluid_density>
-        <flow_velocity_topic>hydrodynamics/current_velocity</flow_velocity_topic>
-        <debug>$(arg debug)</debug>
-        <!-- Adding the hydrodynamic and hydrostatic parameters for the vehicle-->
-        <xacro:rexrov2_hydro_model namespace="$(arg namespace)"/>
-      </plugin>
+      <xacro:unless value="$(arg hover_mode)">
+        <plugin name="uuv_simulator_ros::UnderwaterObjectROSPlugin" filename="libuuv_underwater_object_ros_plugin.so">
+          <fluid_density>1028.0</fluid_density>
+          <flow_velocity_topic>hydrodynamics/current_velocity</flow_velocity_topic>
+          <debug>$(arg debug)</debug>
+          <!-- Adding the hydrodynamic and hydrostatic parameters for the vehicle-->
+          <xacro:rexrov2_hydro_model namespace="$(arg namespace)"/>
+        </plugin>
+      </xacro:unless>
     </gazebo>
   </xacro:rexrov2_base>
-  
-  <gazebo>
-      <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
-        <robotNamespace>/$(arg namespace)</robotNamespace>
-        <robotParam>/$(arg namespace)/robot_description</robotParam>
-      </plugin>
-  </gazebo>
+
+  <xacro:if value="$(arg hover_mode)">
+    <xacro:disable_link_gravity link_name="$(arg namespace)/base_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/dvl_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/dvl_sonar0_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/dvl_sonar1_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/dvl_sonar2_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/dvl_sonar3_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/magnetometer_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/rpt_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/pressure_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/imu_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/camera_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/camera_link_optical"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/cameraright_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/cameraright_link_optical"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/cameraleft_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/cameraleft_link_optical"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/gps_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/pose_sensor_link_default"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/cc_sensor_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/sonar_link"/>
+    <xacro:disable_link_gravity link_name="blueview_p900_link"/>
+    <xacro:disable_link_gravity link_name="blueview_p900_visual_ray_link"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/thruster_0"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/thruster_1"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/thruster_2"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/thruster_3"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/thruster_4"/>
+    <xacro:disable_link_gravity link_name="$(arg namespace)/thruster_5"/>
+  </xacro:if>
 
   <!-- Joint state publisher plugin -->
   <xacro:default_joint_state_publisher namespace="$(arg namespace)" update_rate="50"/>
+
+  <!-- Gazebo Harmonic systems used by the ROS 2 EROAS demo path. -->
+  <gazebo>
+    <xacro:if value="$(arg use_velocity_control_plugin)">
+      <plugin filename="gz-sim-velocity-control-system"
+              name="gz::sim::systems::VelocityControl">
+        <topic>/rexrov2/cmd_vel</topic>
+        <initial_linear>0 0 0</initial_linear>
+        <initial_angular>0 0 0</initial_angular>
+      </plugin>
+    </xacro:if>
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <dimensions>3</dimensions>
+      <odom_publish_frequency>30</odom_publish_frequency>
+      <odom_frame>$(arg namespace)/odom</odom_frame>
+      <robot_base_frame>$(arg namespace)/base_link</robot_base_frame>
+    </plugin>
+  </gazebo>
 
 </robot>

@@ -13,7 +13,7 @@
 
 #include <sdf/sdf.hh>
 
-#include "GaussMarkovProcess.hh"
+#include "uuv_world_plugins/GaussMarkovProcess.hh"
 
 namespace uuv_gz_sim
 {
@@ -36,7 +36,7 @@ public:
                  gz::sim::EntityComponentManager &_ecm) override;
 
 protected:
-  void PublishCurrentVelocity();
+  void UpdateCurrent(double _time);
 
 private:
   gz::sim::Entity worldEntity;

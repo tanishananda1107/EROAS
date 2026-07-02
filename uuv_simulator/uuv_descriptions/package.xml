@@ -29,11 +29,7 @@
   </buildtool_depend>
 
   <exec_depend>
-    gazebo_ros
-  </exec_depend>
-
-  <exec_depend>
-    gazebo_ros2_control
+    ros_gz_sim
   </exec_depend>
 
   <exec_depend>

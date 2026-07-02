@@ -89,7 +89,16 @@
   </xacro:default_chemical_concentration_sensor_macro>
   
   <link name="${namespace}/sonar_link">
-    <!-- Add visual or collision elements if needed -->
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+    <collision>
+      <geometry>
+        <box size="0.05 0.05 0.05"/>
+      </geometry>
+    </collision>
   </link>
   
    <!-- Define the Revolute Joint -->
@@ -98,8 +107,31 @@
     <child link="${namespace}/sonar_link"/>
     <origin xyz="1.3 0 0.615" rpy="3.141592 0 0"/>
     <axis xyz="0 1 0"/> <!-- Rotation around Y-axis , check if this is correct-->
-    <limit effort="100" lower="-1.5708" upper="1.5708" velocity="100"/> <!-- 0 to 90 degrees in radians -->
+    <limit effort="100" lower="-1.5708" upper="1.5708" velocity="8.0"/>
+    <dynamics damping="0.8" friction="0.05"/>
   </joint>
+
+  <!-- Gazebo Harmonic replacement for the Gazebo Classic ROS joint
+       position controller.  ROS commands are bridged to this Gazebo topic
+       by start_EROAS_demo.launch.py. -->
+  <gazebo>
+    <plugin filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+      <joint_name>${namespace}/sonar_vertical_joint</joint_name>
+      <topic>/${namespace}/sonar_joint_position_controller/command</topic>
+      <!-- The force-command PID is unstable for this lightweight sonar link
+           in gz-sim 8.  Drive the position error through a bounded velocity
+           command so every Algorithm-1 elevation sample can settle. -->
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>2.0</p_gain>
+      <i_gain>0.0</i_gain>
+      <d_gain>0.0</d_gain>
+      <i_max>0.0</i_max>
+      <i_min>0.0</i_min>
+      <cmd_max>0.8</cmd_max>
+      <cmd_min>-0.8</cmd_min>
+    </plugin>
+  </gazebo>
 
 
   <transmission name="${namespace}/sonar_vertical_transmission">

@@ -36,6 +36,7 @@ class ROVMBSMController(
 
         DPControllerBase.__init__(
             self,
+            self,
             True
         )
 

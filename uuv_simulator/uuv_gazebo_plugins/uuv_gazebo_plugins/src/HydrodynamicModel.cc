@@ -31,8 +31,8 @@
 
 #include <uuv_gazebo_plugins/HydrodynamicModel.hh>
 
-namespace gz {
-namespace sim {
+namespace uuv_gz_plugins
+{
 
 /////////////////////////////////////////////////
 HydrodynamicModel::HydrodynamicModel(
@@ -751,5 +751,4 @@ void HMBox::Print(std::string _paramName, std::string _message)
   else HMFossen::Print(_paramName, _message);
 }
 
-}  // namespace sim
-}  // namespace gz
+}  // namespace uuv_gz_plugins

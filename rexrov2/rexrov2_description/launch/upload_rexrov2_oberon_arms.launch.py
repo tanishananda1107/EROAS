@@ -2,6 +2,7 @@ import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import LaunchConfiguration, Command
 from ament_index_python.packages import get_package_share_directory
 
@@ -17,6 +18,7 @@ def generate_launch_description():
         os.path.join(pkg_desc, 'robots', 'rexrov2_oberon_arms.xacro'),
         ' namespace:=', namespace,
     ])
+    robot_desc_param = ParameterValue(robot_desc, value_type=str)
 
     return LaunchDescription([
 
@@ -27,13 +29,14 @@ def generate_launch_description():
                 package='robot_state_publisher',
                 executable='robot_state_publisher',
                 namespace=namespace,
-                parameters=[{'robot_description': robot_desc}]
+                parameters=[{'robot_description': robot_desc_param}]
             ),
 
             Node(
-                package='gazebo_ros',
-                executable='spawn_entity.py',
-                arguments=['-entity', namespace, '-topic', 'robot_description'],
+                package='ros_gz_sim',
+                executable='create',
+                arguments=['-name', namespace, '-param', 'robot_description'],
+                parameters=[{'robot_description': robot_desc_param}],
                 output='screen'
             ),
         ]),

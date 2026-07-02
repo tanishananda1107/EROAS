@@ -9,7 +9,6 @@
 #include <gz/sim/Link.hh>
 #include <gz/sim/World.hh>
 #include <gz/sim/Entity.hh>
-#include <gz/sim/UpdateInfo.hh>
 
 #include <gz/math/Pose3.hh>
 #include <gz/math/Vector3.hh>

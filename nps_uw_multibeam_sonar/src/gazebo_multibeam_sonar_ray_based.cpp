@@ -64,7 +64,11 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/image_encodings.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
+#if __has_include(<cv_bridge/cv_bridge.hpp>)
 #include <cv_bridge/cv_bridge.hpp>
+#else
+#include <cv_bridge/cv_bridge.h>
+#endif
 
 // PCL
 #include <pcl_conversions/pcl_conversions.h>
@@ -101,7 +105,6 @@
 //              Ensure CMakeLists.txt routes this translation unit through nvcc
 //              (cuda_add_library / target_sources with CUDA language).
 #include <nps_uw_multibeam_sonar/sonar_calculation_cuda.cuh>
-#include <nps_uw_multibeam_sonar/gazebo_multibeam_sonar_raster_based.hh>
 
 namespace nps_uw_multibeam_sonar
 {
@@ -541,7 +544,7 @@ bool NpsGazeboRosMultibeamSonarRay::TryConnectSensor(
   // We therefore read angle limits directly from the SDF sensor description
   // stored in the GpuLidar component.
   const sdf::Sensor & sensor_sdf = lidar_comp->Data();
-  const sdf::Lidar  * lidar_sdf  = sensor_sdf.LidarData();
+  const sdf::Lidar  * lidar_sdf  = sensor_sdf.LidarSensor();
   if (!lidar_sdf) return false;
 
   hAngleMin_ = gz::math::Angle(lidar_sdf->HorizontalScanMinAngle().Radian());
@@ -717,10 +720,9 @@ void NpsGazeboRosMultibeamSonarRay::OnPointCloud(
     new_cloud_available_      = true;
   }
 
-  // FIX-H: only publish when subscribers exist
-  if (point_cloud_pub_->get_subscription_count() > 0) {
-    point_cloud_pub_->publish(*_msg);
-  }
+  // The ROS/Gazebo bridge is the single source of this point-cloud topic in
+  // Harmonic.  Re-publishing the subscribed cloud on the same ROS topic creates
+  // an ownership loop and can starve the raw sonar image path.
 }
 
 // =========================================================================
@@ -746,7 +748,7 @@ void NpsGazeboRosMultibeamSonarRay::ComputeSonarImage()
   auto t_start = std::chrono::high_resolution_clock::now();
 
   // GCC13-FIX-3: pass .data() pointers for legacy CUDA wrapper compatibility
-  CArray2D P_Beams = NpsGazeboSonar::sonar_calculation_wrapper(
+  NpsGazeboSonar::CArray2D P_Beams = NpsGazeboSonar::sonar_calculation_wrapper(
     depth_image,
     normal_image,
     rand_image_,
@@ -1045,12 +1047,12 @@ cv::Mat NpsGazeboRosMultibeamSonarRay::ComputeNormalImage(cv::Mat & depth)
 // =========================================================================
 
 GZ_ADD_PLUGIN(
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay,
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay,
   gz::sim::System,
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay::ISystemConfigure,
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay::ISystemPreUpdate,
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay::ISystemPostUpdate)
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay::ISystemConfigure,
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay::ISystemPreUpdate,
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay::ISystemPostUpdate)
 
 GZ_ADD_PLUGIN_ALIAS(
-  nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay,
+  ::nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay,
   "nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay")

@@ -33,14 +33,14 @@
       topic="pressure"
       mass="0.015"
       update_rate="10"
-      range="30000"
+      pressure_range="30000"
       noise_sigma="3.0"
       noise_amplitude="0.0"
       estimateDepth="false"
       standardPressure="101.325"
       kPaPerM="9.80638">
       <inertia ixx="0.00001" ixy="0.0" ixz="0.0" iyy="0.00001" iyz="0.0" izz="0.00001" />
-      <xacro:insert_block name="origin" />>
+      <xacro:insert_block name="origin" />
     </xacro:pressure_plugin_macro>
   </xacro:macro>
 
@@ -52,7 +52,7 @@
       topic="pressure"
       mass="0.015"
       update_rate="10"
-      range="30000"
+      pressure_range="30000"
       noise_sigma="3.0"
       noise_amplitude="0.0"
       estimateDepth="false"
@@ -65,7 +65,7 @@
 
   <xacro:macro name="pressure_plugin_macro"
     params="namespace suffix parent_link topic mass update_rate
-      range noise_sigma noise_amplitude estimateDepth standardPressure kPaPerM
+      pressure_range noise_sigma noise_amplitude estimateDepth standardPressure kPaPerM
       *inertia *origin">
 
     <link name="${namespace}/pressure${suffix}_link">
@@ -90,22 +90,6 @@
       <axis xyz="1 0 0"/>
     </joint>
 
-    <gazebo>
-      <plugin filename="libuuv_gazebo_ros_subsea_pressure_plugin.so" name="libuuv_gazebo_subseapressure${suffix}_plugin">
-        <robot_namespace>${namespace}</robot_namespace> <!-- (string, required): ros namespace in which the messages are published -->
-        <link_name>${namespace}/pressure${suffix}_link</link_name> <!-- (string, required): name of the body which holds the IMU sensor -->
-        <sensor_topic>${topic}</sensor_topic> <!-- (string): name of the sensor output topic and prefix of service names (defaults to imu) -->
-        <update_rate>${update_rate}</update_rate> <!-- Update period of accelerometer and gyroscope [s] -->
-
-        <saturation>${range}</saturation> <!-- measurement range [kPa] -->
-        <noise_sigma>${noise_sigma}</noise_sigma> <!-- measurement stddev [kPa] -->
-        <noise_amplitude>${noise_amplitude}</noise_amplitude>
-        <estimate_depth_on>${estimateDepth}</estimate_depth_on> <!-- infer depth? -->
-        <standard_pressure>${standardPressure}</standard_pressure> <!-- pressure at sea level (depth 0 m) [kPa] -->
-        <kPa_per_meter>${kPaPerM}</kPa_per_meter> <!-- increase in pressure [kPa] per [m] in increased depth -->
-        <enable_gazebo_messages>false</enable_gazebo_messages>
-      </plugin>
-    </gazebo>
   </xacro:macro>
 
 </robot>

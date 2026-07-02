@@ -1,0 +1,1832 @@
+<sdf version='1.11'>
+  <model name='rexrov2'>
+    <link name='rexrov2/base_link'>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>1862.8699999999999</mass>
+        <inertia>
+          <ixx>525.38999999999999</ixx>
+          <ixy>1.4399999999999999</ixy>
+          <ixz>33.409999999999997</ixz>
+          <iyy>794.20000000000005</iyy>
+          <iyz>2.6000000000000001</iyz>
+          <izz>691.23000000000002</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/base_link_collision'>
+        <pose>0 0 -0.75 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>2.5600000000000001 1.5 0.10000000000000001</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <collision name='rexrov2/base_link_collision_1'>
+        <pose>0 0 0.59999999999999998 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>2.5600000000000001 1.5 0.40000000000000002</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <collision name='rexrov2/base_link_collision_2'>
+        <pose>-0.20000000000000001 0.69999999999999996 -0.14999999999999999 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>2.2000000000000002 0.10000000000000001 1.1000000000000001</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <collision name='rexrov2/base_link_collision_3'>
+        <pose>-0.20000000000000001 -0.69999999999999996 -0.14999999999999999 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>2.2000000000000002 0.10000000000000001 1.1000000000000001</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/base_link_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_ros22/rexrov2_description/share/rexrov2_description/meshes/RexROV2_no_props.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <gravity>true</gravity>
+    </link>
+    <joint name='rexrov2/camera_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>1.3999999999999999 0 0.40000000000000002 0 0.10000000000000001 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/camera_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/camera_link'>
+      <pose relative_to='rexrov2/camera_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.10000000000000001</mass>
+        <inertia>
+          <ixx>1.0000000000000001e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.0000000000000001e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1.0000000000000001e-05</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/camera_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/camera_link_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_worlda/uuv_sensor_ros_plugins/share/uuv_sensor_ros_plugins/meshes/oe14-372.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <sensor name='camera' type='camera'>
+        <update_rate>30</update_rate>
+        <camera name='camera'>
+          <horizontal_fov>1.5125</horizontal_fov>
+          <image>
+            <width>1920</width>
+            <height>1080</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.050000000000000003</near>
+            <far>3000</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0</mean>
+            <stddev>0.02</stddev>
+          </noise>
+        </camera>
+      </sensor>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/camera_optical_joint' type='revolute'>
+      <pose relative_to='rexrov2/camera_link'>0 0 0 -1.5707963267948959 -5.5511151231257827e-17 -1.5707963267948959</pose>
+      <parent>rexrov2/camera_link</parent>
+      <child>rexrov2/camera_link_optical</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/camera_link_optical'>
+      <pose relative_to='rexrov2/camera_optical_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.6666659999999999e-12</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.6666659999999999e-12</iyy>
+          <iyz>0</iyz>
+          <izz>1.6666659999999999e-12</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/camera_link_optical_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/cameraleft_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>1.1499999999999999 0.63 0.40000000000000002 -1.6814720650741807e-17 0.59999999999999987 -0.39999999999999991</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/cameraleft_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/cameraleft_link'>
+      <pose relative_to='rexrov2/cameraleft_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.10000000000000001</mass>
+        <inertia>
+          <ixx>1.0000000000000001e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.0000000000000001e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1.0000000000000001e-05</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/cameraleft_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/cameraleft_link_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_worlda/uuv_sensor_ros_plugins/share/uuv_sensor_ros_plugins/meshes/oe14-372.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <sensor name='cameraleft' type='camera'>
+        <update_rate>30</update_rate>
+        <camera name='cameraleft'>
+          <horizontal_fov>1.5125</horizontal_fov>
+          <image>
+            <width>1920</width>
+            <height>1080</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.050000000000000003</near>
+            <far>3000</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0</mean>
+            <stddev>0.02</stddev>
+          </noise>
+        </camera>
+      </sensor>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/cameraleft_optical_joint' type='revolute'>
+      <pose relative_to='rexrov2/cameraleft_link'>0 0 0 -1.5707963267948959 -5.5511151231257827e-17 -1.5707963267948959</pose>
+      <parent>rexrov2/cameraleft_link</parent>
+      <child>rexrov2/cameraleft_link_optical</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/cameraleft_link_optical'>
+      <pose relative_to='rexrov2/cameraleft_optical_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.6666659999999999e-12</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.6666659999999999e-12</iyy>
+          <iyz>0</iyz>
+          <izz>1.6666659999999999e-12</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/cameraleft_link_optical_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/cameraright_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>1.1499999999999999 -0.63 0.40000000000000002 1.6814720650741807e-17 0.59999999999999987 0.39999999999999991</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/cameraright_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/cameraright_link'>
+      <pose relative_to='rexrov2/cameraright_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.10000000000000001</mass>
+        <inertia>
+          <ixx>1.0000000000000001e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.0000000000000001e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1.0000000000000001e-05</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/cameraright_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/cameraright_link_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_worlda/uuv_sensor_ros_plugins/share/uuv_sensor_ros_plugins/meshes/oe14-372.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <sensor name='cameraright' type='camera'>
+        <update_rate>30</update_rate>
+        <camera name='cameraright'>
+          <horizontal_fov>1.5125</horizontal_fov>
+          <image>
+            <width>1920</width>
+            <height>1080</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.050000000000000003</near>
+            <far>3000</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0</mean>
+            <stddev>0.02</stddev>
+          </noise>
+        </camera>
+      </sensor>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/cameraright_optical_joint' type='revolute'>
+      <pose relative_to='rexrov2/cameraright_link'>0 0 0 -1.5707963267948959 -5.5511151231257827e-17 -1.5707963267948959</pose>
+      <parent>rexrov2/cameraright_link</parent>
+      <child>rexrov2/cameraright_link_optical</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/cameraright_link_optical'>
+      <pose relative_to='rexrov2/cameraright_optical_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.6666659999999999e-12</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.6666659999999999e-12</iyy>
+          <iyz>0</iyz>
+          <izz>1.6666659999999999e-12</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/cameraright_link_optical_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/cc_sensor_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>0 0 0 0 0 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/cc_sensor_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/cc_sensor_link'>
+      <pose relative_to='rexrov2/cc_sensor_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.0000000000000001e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.0000000000000001e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1.0000000000000001e-05</izz>
+        </inertia>
+      </inertial>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/dvl_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>0.29430699999999999 0.46849400000000002 -0.68000000000000005 0 1.5707963267948966 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/dvl_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/dvl_link'>
+      <pose relative_to='rexrov2/dvl_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.7e-08</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.7e-08</iyy>
+          <iyz>0</iyz>
+          <izz>1.7e-08</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/dvl_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/dvl_link_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_worlda/uuv_sensor_ros_plugins/share/uuv_sensor_ros_plugins/meshes/dvl.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/dvl_sonar0_joint' type='revolute'>
+      <pose relative_to='rexrov2/dvl_link'>0 0 0 0 -0.52000000000000002 0</pose>
+      <parent>rexrov2/dvl_link</parent>
+      <child>rexrov2/dvl_sonar0_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/dvl_sonar0_link'>
+      <pose relative_to='rexrov2/dvl_sonar0_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.7e-08</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.7e-08</iyy>
+          <iyz>0</iyz>
+          <izz>1.7e-08</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/dvl_sonar0_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <sensor name='dvl_sonar0' type='ray'>
+        <pose>0 0 0 0 0 0</pose>
+        <update_rate>7</update_rate>
+        <visualize>false</visualize>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>3</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.029999999999999999</min_angle>
+              <max_angle>0.029999999999999999</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>3</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.029999999999999999</min_angle>
+              <max_angle>0.029999999999999999</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.55000000000000004</min>
+            <max>81</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+      </sensor>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/dvl_sonar1_joint' type='revolute'>
+      <pose relative_to='rexrov2/dvl_link'>0 0 0 0 0 0.52000000000000024</pose>
+      <parent>rexrov2/dvl_link</parent>
+      <child>rexrov2/dvl_sonar1_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/dvl_sonar1_link'>
+      <pose relative_to='rexrov2/dvl_sonar1_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.7e-08</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.7e-08</iyy>
+          <iyz>0</iyz>
+          <izz>1.7e-08</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/dvl_sonar1_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <sensor name='dvl_sonar1' type='ray'>
+        <pose>0 0 0 0 0 0</pose>
+        <update_rate>7</update_rate>
+        <visualize>false</visualize>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>3</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.029999999999999999</min_angle>
+              <max_angle>0.029999999999999999</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>3</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.029999999999999999</min_angle>
+              <max_angle>0.029999999999999999</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.55000000000000004</min>
+            <max>81</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+      </sensor>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/dvl_sonar2_joint' type='revolute'>
+      <pose relative_to='rexrov2/dvl_link'>0 0 0 0 0.52000000000000002 0</pose>
+      <parent>rexrov2/dvl_link</parent>
+      <child>rexrov2/dvl_sonar2_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/dvl_sonar2_link'>
+      <pose relative_to='rexrov2/dvl_sonar2_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.7e-08</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.7e-08</iyy>
+          <iyz>0</iyz>
+          <izz>1.7e-08</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/dvl_sonar2_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <sensor name='dvl_sonar2' type='ray'>
+        <pose>0 0 0 0 0 0</pose>
+        <update_rate>7</update_rate>
+        <visualize>false</visualize>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>3</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.029999999999999999</min_angle>
+              <max_angle>0.029999999999999999</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>3</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.029999999999999999</min_angle>
+              <max_angle>0.029999999999999999</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.55000000000000004</min>
+            <max>81</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+      </sensor>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/dvl_sonar3_joint' type='revolute'>
+      <pose relative_to='rexrov2/dvl_link'>0 0 0 0 0 -0.52000000000000024</pose>
+      <parent>rexrov2/dvl_link</parent>
+      <child>rexrov2/dvl_sonar3_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/dvl_sonar3_link'>
+      <pose relative_to='rexrov2/dvl_sonar3_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.7e-08</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.7e-08</iyy>
+          <iyz>0</iyz>
+          <izz>1.7e-08</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/dvl_sonar3_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <sensor name='dvl_sonar3' type='ray'>
+        <pose>0 0 0 0 0 0</pose>
+        <update_rate>7</update_rate>
+        <visualize>false</visualize>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>3</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.029999999999999999</min_angle>
+              <max_angle>0.029999999999999999</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>3</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.029999999999999999</min_angle>
+              <max_angle>0.029999999999999999</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.55000000000000004</min>
+            <max>81</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+      </sensor>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/gps_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>0 0 0 0 0 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/gps_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/gps_link'>
+      <pose relative_to='rexrov2/gps_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.0000000000000001e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.0000000000000001e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1.0000000000000001e-05</izz>
+        </inertia>
+      </inertial>
+      <sensor name='rexrov2/gps' type='gps'>
+        <pose>0 0 0 0 0 0</pose>
+        <visualize>false</visualize>
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <gps>
+          <position_sensing>
+            <horizontal>
+              <noise type='gaussian'>
+                <mean>0</mean>
+                <stddev>0</stddev>
+                <bias_mean>0</bias_mean>
+                <bias_stddev>0</bias_stddev>
+              </noise>
+            </horizontal>
+            <vertical>
+              <noise type='gaussian'>
+                <mean>0</mean>
+                <stddev>0</stddev>
+                <bias_mean>0</bias_mean>
+                <bias_stddev>0</bias_stddev>
+              </noise>
+            </vertical>
+          </position_sensing>
+          <velocity_sensing>
+            <horizontal>
+              <noise type='gaussian'>
+                <mean>0</mean>
+                <stddev>0</stddev>
+                <bias_mean>0</bias_mean>
+                <bias_stddev>0</bias_stddev>
+              </noise>
+            </horizontal>
+            <vertical>
+              <noise type='gaussian'>
+                <mean>0</mean>
+                <stddev>0</stddev>
+                <bias_mean>0</bias_mean>
+                <bias_stddev>0</bias_stddev>
+              </noise>
+            </vertical>
+          </velocity_sensing>
+        </gps>
+      </sensor>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/imu_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>0 0 0 0 0 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/imu_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/imu_link'>
+      <pose relative_to='rexrov2/imu_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.014999999999999999</mass>
+        <inertia>
+          <ixx>1.0000000000000001e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.0000000000000001e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1.0000000000000001e-05</izz>
+        </inertia>
+      </inertial>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/magnetometer_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>0 0 0 0 0 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/magnetometer_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/magnetometer_link'>
+      <pose relative_to='rexrov2/magnetometer_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.014999999999999999</mass>
+        <inertia>
+          <ixx>1.0000000000000001e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.0000000000000001e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1.0000000000000001e-05</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/magnetometer_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/magnetometer_link_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.10000000000000001 0.10000000000000001 0.10000000000000001</size>
+          </box>
+        </geometry>
+      </visual>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/pose_sensor_default_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>0 0 0 0 0 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/pose_sensor_link_default</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/pose_sensor_link_default'>
+      <pose relative_to='rexrov2/pose_sensor_default_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.0000000000000001e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.0000000000000001e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1.0000000000000001e-05</izz>
+        </inertia>
+      </inertial>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/pressure_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>-1.3200000000000001 0.5 0.84999999999999998 0 0 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/pressure_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/pressure_link'>
+      <pose relative_to='rexrov2/pressure_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.014999999999999999</mass>
+        <inertia>
+          <ixx>1.0000000000000001e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.0000000000000001e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1.0000000000000001e-05</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/pressure_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/pressure_link_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_worlda/uuv_sensor_ros_plugins/share/uuv_sensor_ros_plugins/meshes/pressure.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/rpt_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>-1.3200000000000001 0 0.80000000000000004 0 0 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/rpt_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0</upper>
+          <effort>0</effort>
+          <velocity>0</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/rpt_link'>
+      <pose relative_to='rexrov2/rpt_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1.7e-08</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.7e-08</iyy>
+          <iyz>0</iyz>
+          <izz>1.7e-08</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/rpt_link_collision'>
+        <pose>0 0 0 0 1.5707963267948966 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/rpt_link_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_worlda/uuv_sensor_ros_plugins/share/uuv_sensor_ros_plugins/meshes/rpt.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/sonar_vertical_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>1.3 0 0.61499999999999999 3.1415920000000002 0 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/sonar_link</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-1.5708</lower>
+          <upper>1.5708</upper>
+          <effort>100</effort>
+          <velocity>100</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/sonar_link'>
+      <pose relative_to='rexrov2/sonar_vertical_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>4.4500099999999989</mass>
+        <inertia>
+          <ixx>0.037000000169999998</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.00100000017</iyy>
+          <iyz>0</iyz>
+          <izz>0.037000000169999998</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/sonar_link_collision'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.050000000000000003 0.050000000000000003 0.050000000000000003</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <collision name='rexrov2/sonar_link_fixed_joint_lump__blueview_p900_link_collision_1'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>model://blueview_p900_nps_multibeam/meshes/COLLISION-p900.dae</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/sonar_link_fixed_joint_lump__blueview_p900_link_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>model://blueview_p900_nps_multibeam/meshes/p900.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <gravity>false</gravity>
+      <sensor name='blueview_p900_sensor' type='gpu_ray'>
+        <visualize>false</visualize>
+        <always_on>true</always_on>
+        <update_rate>10</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>512</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.78539816339000001</min_angle>
+              <max_angle>0.78539816339000001</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>500</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.034906600000000003</min_angle>
+              <max_angle>0.034906600000000003</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10000000000000001</min>
+            <max>17</max>
+            <resolution>0.10000000000000001</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0</mean>
+            <stddev>0</stddev>
+          </noise>
+        </ray>
+        <plugin name='nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay' filename='libnps_multibeam_sonar_ray_ros_plugin.so'>
+          <verticalFOV>90</verticalFOV>
+          <sonarFreq>900e3</sonarFreq>
+          <bandwidth>29.9e3</bandwidth>
+          <soundSpeed>1500</soundSpeed>
+          <sourceLevel>220</sourceLevel>
+          <maxDistance>15</maxDistance>
+          <raySkips>10</raySkips>
+          <sensorGain>0.04</sensorGain>
+          <plotScaler>1</plotScaler>
+          <writeLog>True</writeLog>
+          <debugFlag>0</debugFlag>
+          <writeFrameInterval>5</writeFrameInterval>
+          <cameraName>blueview_p900</cameraName>
+          <imageTopicName>image_raw</imageTopicName>
+          <cameraInfoTopicName>image_raw/camera_info</cameraInfoTopicName>
+          <pointCloudTopicName>rexrov2/blueview_p900_point_cloud</pointCloudTopicName>
+          <sonarImageRawTopicName>rexrov2/blueview_p900/sonar_image_raw</sonarImageRawTopicName>
+          <sonarImageTopicName>rexrov2/blueview_p900/sonar_image</sonarImageTopicName>
+          <frameName>blueview_p900_forward_sonar_optical_link</frameName>
+        </plugin>
+        <pose>0 0 0 0 0 0</pose>
+      </sensor>
+      <gravity>false</gravity>
+      <sensor name='multibeam_ray' type='ray'>
+        <update_rate>5</update_rate>
+        <visualize>false</visualize>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>100</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.78539800000000004</min_angle>
+              <max_angle>0.78539800000000004</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>3</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.17453299999999999</min_angle>
+              <max_angle>0.17453299999999999</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.20000000000000001</min>
+            <max>60</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+        <pose>0 0 0 0 0 0</pose>
+      </sensor>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/thruster_0_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>0.48780000000000001 0 0.23730000000000001 0 0 1.5707960999999999</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/thruster_0</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/thruster_0'>
+      <pose relative_to='rexrov2/thruster_0_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>0</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0</iyy>
+          <iyz>0</iyz>
+          <izz>0</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/thruster_0_collision'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/thruster_0_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_ros22/rexrov2_description/share/rexrov2_description/meshes/Propeller.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <self_collide>false</self_collide>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/thruster_1_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>-0.82169999999999999 0 0.58899999999999997 0 -1.3089967499999997 0</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/thruster_1</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/thruster_1'>
+      <pose relative_to='rexrov2/thruster_1_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>0</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0</iyy>
+          <iyz>0</iyz>
+          <izz>0</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/thruster_1_collision'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/thruster_1_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_ros22/rexrov2_description/share/rexrov2_description/meshes/Propeller.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <self_collide>false</self_collide>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/thruster_2_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>0.86539999999999995 -0.53220000000000001 0.53320000000000001 -4.3517270731547147e-16 -1.1780970750000004 1.5707961000000004</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/thruster_2</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/thruster_2'>
+      <pose relative_to='rexrov2/thruster_2_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>0</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0</iyy>
+          <iyz>0</iyz>
+          <izz>0</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/thruster_2_collision'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/thruster_2_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_ros22/rexrov2_description/share/rexrov2_description/meshes/Propeller.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <self_collide>false</self_collide>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/thruster_3_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>0.86539999999999995 0.53220000000000001 0.53320000000000001 4.3517270731547147e-16 1.1780970750000004 1.5707961000000004</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/thruster_3</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/thruster_3'>
+      <pose relative_to='rexrov2/thruster_3_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>0</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0</iyy>
+          <iyz>0</iyz>
+          <izz>0</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/thruster_3_collision'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/thruster_3_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_ros22/rexrov2_description/share/rexrov2_description/meshes/Propeller.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <self_collide>false</self_collide>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/thruster_4_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>-0.70760000000000001 0.51290000000000002 0.2404 0 0 0.43633224999999998</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/thruster_4</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/thruster_4'>
+      <pose relative_to='rexrov2/thruster_4_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>0</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0</iyy>
+          <iyz>0</iyz>
+          <izz>0</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/thruster_4_collision'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/thruster_4_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_ros22/rexrov2_description/share/rexrov2_description/meshes/Propeller.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <self_collide>false</self_collide>
+      <gravity>false</gravity>
+    </link>
+    <joint name='rexrov2/thruster_5_joint' type='revolute'>
+      <pose relative_to='rexrov2/base_link'>-0.70760000000000001 -0.51290000000000002 0.2404 0 0 -0.43633224999999998</pose>
+      <parent>rexrov2/base_link</parent>
+      <child>rexrov2/thruster_5</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='rexrov2/thruster_5'>
+      <pose relative_to='rexrov2/thruster_5_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>0</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0</iyy>
+          <iyz>0</iyz>
+          <izz>0</izz>
+        </inertia>
+      </inertial>
+      <collision name='rexrov2/thruster_5_collision'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>9.9999999999999995e-07</length>
+            <radius>9.9999999999999995e-07</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <visual name='rexrov2/thruster_5_visual'>
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/user/TANISHA/eroas_ws/install_eroas1_ros22/rexrov2_description/share/rexrov2_description/meshes/Propeller.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <self_collide>false</self_collide>
+      <gravity>false</gravity>
+    </link>
+    <plugin name='uuv_simulator_ros::ThrusterROSPlugin' filename='libuuv_thruster_ros_plugin.so'>
+      <linkName>rexrov2/thruster_0</linkName>
+      <jointName>rexrov2/thruster_0_joint</jointName>
+      <thrusterID>0</thrusterID>
+      <dynamics>
+        <type>FirstOrder</type>
+        <timeConstant>0.05</timeConstant>
+      </dynamics>
+      <conversion>
+        <type>Basic</type>
+        <rotorConstant>0.026546960744430276</rotorConstant>
+      </conversion>
+    </plugin>
+    <plugin name='uuv_simulator_ros::ThrusterROSPlugin' filename='libuuv_thruster_ros_plugin.so'>
+      <linkName>rexrov2/thruster_1</linkName>
+      <jointName>rexrov2/thruster_1_joint</jointName>
+      <thrusterID>1</thrusterID>
+      <dynamics>
+        <type>FirstOrder</type>
+        <timeConstant>0.05</timeConstant>
+      </dynamics>
+      <conversion>
+        <type>Basic</type>
+        <rotorConstant>0.026546960744430276</rotorConstant>
+      </conversion>
+    </plugin>
+    <plugin name='uuv_simulator_ros::ThrusterROSPlugin' filename='libuuv_thruster_ros_plugin.so'>
+      <linkName>rexrov2/thruster_2</linkName>
+      <jointName>rexrov2/thruster_2_joint</jointName>
+      <thrusterID>2</thrusterID>
+      <dynamics>
+        <type>FirstOrder</type>
+        <timeConstant>0.05</timeConstant>
+      </dynamics>
+      <conversion>
+        <type>Basic</type>
+        <rotorConstant>0.026546960744430276</rotorConstant>
+      </conversion>
+    </plugin>
+    <plugin name='uuv_simulator_ros::ThrusterROSPlugin' filename='libuuv_thruster_ros_plugin.so'>
+      <linkName>rexrov2/thruster_3</linkName>
+      <jointName>rexrov2/thruster_3_joint</jointName>
+      <thrusterID>3</thrusterID>
+      <dynamics>
+        <type>FirstOrder</type>
+        <timeConstant>0.05</timeConstant>
+      </dynamics>
+      <conversion>
+        <type>Basic</type>
+        <rotorConstant>0.026546960744430276</rotorConstant>
+      </conversion>
+    </plugin>
+    <plugin name='uuv_simulator_ros::ThrusterROSPlugin' filename='libuuv_thruster_ros_plugin.so'>
+      <linkName>rexrov2/thruster_4</linkName>
+      <jointName>rexrov2/thruster_4_joint</jointName>
+      <thrusterID>4</thrusterID>
+      <dynamics>
+        <type>FirstOrder</type>
+        <timeConstant>0.05</timeConstant>
+      </dynamics>
+      <conversion>
+        <type>Basic</type>
+        <rotorConstant>0.026546960744430276</rotorConstant>
+      </conversion>
+    </plugin>
+    <plugin name='uuv_simulator_ros::ThrusterROSPlugin' filename='libuuv_thruster_ros_plugin.so'>
+      <linkName>rexrov2/thruster_5</linkName>
+      <jointName>rexrov2/thruster_5_joint</jointName>
+      <thrusterID>5</thrusterID>
+      <dynamics>
+        <type>FirstOrder</type>
+        <timeConstant>0.05</timeConstant>
+      </dynamics>
+      <conversion>
+        <type>Basic</type>
+        <rotorConstant>0.026546960744430276</rotorConstant>
+      </conversion>
+    </plugin>
+    <plugin name='uuv_simulator_ros::JointStatePublisher' filename='libuuv_joint_state_publisher.so'>
+      <robotNamespace>rexrov2</robotNamespace>
+      <updateRate>50</updateRate>
+    </plugin>
+    <plugin name='gz::sim::systems::VelocityControl' filename='gz-sim-velocity-control-system'>
+      <topic>/rexrov2/cmd_vel</topic>
+      <initial_linear>0 0 0</initial_linear>
+      <initial_angular>0 0 0</initial_angular>
+    </plugin>
+    <plugin name='gz::sim::systems::OdometryPublisher' filename='gz-sim-odometry-publisher-system'>
+      <dimensions>3</dimensions>
+      <odom_publish_frequency>30</odom_publish_frequency>
+      <odom_frame>rexrov2/odom</odom_frame>
+      <robot_base_frame>rexrov2/base_link</robot_base_frame>
+    </plugin>
+    <frame name='ray_joint' attached_to='blueview_p900_link'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+    <frame name='blueview_p900_visual_ray_link' attached_to='ray_joint'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+    <frame name='multibeam_sonar_joint' attached_to='rexrov2/sonar_link'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+    <frame name='blueview_p900_link' attached_to='multibeam_sonar_joint'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+      <plugin filename="gz-sim-velocity-control-system"
+            name="gz::sim::systems::VelocityControl">
+      <topic>/rexrov2/cmd_vel</topic>
+    </plugin>
+</model>
+</sdf>
