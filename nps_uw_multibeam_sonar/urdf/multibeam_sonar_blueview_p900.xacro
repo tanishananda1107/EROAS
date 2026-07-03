@@ -102,7 +102,7 @@
       <sensor name="${name}_sensor" type="gpu_lidar">
         <visualize>true</visualize>
         <always_on>true</always_on>
-        <update_rate>10</update_rate>
+        <update_rate>8.0</update_rate>
         <lidar>
           <visualize>true</visualize>
           <scan>
@@ -139,35 +139,6 @@
             <stddev>${gaussian_noise_stddev}</stddev>
           </noise>
         </lidar>
-
-        <plugin filename="libnps_multibeam_sonar_ray_ros_plugin.so" name="nps_uw_multibeam_sonar::NpsGazeboRosMultibeamSonarRay">
-          <!-- Sonar properties -->
-          <verticalFOV>90</verticalFOV>
-          <sonarFreq>900e3</sonarFreq>
-          <bandwidth>29.9e3</bandwidth>
-          <soundSpeed>1500</soundSpeed>
-          <sourceLevel>220</sourceLevel>
-          <maxDistance>${maxDistance}</maxDistance>
-          <!-- Harmonic's GpuLidar can return the sonar housing / RexROV hull
-               while the vertical joint is pivoted.  Reject only that
-               near-field self-occlusion before synthesizing the sonar image. -->
-          <pointCloudCutoff>0.30</pointCloudCutoff>
-          <raySkips>${raySkips}</raySkips>
-          <sensorGain>${sensorGain}</sensorGain>
-          <plotScaler>${plotScaler}</plotScaler>
-          <writeLog>${writeLog}</writeLog>
-          <debugFlag>${debug}</debugFlag>
-          <writeFrameInterval>${writeFrameInterval}</writeFrameInterval>
-          <!-- This name is prepended to ROS topics -->
-          <cameraName>${name}</cameraName>
-          <!-- ROS publication topics -->
-          <imageTopicName>image_raw</imageTopicName>
-          <cameraInfoTopicName>image_raw/camera_info</cameraInfoTopicName>
-          <pointCloudTopicName>${pcl_topic_name}</pointCloudTopicName>
-          <sonarImageRawTopicName>${sonar_image_raw_topic}</sonarImageRawTopicName>
-          <sonarImageTopicName>${sonar_image_topic}</sonarImageTopicName>
-          <frameName>${name}_forward_sonar_optical_link</frameName>
-        </plugin>
 
       </sensor>
     </gazebo>

@@ -90,8 +90,8 @@ def generate_launch_description():
                 package='ros_gz_sim',
                 executable='create',
                 arguments=[
-                    '-name', namespace,
-                    '-param', 'robot_description',
+                    '-name', 'rexrov2',
+                    '-string', robot_desc,
                     '-x', x,
                     '-y', y,
                     '-z', z,
@@ -99,7 +99,6 @@ def generate_launch_description():
                     '-P', pitch,
                     '-Y', yaw,
                 ],
-                parameters=[{'robot_description': robot_desc_param}],
                 output='screen',
                 condition=UnlessCondition(use_geo)
             ),

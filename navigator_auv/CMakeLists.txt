@@ -20,6 +20,7 @@ install(PROGRAMS
   scripts/just_cbf.py
   scripts/obstacle_draw.py
   scripts/only_gap.py
+  scripts/sonar_frame_converter.py
   scripts/pose_plotter.py
   scripts/hover_hold.py
   scripts/pose_gt_to_odom.py
@@ -27,6 +28,7 @@ install(PROGRAMS
   scripts/trail_marker.py
   scripts/hover_patrol.py
   scripts/velocity_cbf.py
+  scripts/waypoint_hover.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
