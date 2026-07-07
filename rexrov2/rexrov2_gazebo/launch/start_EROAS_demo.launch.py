@@ -53,7 +53,7 @@ WORLD_A = {
     # waypoints match the World A block used by the paper-style scenario.
     # planner holds the spawn depth until SPD2C explicitly enters vertical
     # avoidance, then resumes the original waypoint progression.
-    'spawn': ('29', '33', '-54', '2.82'),
+    'spawn': ('10', '26', '-54', '0.0'),
     'waypoints': '29,97,-50;31,110,-55;30,90,-90;30,120,-40',
     'target_depth': '-54.0',
     'cruise_speed': 0.5,
@@ -233,10 +233,10 @@ def _camera_follow_actions():
         'track_mode: FOLLOW '
         'follow_target: {name: "rexrov2" type: MODEL} '
         'track_target: {name: "rexrov2" type: MODEL} '
-        'follow_offset: {x: -16 y: 0 z: 8.5} '
-        'track_offset: {x: 0 y: 0 z: 1.2} '
-        'follow_pgain: 1.25 '
-        'track_pgain: 1.25'
+        'follow_offset: {x: -50 y: 0 z: 30} '
+        'track_offset: {x: 0 y: 0 z: 0} '
+        'follow_pgain: 0.5 '
+        'track_pgain: 0.5'
     )
     track_cmd = [
         'gz', 'topic',
@@ -374,7 +374,7 @@ def _setup(context, *args, **kwargs):
         ),
 
         TimerAction(
-            period=5.0,
+            period=3.0,
             actions=[
                 IncludeLaunchDescription(
                     PythonLaunchDescriptionSource(os.path.join(pkg_desc, 'launch', 'upload_rexrov2.launch.py')),
@@ -425,7 +425,7 @@ def _setup(context, *args, **kwargs):
                 ('/model/rexrov2/odometry', '/rexrov2/pose_gt'),
                 (sonar_points_gz_topic, '/rexrov2/blueview_p900_point_cloud'),
             ],
-            parameters=[{'use_sim_time': True}],
+            parameters=[{'use_sim_time': False}],
             output='screen',
         ),
 
@@ -453,7 +453,7 @@ def _setup(context, *args, **kwargs):
             executable='only_gap.py',
             name='sonar_heading_node',
             parameters=[{
-                'use_sim_time': True,
+                'use_sim_time': False,
                 'waypoints': waypoints,
                 'cmd_vel_topic': '/rexrov2/cmd_vel_1',
                 'pose_topic': '/rexrov2/pose_gt',
@@ -516,7 +516,7 @@ def _setup(context, *args, **kwargs):
             executable='hover_hold.py',
             name='rexrov2_hover_hold',
             parameters=[{
-                'use_sim_time': True,
+                'use_sim_time': False,
                 'pose_topic': '/rexrov2/pose_gt',
                 'cmd_vel_topic': '/rexrov2/cmd_vel',
                 'target_depth': float(cfg['target_depth']),
@@ -533,7 +533,7 @@ def _setup(context, *args, **kwargs):
             executable='velocity_cbf.py',
             name='obstacle_avoidance_node',
             parameters=[{
-                'use_sim_time': True,
+                'use_sim_time': False,
                 'target_depth': float(cfg['target_depth']),
                 'depth_hold_kp': cfg.get('depth_hold_kp', 0.14),
                 'depth_deadband': cfg.get('depth_deadband', 0.12),
@@ -608,7 +608,7 @@ def _setup(context, *args, **kwargs):
             executable='waypoint_hover.py',
             name='waypoint_hover',
             parameters=[{
-                'use_sim_time': True,
+                'use_sim_time': False,
                 'waypoints': waypoints,
             }],
             output='screen',
@@ -619,7 +619,7 @@ def _setup(context, *args, **kwargs):
             package='navigator_auv',
             executable='sonar_reconstruction.py',
             name='sonar_reconstruction',
-            parameters=[{'use_sim_time': True}],
+            parameters=[{'use_sim_time': False}],
             output='screen',
             condition=IfCondition(LaunchConfiguration('start_sonar_reconstruction')),
         ),
@@ -630,7 +630,7 @@ def _setup(context, *args, **kwargs):
                 executable='trail_marker.py',
                 name='rexrov2_green_trail',
                 parameters=[{
-                    'use_sim_time': True,
+                    'use_sim_time': False,
                     'pose_topic': '/rexrov2/pose_gt',
                     'marker_topic': '/rexrov2/trail_marker',
                     'frame_id': 'world',
@@ -651,7 +651,7 @@ def _setup(context, *args, **kwargs):
                 executable='spawner.py',
                 name='eroas_trail_spawner',
                 parameters=[{
-                    'use_sim_time': True,
+                    'use_sim_time': False,
                     'world_name': gz_world_name,
                     'pose_topic': '/rexrov2/pose_gt',
                     'distance_threshold': 0.35,
@@ -668,7 +668,7 @@ def _setup(context, *args, **kwargs):
             executable='pose_gt_to_odom.py',
             name='rexrov2_odom_alias',
             parameters=[{
-                'use_sim_time': True,
+                'use_sim_time': False,
                 'input_topic': '/rexrov2/pose_gt',
                 'output_topic': '/rexrov2/odom',
             }],
