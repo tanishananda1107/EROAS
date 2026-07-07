@@ -794,6 +794,47 @@ class ObstacleAvoidanceNode(Node):
                 in_run = False
         return count
 
+    def _scg_constraints(self, vp):
+        """Build CBF constraints from FLS-based SCG data (only_gap.py output).
+        
+        When scg_obstacle_count > 0, we have obstacles detected by sonar.
+        Convert the SCG gap information into constraint points at the
+        obstacle boundaries near the selected gap.
+        """
+        constraints = []
+        
+        if self.scg_obstacle_count == 0 or not np.isfinite(self.scg_h):
+            return constraints
+        
+        # SCG h value is the CBF barrier function from only_gap.py
+        # If h >= 0, no constraint violation. If h < 0, obstacle too close.
+        # Map scg_h to a pseudo-distance for constraint building.
+        scg_distance = np.sqrt(self.scg_h + self.R_o**2) if self.scg_h >= -self.R_o**2 else self.R_o
+        
+        # If too far away, don't add constraint
+        if scg_distance > self.radius:
+            return constraints
+        
+        # Create a synthetic constraint point in the direction of the
+        # selected gap angle (where the obstacle is relative to us)
+        # The gap_angle points to the free space; obstacle is perpendicular.
+        obstacle_angle = self.scg_selected_gap_angle + np.pi / 2.0
+        
+        # Generate 2-3 constraint points around the obstacle direction
+        # to properly blockade this direction
+        for angle_offset in [-0.3, 0.0, 0.3]:
+            angle = obstacle_angle + angle_offset
+            cp_xy = vp[:2] + scg_distance * np.array([np.cos(angle), np.sin(angle)])
+            cp_z = vp[2]  # Keep obstacle at vehicle Z for XY plane constraint
+            
+            constraints.append({
+                'source': 'scg_fls',
+                'point': np.array([cp_xy[0], cp_xy[1], cp_z]),
+                'distance': scg_distance,
+            })
+        
+        return constraints
+
     def _scg_beam_to_angle(self, beam):
         center = (self.local_scg_beam_count - 1) / 2.0
         return (beam - center) * (
@@ -1221,6 +1262,9 @@ class ObstacleAvoidanceNode(Node):
             constraints.extend(self._analytical_constraints(vp))
         if self._point_cloud_is_fresh() or self._spatial_memory_has_points():
             constraints.extend(self._point_cloud_constraints(vp))
+        # Integrate FLS-based SCG constraints when available
+        if self.scg_obstacle_count > 0 and np.isfinite(self.scg_h):
+            constraints.extend(self._scg_constraints(vp))
 
         if not constraints:
             self.closest_point = None
