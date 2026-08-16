@@ -31,7 +31,6 @@ def generate_launch_description():
                 'y': LaunchConfiguration('y'),
                 'z': LaunchConfiguration('z'),
                 'yaw': LaunchConfiguration('yaw'),
-                'start_hover_patrol': 'false',
                 'start_navigator': 'false',
                 'start_cbf': 'true',
                 'start_sonar_reconstruction': 'true',

@@ -1623,6 +1623,14 @@ class SonarHeadingNode(Node):
     def _stuck_recovery_yaw_sign(self):
         return 1.0 if self.stuck_recovery_count % 2 == 1 else -1.0
 
+    def _has_horizontal_gap(self, data, beam_count, stride):
+        """Would normal 2D nav (gap_follow) have a real corridor right now?"""
+        free_beams = self._paper_classify_beams(data, stride)
+        deg_per_beam = FOV_DEG / max(1, beam_count - 1)
+        paper_gap_deg = (PAPER_GAP_BEAMS / PAPER_REFERENCE_BEAM_COUNT) * FOV_DEG
+        required_beams = max(1, int(round(paper_gap_deg / (deg_per_beam * stride))))
+        return bool(self._paper_gap_candidates(free_beams, stride, required_beams))
+
     def _process_data_paper(self, data, ranges, beam_count):
         now = self._now_sec()
         stride = self.paper_beam_stride
@@ -1631,30 +1639,31 @@ class SonarHeadingNode(Node):
             return
 
         if self.vertical_escape_active:
-            # world_a's vertical_depth_tolerance is documented ("finish the
-            # climb tightly around the first waypoint's safe depth") but was
-            # never actually checked here -- only the flat duration timer
-            # was, so a long duration (world_a: 180s) had nothing to stop
-            # the vehicle climbing straight through any sane target depth
-            # and toward the surface once a real escape elevation was found.
+            # Originally exited only via a flat duration timer (world_a:
+            # 180s), so nothing stopped it climbing indefinitely once a real
+            # escape elevation was found. A "reached target depth" check was
+            # added, but target_z is the *current waypoint's* depth, which
+            # the vehicle is already sitting at when it gets wedged (a
+            # horizontal pinch blocks it at the same depth it's trying to
+            # hold, not a different one) -- so that check either fires
+            # trivially on tick one (zero climb, self-cancels immediately)
+            # or, once gated behind a minimum duration/distance to fix that,
+            # never fires again during a real climb, since climbing moves
+            # current_z monotonically *away* from target_z. Confirmed via
+            # headless log capture: a single escape ran the full 180s,
+            # climbing continuously from -50 to -14.7 (nearly surfacing)
+            # because it had genuinely cleared the obstacle in the first
+            # ~10s and then kept climbing for no reason for another 170.
             #
-            # But that depth check alone is a trap for a *horizontal* pinch:
-            # target_z is the current waypoint's depth, which the vehicle is
-            # already sitting at when it gets wedged (the obstacle blocks it
-            # at the same depth it's trying to hold, not a different one).
-            # abs(current_z - target_z) is then already inside
-            # vertical_depth_tolerance on the very first tick after
-            # "beginning escape", so reached_target_depth fired true before
-            # any actual climbing happened -- the escape cancelled itself
-            # out for zero net elevation change, fell through to gap_follow
-            # on stale/wide-open SCG defaults, and drove straight back into
-            # the same obstacle. vertical_escape_min_duration/
-            # _min_planar_distance exist for exactly this (documented,
-            # passed in via launch params) but were never actually read
-            # here. Gate the depth check on them so the escape has to
-            # actually run for a bit -- and/or move the vehicle -- before
-            # "at target depth" is trusted as "climb complete" rather than
-            # "never left".
+            # The actual paper intent (Sec III-C1 / Fig 8b) is "climb until
+            # you can see a way through again", not "climb to a specific
+            # depth" or "climb for a fixed duration" -- so check for that
+            # directly: has a real horizontal gap reopened. That's both the
+            # correct success signal and an inherent safety bound (it stops
+            # climbing the moment it's no longer needed, rather than
+            # over-relying on the 180s ceiling). Still requires
+            # vertical_escape_min_duration first so it can't fire before any
+            # real climbing has happened at all.
             elapsed_since_start = (
                 now - self.vertical_escape_started_at
                 if self.vertical_escape_started_at is not None else float('inf'))
@@ -1665,14 +1674,23 @@ class SonarHeadingNode(Node):
                     self.pose.position.x - self.vertical_escape_start_xy[0],
                     self.pose.position.y - self.vertical_escape_start_xy[1])
             min_planar_met = planar_progress >= self.vertical_escape_min_planar_distance
+            cleared_obstacle = (
+                min_duration_met and min_planar_met and
+                self._has_horizontal_gap(data, beam_count, stride))
             reached_target_depth = (
                 min_duration_met and min_planar_met and
                 self.pose is not None and self.target_z is not None and
                 abs(self.pose.position.z - self.target_z) <= self.vertical_depth_tolerance)
-            if reached_target_depth or (
+            if cleared_obstacle or reached_target_depth or (
                     self.vertical_escape_until is not None and now >= self.vertical_escape_until):
                 self.vertical_escape_active = False
                 self.vertical_resume_until = now + self.post_vertical_resume_duration
+                z_text = f'{self.pose.position.z:.2f}' if self.pose is not None else 'n/a'
+                self.get_logger().info(
+                    '[VERTICAL_PIVOT] escape ending: '
+                    f'cleared_obstacle={cleared_obstacle} '
+                    f'reached_target_depth={reached_target_depth} '
+                    f'elapsed={elapsed_since_start:.1f}s z={z_text}')
             else:
                 cmd = Twist()
                 forward = min(0.5, self.paper_vx_max)
