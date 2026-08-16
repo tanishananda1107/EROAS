@@ -165,6 +165,21 @@ class SonarHeadingNode(Node):
         self.declare_parameter('narrowing_trap_window', 6.0)
         self.declare_parameter('narrowing_trap_min_width', 60)
         self.declare_parameter('narrowing_trap_ratio', 0.35)
+        # See known_bad_headings: excludes headings already confirmed (via
+        # a prior trap) to be dead ends, so repeated attempts don't
+        # deterministically re-select the same widest-looking-but-wrong
+        # opening. ~26deg -- wide enough to cover a bay's whole mouth
+        # despite the vehicle's position shifting slightly between
+        # attempts, narrow enough not to blot out genuinely distinct
+        # nearby headings.
+        self.declare_parameter('bad_heading_tolerance', 0.45)
+        # A raw 2.5m local-displacement reset was clearing known_bad_headings
+        # even when the vehicle was just wandering sideways along the same
+        # wall, not actually advancing -- letting it re-discover and re-try
+        # openings already confirmed to be dead ends. Require real
+        # goal-ward progress (distance-to-goal shrinking by this much)
+        # before forgetting them instead.
+        self.declare_parameter('bad_heading_clear_progress', 3.0)
 
         # Paper-faithful SPD2C controller (arXiv 2411.05516 Algorithm 1 /
         # AIRLabIISc/EROAS reference only_gap.py). Kept behind a flag so
@@ -398,6 +413,10 @@ class SonarHeadingNode(Node):
             self.get_parameter('narrowing_trap_min_width').value)
         self.narrowing_trap_ratio = float(
             self.get_parameter('narrowing_trap_ratio').value)
+        self.bad_heading_tolerance = float(
+            self.get_parameter('bad_heading_tolerance').value)
+        self.bad_heading_clear_progress = float(
+            self.get_parameter('bad_heading_clear_progress').value)
 
         self.paper_controller = bool(self.get_parameter('paper_controller').value)
         self.paper_k_t = float(self.get_parameter('paper_k_t').value)
@@ -457,6 +476,9 @@ class SonarHeadingNode(Node):
         self.progress3d_anchor_xyz = None
         self.progress3d_anchor_time = None
         self.gap_width_history = []
+        self.known_bad_headings = []
+        self.known_bad_headings_goal_anchor = None
+        self.stuck_recovery_last_turn_yaw = None
 
     def _parse_waypoints(self, value):
         waypoints = []
@@ -1536,6 +1558,10 @@ class SonarHeadingNode(Node):
                 self.vertical_resume_until = now + self.post_vertical_resume_duration
                 self.progress3d_anchor_xyz = None
                 self.progress3d_anchor_time = None
+                # Remembered so that *if* this heading also turns out to be
+                # a dead end (the next trigger fires), it gets blacklisted
+                # below -- see the class docstring note on known_bad_headings.
+                self.stuck_recovery_last_turn_yaw = self.stuck_recovery_best_yaw
                 self.get_logger().info(
                     '[STUCK_RECOVERY] turned onto best heading '
                     f'(run={self.stuck_recovery_best_run} beams); resuming navigation')
@@ -1563,8 +1589,21 @@ class SonarHeadingNode(Node):
                 yaw_delta = abs(math.atan2(
                     math.sin(sample_yaw - self.stuck_recovery_start_yaw),
                     math.cos(sample_yaw - self.stuck_recovery_start_yaw)))
+                # "Widest free run" is a proxy for "real through-passage",
+                # and a bad one: a large dead-end bay is more open volume
+                # than a narrow-but-genuine corridor, so it will *always*
+                # out-score the real path on raw width. Confirmed: repeated
+                # attempts kept re-selecting the same run=103 heading, which
+                # traced (via closing-corridor detection) straight into a
+                # dead end every time -- a wider sweep or more attempts
+                # alone can't fix this, since picking the single global max
+                # is deterministic. Once a heading is confirmed bad (below),
+                # exclude it from candidacy so later attempts are forced
+                # onto a different, unproven heading instead of re-deriving
+                # the same wrong answer.
                 run = self._widest_free_run(data)
-                if yaw_delta >= 0.6 and run > self.stuck_recovery_best_run:
+                if (yaw_delta >= 0.6 and run > self.stuck_recovery_best_run
+                        and not self._is_known_bad_heading(sample_yaw)):
                     self.stuck_recovery_best_run = run
                     self.stuck_recovery_best_yaw = sample_yaw
             if now >= self.stuck_recovery_until:
@@ -1574,12 +1613,15 @@ class SonarHeadingNode(Node):
                     self.stuck_recovery_turn_until = now + 8.0
                     self.get_logger().info(
                         '[STUCK_RECOVERY] backed away; turning onto widest '
-                        f'corridor seen (run={self.stuck_recovery_best_run} beams)')
+                        f'unproven corridor seen (run={self.stuck_recovery_best_run} '
+                        f'beams, {len(self.known_bad_headings)} heading(s) excluded)')
                     return True
                 self.vertical_resume_until = now + self.post_vertical_resume_duration
                 self.progress3d_anchor_xyz = None
                 self.progress3d_anchor_time = None
-                self.get_logger().info('[STUCK_RECOVERY] backing-away complete; resuming navigation')
+                self.get_logger().info(
+                    '[STUCK_RECOVERY] backing-away complete, no unproven corridor found; '
+                    'resuming navigation')
                 return False
             cmd = Twist()
             cmd.linear.x = -self.stuck_recovery_reverse_speed
@@ -1629,6 +1671,32 @@ class SonarHeadingNode(Node):
         if moved >= self.stuck_recovery_distance_threshold and not narrowing_trap:
             self.progress3d_anchor_xyz = xyz
             self.progress3d_anchor_time = now
+            # 2.5m of *raw* displacement resets the no-progress timer
+            # correctly (it proves the vehicle isn't frozen), but it's the
+            # wrong test for "safe to forget known_bad_headings": confirmed
+            # via log -- the vehicle can wander 2.5m sideways along a
+            # concave wall face repeatedly, clearing the bad-heading list
+            # each time without ever net-advancing, letting it re-discover
+            # and re-try the exact same false openings it already ruled
+            # out. Only clear once distance to the actual goal has shrunk,
+            # so the memory persists for as long as the vehicle is still
+            # working the same local pocket, however much it wanders within
+            # it.
+            if (self.known_bad_headings and self.target_x is not None and
+                    self.known_bad_headings_goal_anchor is not None):
+                dist_to_goal = math.hypot(
+                    self.target_x - xyz[0], self.target_y - xyz[1])
+                if dist_to_goal <= (
+                        self.known_bad_headings_goal_anchor -
+                        self.bad_heading_clear_progress):
+                    self.get_logger().info(
+                        f'[STUCK_RECOVERY] clearing {len(self.known_bad_headings)} '
+                        'bad heading(s), real progress made '
+                        f'(dist_to_goal {self.known_bad_headings_goal_anchor:.1f}m '
+                        f'-> {dist_to_goal:.1f}m)')
+                    self.known_bad_headings = []
+                    self.known_bad_headings_goal_anchor = None
+            self.stuck_recovery_last_turn_yaw = None
             return False
 
         no_progress_timeout = now - self.progress3d_anchor_time >= self.stuck_recovery_timeout
@@ -1648,16 +1716,31 @@ class SonarHeadingNode(Node):
         self.stuck_recovery_best_yaw = None
         self.stuck_recovery_start_yaw = yaw_from_quaternion(self.pose.orientation)
         self.gap_width_history = []
+        # The heading responsible for *this* trap: if we just turned onto a
+        # chosen heading and drove into a dead end, that's
+        # stuck_recovery_last_turn_yaw. Otherwise (first attempt in a fresh
+        # pocket, nothing turned onto yet) it's wherever we're facing now.
+        bad_yaw = (
+            self.stuck_recovery_last_turn_yaw
+            if self.stuck_recovery_last_turn_yaw is not None
+            else self.stuck_recovery_start_yaw)
+        if not self.known_bad_headings and self.target_x is not None:
+            self.known_bad_headings_goal_anchor = math.hypot(
+                self.target_x - xyz[0], self.target_y - xyz[1])
+        self.known_bad_headings.append(bad_yaw)
+        self.stuck_recovery_last_turn_yaw = None
         if narrowing_trap:
             self.get_logger().warning(
                 '[STUCK_RECOVERY] closing corridor detected '
                 f'(free_beams {recent_max}->{free_now} in {self.narrowing_trap_window:.0f}s); '
-                f'backing away (attempt {self.stuck_recovery_count})')
+                f'backing away (attempt {self.stuck_recovery_count}, '
+                f'{len(self.known_bad_headings)} bad heading(s) known)')
         else:
             self.get_logger().warning(
                 '[STUCK_RECOVERY] no net progress in '
                 f'{self.stuck_recovery_timeout:.0f}s (moved {moved:.2f}m); '
-                f'backing away (attempt {self.stuck_recovery_count})')
+                f'backing away (attempt {self.stuck_recovery_count}, '
+                f'{len(self.known_bad_headings)} bad heading(s) known)')
         cmd = Twist()
         cmd.linear.x = -self.stuck_recovery_reverse_speed
         cmd.angular.z = self._stuck_recovery_yaw_sign() * self.stuck_recovery_yaw_bias
@@ -1666,6 +1749,13 @@ class SonarHeadingNode(Node):
 
     def _stuck_recovery_yaw_sign(self):
         return 1.0 if self.stuck_recovery_count % 2 == 1 else -1.0
+
+    def _is_known_bad_heading(self, yaw):
+        for bad_yaw in self.known_bad_headings:
+            delta = abs(math.atan2(math.sin(yaw - bad_yaw), math.cos(yaw - bad_yaw)))
+            if delta <= self.bad_heading_tolerance:
+                return True
+        return False
 
     def _has_horizontal_gap(self, data, beam_count, stride):
         """Would normal 2D nav (gap_follow) have a real corridor right now?"""

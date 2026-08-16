@@ -2,12 +2,15 @@
 
 **Status**: PARTIALLY RESOLVED. The vertical-escape self-cancellation bug,
 the depth-instability/near-surfacing bug (fix #4), and the
-closing-corridor/dead-end trap (fix #5) are all fixed and confirmed. The
+closing-corridor/dead-end trap (fix #5) are all fixed and confirmed. Fix #6
+(bad-heading memory) is a clear, confirmed improvement over having no
+memory at all. Its sub-refinement (gating memory-clearing on goal distance
+rather than raw local displacement) is implemented but **not confirmed to
+help** -- one verification run under it looked worse than fix #6 alone. The
 vehicle now handles World A's obstacle clusters *safely* (bounded depth,
 real motion throughout, no runaway, traps caught in ~6s instead of driving
 fully into them) but a winding multi-pocket area (~y=60-68) still is not
-reliably cleared -- 9 recovery attempts without net progress in one 10-minute
-run. Do not treat World A as reliably completing end-to-end.
+reliably cleared. Do not treat World A as reliably completing end-to-end.
 
 ## What was fixed (confirmed via headless log capture, not just code review)
 
@@ -113,38 +116,65 @@ finishing the drive into the dead end. Confirmed via log: traps now caught
 in ~6s (`free_beams 89->28`, `84->18`, etc.) instead of driving fully in and
 then waiting out the 45s no-progress timer.
 
+### 6. Frontier scan deterministically re-picking the same dead end (PARTIALLY FIXED)
+
+Even with fix #5 catching each closing trap quickly, the vehicle kept
+re-triggering in the same local area (9 attempts in one run without net
+progress past y=64). Root cause: "widest free run" is a poor proxy for
+"real through-passage" -- a large dead-end bay is more open volume than a
+narrow-but-genuine corridor, so it will *always* out-score the real path on
+raw width. Picking the single global max is deterministic, so no amount of
+re-sweeping or more attempts fixes this on its own; it just re-derives the
+same wrong answer every time (confirmed: repeated attempts kept
+re-selecting a `run=103` heading that traced, via fix #5's detector, into a
+dead end every time).
+
+Fixed by adding memory: `known_bad_headings` records the world-frame yaw of
+any heading confirmed (via a subsequent trap) to be a dead end, and the
+frontier scan excludes candidates within `bad_heading_tolerance` (~26 deg)
+of any of them, forcing later attempts onto a different, unproven heading.
+Confirmed via log: this is a real improvement over no memory -- attempts
+now regularly end in "clearing N bad heading(s), real progress made"
+instead of endlessly cycling with zero forward motion.
+
+**Sub-refinement, not yet confirmed to help**: the original clear condition
+(any 2.5m of raw local displacement) turned out to also be satisfiable by
+wandering sideways along the same wall face without net advancing,
+prematurely forgetting headings that were still valid dead ends nearby and
+letting the vehicle re-discover them. Changed to require distance-to-goal
+to shrink by `bad_heading_clear_progress` (3.0m) before clearing. One
+verification run under this change did *not* clearly improve things: 6
+attempts, zero clears, and it kept discovering additional same-width
+(`run=103`) dead-end pockets rather than converging -- possibly because
+requiring more sustained goal-ward progress before forgetting means bad
+headings accumulate faster than the vehicle can find genuinely new
+directions to try in a sonar-FOV-limited sweep. This needs its own
+headless-log verification pass before being trusted; if it doesn't help on
+a re-test, reverting the clear condition back to raw displacement (fix #6
+without the sub-refinement) is a safe fallback -- that version was
+confirmed to make real, if slow, progress.
+
 ## Known open issue: multi-pocket terrain near y=60-68 not reliably cleared
 
-With fixes #4 and #5 in place, re-running the same reproduction no longer
-produces any dangerous depth excursion, and closing traps are caught much
-faster -- but the vehicle still does not reliably get through World A's
-obstacle cluster in this region. A single run triggered **9 recovery
-attempts** in ~10 minutes of sim time without net progress past y=64,
-oscillating between roughly x=20-32. This looks like a winding,
+Even with fixes #4, #5, and #6, the vehicle has not been observed to get
+through World A's obstacle cluster in this region and reach later waypoints
+(y=97+) in any verification run so far. This looks like a winding,
 concave-walled area (visually, an S-curved wall of blocks) with several
-false openings close together -- each one individually gets caught and
-backed out of correctly now, but finding the *actual* through-path among
-several similar-looking false ones is still mostly trial and error via
-`stuck_recovery_yaw_sign`'s left/right alternation, which doesn't
-systematically explore all headings.
-
-Earlier symptom for reference (still relevant, just further along the
-course past this area): real, healthy motion throughout (`measured_planar`
-0.4-0.5 m/s, `h` staying high/safe, `nearest_obstacle` 4-5m -- not boxed in
-or frozen), vertical escapes ending quickly and safely, stuck-recovery
-finding and turning onto wide corridors (`run=103` beams) -- but net
-position keeps returning to the same ~1-2m pocket around (28-29, 67-68)
-rather than continuing toward y=97+.
+similar-width false openings close together. The mechanisms now in place
+(closing-corridor detection, bad-heading exclusion) are demonstrably
+working *individually* -- traps are caught fast and safely, and the vehicle
+does explore genuinely different headings across attempts -- but the
+combination hasn't yet been observed to fully clear this specific terrain
+within the time available to verify it.
 
 This is a materially different, *safer* failure mode than either the
 original freeze or the depth runaway: the vehicle is never stuck motionless
-and never leaves a safe depth band, it just hasn't found the way through
-this specific cluster yet. Worth investigating next: whether the "widest
-corridor" headings the frontier scan keeps finding are genuinely being
-followed through to escape, or whether something downstream (spatial
-memory re-accumulating around the vehicle as it re-approaches, or the
-corridor closing again once it's no longer viewed edge-on) is pulling it
-back before it clears the cluster.
+and never leaves a safe depth band. Worth investigating next: whether the
+goal-progress-gated clear condition (fix #6's sub-refinement) is actually
+counterproductive here versus the simpler raw-displacement version, and
+whether `bad_heading_tolerance` needs to be wider given how many
+similar-width dead ends this specific area apparently has (6+ distinct
+`run=103` pockets observed in one run without exhausting them).
 
 ---
 *Diagnosed 2026-08-16/17 across an extended debugging session. Reproduction
