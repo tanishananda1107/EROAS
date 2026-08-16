@@ -159,6 +159,12 @@ class SonarHeadingNode(Node):
         # just failed. Alternates side per attempt so it doesn't overshoot
         # into a mirror-image loop between just two headings.
         self.declare_parameter('stuck_recovery_yaw_bias', 0.5)
+        # See _update_stuck_recovery's narrowing_trap comment: catches a
+        # corridor that looks open but funnels shut as the vehicle
+        # approaches it, before it fully boxes in again.
+        self.declare_parameter('narrowing_trap_window', 6.0)
+        self.declare_parameter('narrowing_trap_min_width', 60)
+        self.declare_parameter('narrowing_trap_ratio', 0.35)
 
         # Paper-faithful SPD2C controller (arXiv 2411.05516 Algorithm 1 /
         # AIRLabIISc/EROAS reference only_gap.py). Kept behind a flag so
@@ -386,6 +392,12 @@ class SonarHeadingNode(Node):
             self.get_parameter('stuck_recovery_duration').value)
         self.stuck_recovery_yaw_bias = float(
             self.get_parameter('stuck_recovery_yaw_bias').value)
+        self.narrowing_trap_window = float(
+            self.get_parameter('narrowing_trap_window').value)
+        self.narrowing_trap_min_width = int(
+            self.get_parameter('narrowing_trap_min_width').value)
+        self.narrowing_trap_ratio = float(
+            self.get_parameter('narrowing_trap_ratio').value)
 
         self.paper_controller = bool(self.get_parameter('paper_controller').value)
         self.paper_k_t = float(self.get_parameter('paper_k_t').value)
@@ -444,6 +456,7 @@ class SonarHeadingNode(Node):
         self.stuck_recovery_turn_until = None
         self.progress3d_anchor_xyz = None
         self.progress3d_anchor_time = None
+        self.gap_width_history = []
 
     def _parse_waypoints(self, value):
         waypoints = []
@@ -1580,25 +1593,50 @@ class SonarHeadingNode(Node):
         if self.pose is None:
             return False
 
+        # Closing-corridor trap: after a back-away, the frontier scan picks
+        # the heading with the widest free run *right now* -- but that only
+        # measures how open it looks from the current distance, not whether
+        # it stays open closer up. Confirmed via log: turning onto a
+        # run=103-beam heading and following it with gap_follow, free_beams
+        # shrank continuously and cleanly (103 -> 88 -> 57 -> 9 -> 0) over
+        # ~15s of forward travel -- a wide-mouthed pocket funneling shut, not
+        # a real through-passage. The existing no-progress timeout only
+        # fires *after* it's fully boxed in again (another 45s on top of
+        # this one), re-running the whole expensive recovery cycle for a
+        # trap that was visible 10+ seconds earlier. Watch for the same
+        # signal directly: if the widest run seen in the last
+        # narrowing_trap_window seconds was large and it has since collapsed
+        # to a small fraction of that, bail immediately instead of driving
+        # the rest of the way into the pocket.
+        stride = self.paper_beam_stride
+        free_now = len(self._paper_classify_beams(data, stride))
+        self.gap_width_history.append((now, free_now))
+        self.gap_width_history = [
+            (t, c) for t, c in self.gap_width_history
+            if now - t <= self.narrowing_trap_window]
+        recent_max = max((c for _, c in self.gap_width_history), default=0)
+        narrowing_trap = (
+            recent_max >= self.narrowing_trap_min_width and
+            free_now < self.narrowing_trap_min_width and
+            free_now <= recent_max * self.narrowing_trap_ratio)
+
         xyz = (self.pose.position.x, self.pose.position.y, self.pose.position.z)
         if self.progress3d_anchor_xyz is None:
             self.progress3d_anchor_xyz = xyz
             self.progress3d_anchor_time = now
-            return False
 
         moved = math.dist(xyz, self.progress3d_anchor_xyz)
-        if moved >= self.stuck_recovery_distance_threshold:
+        if moved >= self.stuck_recovery_distance_threshold and not narrowing_trap:
             self.progress3d_anchor_xyz = xyz
             self.progress3d_anchor_time = now
             return False
 
-        if now - self.progress3d_anchor_time < self.stuck_recovery_timeout:
+        no_progress_timeout = now - self.progress3d_anchor_time >= self.stuck_recovery_timeout
+        if not (narrowing_trap or no_progress_timeout):
             return False
 
-        # Genuinely stuck: abandon whatever 2D/vertical maneuver was in
-        # progress (it's had stuck_recovery_timeout seconds and produced
-        # under stuck_recovery_distance_threshold of net movement) and back
-        # away instead.
+        # Genuinely stuck (or about to be): abandon whatever 2D/vertical
+        # maneuver was in progress and back away instead.
         self.vpivot_active = False
         self.vertical_escape_active = False
         self.joint_pub.publish(Float64(data=0.0))
@@ -1608,12 +1646,18 @@ class SonarHeadingNode(Node):
         self.stuck_recovery_count += 1
         self.stuck_recovery_best_run = -1
         self.stuck_recovery_best_yaw = None
-        self.stuck_recovery_start_yaw = (
-            yaw_from_quaternion(self.pose.orientation) if self.pose is not None else 0.0)
-        self.get_logger().warning(
-            '[STUCK_RECOVERY] no net progress in '
-            f'{self.stuck_recovery_timeout:.0f}s (moved {moved:.2f}m); '
-            f'backing away (attempt {self.stuck_recovery_count})')
+        self.stuck_recovery_start_yaw = yaw_from_quaternion(self.pose.orientation)
+        self.gap_width_history = []
+        if narrowing_trap:
+            self.get_logger().warning(
+                '[STUCK_RECOVERY] closing corridor detected '
+                f'(free_beams {recent_max}->{free_now} in {self.narrowing_trap_window:.0f}s); '
+                f'backing away (attempt {self.stuck_recovery_count})')
+        else:
+            self.get_logger().warning(
+                '[STUCK_RECOVERY] no net progress in '
+                f'{self.stuck_recovery_timeout:.0f}s (moved {moved:.2f}m); '
+                f'backing away (attempt {self.stuck_recovery_count})')
         cmd = Twist()
         cmd.linear.x = -self.stuck_recovery_reverse_speed
         cmd.angular.z = self._stuck_recovery_yaw_sign() * self.stuck_recovery_yaw_bias

@@ -1,11 +1,13 @@
 # World A Pinch-Point Recovery — Status and Known Issue
 
-**Status**: PARTIALLY RESOLVED. The vertical-escape self-cancellation bug and
-the depth-instability/near-surfacing bug (see fix #4 below) are both fixed
-and confirmed. The pinch-clearing problem at World A's tightest obstacle
-cluster (~y=67-68) is still open: the vehicle now handles it *safely*
-(bounded depth, real motion, no runaway) but does not reliably get past it.
-Do not treat World A as reliably completing end-to-end.
+**Status**: PARTIALLY RESOLVED. The vertical-escape self-cancellation bug,
+the depth-instability/near-surfacing bug (fix #4), and the
+closing-corridor/dead-end trap (fix #5) are all fixed and confirmed. The
+vehicle now handles World A's obstacle clusters *safely* (bounded depth,
+real motion throughout, no runaway, traps caught in ~6s instead of driving
+fully into them) but a winding multi-pocket area (~y=60-68) still is not
+reliably cleared -- 9 recovery attempts without net progress in one 10-minute
+run. Do not treat World A as reliably completing end-to-end.
 
 ## What was fixed (confirmed via headless log capture, not just code review)
 
@@ -88,17 +90,51 @@ Confirmed via log after the fix: escapes now end in 4-6.5s, with `z`
 staying within ~0.1m of the original target depth (`z=-49.92`, `z=-49.94`)
 — nowhere near the earlier near-surface excursion.
 
-## Known open issue: pinch at ~y=67-68 not reliably cleared
+### 5. Frontier scan turning onto pockets that funnel shut (FIXED)
 
-With fix #4 in place, re-running the same reproduction no longer produces
-any dangerous depth excursion, but the vehicle still does not reliably get
-past World A's tightest obstacle cluster. Observed behavior post-fix: real,
-healthy motion the whole time (`measured_planar` 0.4-0.5 m/s, `h` staying
-high/safe, `nearest_obstacle` 4-5m -- not boxed in or frozen), vertical
-escapes ending quickly and safely, stuck-recovery finding and turning onto
-wide corridors (`run=103` beams) -- but net position keeps returning to the
-same ~1-2m pocket around (28-29, 67-68) rather than continuing toward
-y=97+.
+With fix #3's guard in place, the vehicle reliably found *a* wide-looking
+heading and turned onto it -- but traced through a full headless log, that
+heading led straight into a dead end: `gap_follow`'s own `free_beams` count
+shrank cleanly and continuously as it drove forward (103 -> 88 -> 57 -> 9 ->
+0 over ~15s) until it was fully boxed in again. The frontier scan measures
+how open a heading looks *from the current distance*, not whether it stays
+open as the vehicle gets closer -- a wide-mouthed pocket that narrows to a
+dead end looks identical to a real corridor from outside. The existing
+no-progress timeout only catches this *after* it's fully boxed in again,
+paying the full 45s again for a trap that was visible 10+ seconds earlier.
+
+Fixed by watching for the same signal directly during normal navigation:
+track the widest free-beam run seen in the last `narrowing_trap_window`
+(6s); if the current run has collapsed to a small fraction
+(`narrowing_trap_ratio`, 0.35) of that recent peak while the peak itself was
+large enough to look like a real opening (`narrowing_trap_min_width`, 60
+beams), treat it as a closing trap and back away immediately rather than
+finishing the drive into the dead end. Confirmed via log: traps now caught
+in ~6s (`free_beams 89->28`, `84->18`, etc.) instead of driving fully in and
+then waiting out the 45s no-progress timer.
+
+## Known open issue: multi-pocket terrain near y=60-68 not reliably cleared
+
+With fixes #4 and #5 in place, re-running the same reproduction no longer
+produces any dangerous depth excursion, and closing traps are caught much
+faster -- but the vehicle still does not reliably get through World A's
+obstacle cluster in this region. A single run triggered **9 recovery
+attempts** in ~10 minutes of sim time without net progress past y=64,
+oscillating between roughly x=20-32. This looks like a winding,
+concave-walled area (visually, an S-curved wall of blocks) with several
+false openings close together -- each one individually gets caught and
+backed out of correctly now, but finding the *actual* through-path among
+several similar-looking false ones is still mostly trial and error via
+`stuck_recovery_yaw_sign`'s left/right alternation, which doesn't
+systematically explore all headings.
+
+Earlier symptom for reference (still relevant, just further along the
+course past this area): real, healthy motion throughout (`measured_planar`
+0.4-0.5 m/s, `h` staying high/safe, `nearest_obstacle` 4-5m -- not boxed in
+or frozen), vertical escapes ending quickly and safely, stuck-recovery
+finding and turning onto wide corridors (`run=103` beams) -- but net
+position keeps returning to the same ~1-2m pocket around (28-29, 67-68)
+rather than continuing toward y=97+.
 
 This is a materially different, *safer* failure mode than either the
 original freeze or the depth runaway: the vehicle is never stuck motionless
