@@ -1,16 +1,21 @@
 # World A Pinch-Point Recovery — Status and Known Issue
 
-**Status**: PARTIALLY RESOLVED. The vertical-escape self-cancellation bug,
-the depth-instability/near-surfacing bug (fix #4), and the
-closing-corridor/dead-end trap (fix #5) are all fixed and confirmed. Fix #6
-(bad-heading memory) is a clear, confirmed improvement over having no
-memory at all. Its sub-refinement (gating memory-clearing on goal distance
-rather than raw local displacement) is implemented but **not confirmed to
-help** -- one verification run under it looked worse than fix #6 alone. The
-vehicle now handles World A's obstacle clusters *safely* (bounded depth,
-real motion throughout, no runaway, traps caught in ~6s instead of driving
-fully into them) but a winding multi-pocket area (~y=60-68) still is not
-reliably cleared. Do not treat World A as reliably completing end-to-end.
+**Status**: PARTIALLY RESOLVED, one new open issue found. The vertical-escape
+self-cancellation bug, the depth-instability/near-surfacing bug (fix #4),
+and the closing-corridor/dead-end trap (fix #5) are all fixed and
+confirmed. Fix #6 (bad-heading memory) is a clear, confirmed improvement
+over having no memory at all; its goal-distance-gated clearing
+sub-refinement is unverified (see fix #6). Fix #7 (excluding bad headings
+from gap_follow itself, not just stuck-recovery's frontier scan) is
+confirmed to break the vehicle out of the local multi-pocket cycling that
+trapped it in every prior run -- but revealed a new problem: once loose in
+open water, the same blacklist can prevent it turning back toward the goal
+if that heading overlaps one blacklisted earlier, and the vehicle was
+observed travelling 60+m away from the obstacle cluster without clearly
+recovering toward the goal. The vehicle now handles World A's obstacle
+clusters *safely* (bounded depth, real motion throughout, no runaway) but
+does not reliably reach the goal. Do not treat World A as reliably
+completing end-to-end.
 
 ## What was fixed (confirmed via headless log capture, not just code review)
 
@@ -154,27 +159,54 @@ a re-test, reverting the clear condition back to raw displacement (fix #6
 without the sub-refinement) is a safe fallback -- that version was
 confirmed to make real, if slow, progress.
 
-## Known open issue: multi-pocket terrain near y=60-68 not reliably cleared
+### 7. gap_follow itself re-targeting confirmed dead ends (FIXED, revealed a new issue)
 
-Even with fixes #4, #5, and #6, the vehicle has not been observed to get
-through World A's obstacle cluster in this region and reach later waypoints
-(y=97+) in any verification run so far. This looks like a winding,
-concave-walled area (visually, an S-curved wall of blocks) with several
-similar-width false openings close together. The mechanisms now in place
-(closing-corridor detection, bad-heading exclusion) are demonstrably
-working *individually* -- traps are caught fast and safely, and the vehicle
-does explore genuinely different headings across attempts -- but the
-combination hasn't yet been observed to fully clear this specific terrain
-within the time available to verify it.
+The user visually traced the actual required route around this cluster: it
+goes around the *outside* of the whole structure (a wide detour), not
+through any gap within it. That explains why fix #6 alone wasn't enough:
+`known_bad_headings` only stopped *stuck-recovery's* frontier scan from
+re-selecting a dead end -- normal `gap_follow` (which always targets
+whichever candidate is closest to the goal bearing) was never filtered, so
+the instant the vehicle backed off even slightly from a dead end, the very
+next cycle it would re-spot that same direction looking marginally open
+again and cut straight back into it. The two mechanisms were fighting each
+other, which is why bad headings kept accumulating (6+, all `run=103`)
+without the vehicle ever committing to a detour long enough to get around.
 
-This is a materially different, *safer* failure mode than either the
-original freeze or the depth runaway: the vehicle is never stuck motionless
-and never leaves a safe depth band. Worth investigating next: whether the
-goal-progress-gated clear condition (fix #6's sub-refinement) is actually
-counterproductive here versus the simpler raw-displacement version, and
-whether `bad_heading_tolerance` needs to be wider given how many
-similar-width dead ends this specific area apparently has (6+ distinct
-`run=103` pockets observed in one run without exhausting them).
+Fixed by applying the same `known_bad_headings` exclusion to `gap_follow`'s
+own candidate selection (filtering `mid_beams` by world-frame bearing
+before picking the goal-nearest one), not just stuck-recovery's frontier
+scan. **Confirmed via a 15-minute isolated log verification**: this broke
+the vehicle out of the local y=56-64 cycling that trapped it in every prior
+run -- it explored genuinely further (both laterally and in y) than any
+previous attempt.
+
+**But it surfaced a new problem, also confirmed in that same run**: once
+loose of the immediate cluster, the vehicle continued diverging further
+away (observed 60+m net displacement, x reaching -30 against a spawn x of
+~29 and a goal x of ~29) without clearly turning back toward the goal. The
+likely mechanism: `known_bad_headings` is a pure world-frame yaw blacklist
+with no expiry and no positional scoping, so once the vehicle has travelled
+far enough that the correct goal-ward heading now points through empty
+water in roughly the same *direction* as a heading blacklisted earlier in
+the same episode (different place, coincidentally similar bearing), the
+filter still excludes it -- blocking the vehicle from turning back even
+though that specific direction is no longer actually blocked by anything.
+
+## Known open issue: vehicle does not reliably reach the goal
+
+With fixes #4-#7, the vehicle no longer gets permanently stuck or dives
+unsafely, and it does break out of the local obstacle cluster that trapped
+every prior run -- but it has not been observed reaching later waypoints
+(y=97+) or the goal. The likely next fix (not yet implemented or verified):
+give `known_bad_headings` either a time-based expiry or a positional radius
+(only exclude a heading while the vehicle is still within some distance of
+where it was recorded), so the blacklist stops applying once the vehicle
+has genuinely moved on to different terrain, instead of it staying globally
+in effect for the rest of the run. Also still open: whether fix #6's
+goal-progress-gated clearing helps or hurts (unverified), and whether
+`bad_heading_tolerance` needs tuning for how many similar-width dead ends
+this specific area has.
 
 ---
 *Diagnosed 2026-08-16/17 across an extended debugging session. Reproduction

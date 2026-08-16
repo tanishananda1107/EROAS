@@ -1875,6 +1875,26 @@ class SonarHeadingNode(Node):
         required_beams = max(1, int(round(paper_gap_deg / (deg_per_beam * stride))))
         mid_beams = self._paper_gap_candidates(free_beams, stride, required_beams)
 
+        # Drawn/observed the actual required route around this obstacle
+        # cluster: it goes around the *outside* of the whole structure, not
+        # through gaps within it. gap_follow always picks whichever
+        # candidate is closest to target_beam (straight at the goal), so
+        # the instant stuck-recovery turns it onto the detour heading and
+        # backs off even slightly, the very next cycle it re-spots the
+        # direct-line gap looking marginally open again and cuts straight
+        # back into it -- never committing to the detour long enough to
+        # get around. Once a heading is confirmed (via known_bad_headings)
+        # to be a dead end, gap_follow itself must not re-target it either,
+        # not just stuck-recovery's frontier scan, or the two fight each
+        # other indefinitely.
+        if mid_beams and self.known_bad_headings and self.pose is not None:
+            current_yaw = yaw_from_quaternion(self.pose.orientation)
+            mid_beams = [
+                b for b in mid_beams
+                if not self._is_known_bad_heading(
+                    current_yaw + self._beam_to_angle(b, beam_count))
+            ]
+
         bcl = None
         if mid_beams:
             bcl = min(mid_beams, key=lambda b: abs(b - target_beam))
