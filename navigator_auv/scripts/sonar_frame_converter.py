@@ -57,49 +57,59 @@ class SonarFrameConverter(Node):
         )
 
     def pc_callback(self, msg):
+        # The GPU lidar backing this topic publishes horizontal_samples(512)
+        # x vertical_samples(fidelity, default 500) = up to ~256k points per
+        # scan. A pure-Python per-point loop over that many points regularly
+        # took long enough (several hundred ms to >1s) to blow past
+        # only_gap.py's 1.0s sonar_timeout, making raw sonar look
+        # intermittently or even sustainedly stale near large obstacles
+        # (more of the FOV returns valid close-range hits there, adding even
+        # more points to iterate) and silently falling back to legacy
+        # pose-only navigation. Vectorized with numpy instead.
         intensity = np.zeros(
             (self.NUM_RANGES, self.NUM_BEAMS),
             dtype=np.uint8,
         )
 
-        for point in pc2.read_points(
-                msg,
-                field_names=('x', 'y', 'z'),
-                skip_nans=False):
-            x = float(point[0])
-            y = float(point[1])
-            z = float(point[2])
-            if not (
-                math.isfinite(x)
-                and math.isfinite(y)
-                and math.isfinite(z)
-            ):
-                continue
-            if x <= 0.1:
-                continue
+        points = pc2.read_points_numpy(
+            msg, field_names=('x', 'y', 'z'), skip_nans=False)
+        if points.size:
+            x, y, z = points[:, 0], points[:, 1], points[:, 2]
+            valid = np.isfinite(x) & np.isfinite(y) & np.isfinite(z) & (x > 0.1)
+            x, y, z = x[valid], y[valid], z[valid]
 
-            angle = math.atan2(y, x)
-            if not -self.H_FOV_HALF <= angle <= self.H_FOV_HALF:
-                continue
+            angle = np.arctan2(y, x)
+            in_fov = (angle >= -self.H_FOV_HALF) & (angle <= self.H_FOV_HALF)
+            x, y, z, angle = x[in_fov], y[in_fov], z[in_fov], angle[in_fov]
 
-            beam = int(
-                (angle + self.H_FOV_HALF)
-                / self.H_FOV
-                * (self.NUM_BEAMS - 1)
-            )
-            beam = max(0, min(self.NUM_BEAMS - 1, beam))
+            distance = np.sqrt(x * x + y * y + z * z)
+            in_range = distance < self.MAX_RANGE
+            angle, distance = angle[in_range], distance[in_range]
 
-            distance = math.sqrt(x * x + y * y)
-            if distance >= self.MAX_RANGE:
-                continue
-            range_bin = int(distance / self.RANGE_RES)
-            range_bin = max(0, min(self.NUM_RANGES - 1, range_bin))
-            first_bin = max(0, range_bin - 2)
-            last_bin = min(self.NUM_RANGES, range_bin + 3)
-            intensity[first_bin:last_bin, beam] = 255
+            if angle.size:
+                beam = (
+                    (angle + self.H_FOV_HALF) / self.H_FOV
+                    * (self.NUM_BEAMS - 1)
+                ).astype(np.int64)
+                beam = np.clip(beam, 0, self.NUM_BEAMS - 1)
+
+                range_bin = (distance / self.RANGE_RES).astype(np.int64)
+                range_bin = np.clip(range_bin, 0, self.NUM_RANGES - 1)
+
+                offsets = np.arange(-2, 3)
+                bins = np.clip(
+                    range_bin[:, None] + offsets[None, :],
+                    0, self.NUM_RANGES - 1).ravel()
+                beams_repeated = np.repeat(beam, offsets.size)
+                intensity[bins, beams_repeated] = 255
 
         out = ProjectedSonarImage()
         out.header = msg.header
+        # The incoming point cloud's stamp comes from Gazebo's simulation
+        # clock; consumers of this topic run with use_sim_time:=False, so a
+        # copied sim-time stamp always looks catastrophically stale against
+        # wall time and gets silently dropped. Stamp with wall time instead.
+        out.header.stamp = self.get_clock().now().to_msg()
         out.header.frame_id = (
             'rexrov2/rexrov2/sonar_link/blueview_p900_sensor'
         )

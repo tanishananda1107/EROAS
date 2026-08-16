@@ -40,6 +40,61 @@ BLUE_BLOCK_WORLD = {
     'spawn': ('29', '33', '-54', '1.5708'),
     'waypoints': '29,97,-50;31,110,-55;30,90,-90;30,120,-40',
     'target_depth': '-54.0',
+    'cruise_speed': 0.42,
+    'fallback_speed': 0.30,
+    'waypoint_tolerance': 5.0,
+    'final_waypoint_tolerance': 5.0,
+    'planar_waypoint_tolerance': True,
+    'loop_waypoints': False,
+    'green_wake': 'true',
+    'min_forward_speed': 0.16,
+    'max_vertical_speed': 0.22,
+    'collision_distance': 2.2,
+    'hard_stop_distance': 0.9,
+    'scan_yaw_rate': 0.35,
+    'use_point_cloud_obstacles': True,
+    'use_analytical_obstacles': False,
+    # Harmonic uses the GPU-lidar PointCloud2 stream as the FLS source.  The
+    # sonar_frame_converter node rebuilds the ProjectedSonarImage profile for
+    # the paper-faithful SPD2C gap logic (use_raw_sonar consumes that
+    # synthetic image), while ST-CBF consumes the raw points directly.
+    'use_raw_sonar': True,
+    'use_point_cloud_sonar': True,
+    'prefer_point_cloud_sonar': True,
+    'min_detection_range': 0.45,
+    'point_cloud_min_range': 0.45,
+    'point_cloud_body_clearance_x': 0.60,
+    'point_cloud_body_clearance_y': 1.20,
+    'point_cloud_body_clearance_z': 1.00,
+    'point_cloud_max_abs_z': 0.0,
+    'depth_deadband': 0.15,
+    'depth_hold_kp': 0.22,
+    'safety_radius_xy': 1.35,
+    'safety_radius_xz': 1.25,
+    'safety_radius_sonar_pivot': 1.35,
+    'max_active_constraints': 3,
+    'pivot_min_angle': -0.8,
+    'pivot_max_angle': 0.8,
+    'pivot_sample_count': 81,
+    'vertical_detection_threshold': 120.0,
+    'spatial_memory_timeout': 8.0,
+    'spatial_memory_radius': 15.0,
+    'spatial_memory_voxel_size': 0.35,
+    'spatial_memory_max_points': 3500,
+    'barrier_slide_enabled': False,
+    'barrier_slide_trigger_h': -1.0,
+    'hover_lock_enabled': False,
+    'attitude_hold_enabled': True,
+    'attitude_hold_kp': 1.2,
+    'attitude_hold_max_rate': 0.45,
+    'attitude_recovery_tilt': 0.45,
+    'paper_controller': True,
+    'paper_k_t': 0.12,
+    'paper_k_v': 0.35,
+    'paper_psi_max': 1.5707963267948966,
+    'paper_vx_max': 1.0,
+    'paper_max_yaw_rate': 0.26,
+    'paper_convexity_threshold': 0.02,
 }
 
 WORLD_A = {
@@ -47,13 +102,11 @@ WORLD_A = {
     'file': 'obstacle_avoidance.world',
     'gz_world_name': 'eroas_world_a',
     # Paper Figure 8 / original EROAS World A: use the existing DAVE/UUV
-    # obstacle_avoidance.world course and goal-behind-obstacle route.  The
-    # ROS1 ocean_waves.launch has coral.world active, but this default is a
-    # deliberate World A port: obstacle poses are preserved, and spawn/yaw/
-    # waypoints match the World A block used by the paper-style scenario.
-    # planner holds the spawn depth until SPD2C explicitly enters vertical
-    # avoidance, then resumes the original waypoint progression.
-    'spawn': ('10', '26', '-54', '0.0'),
+    # obstacle_avoidance.world course and goal-behind-obstacle route.
+    # Spawn matches the ROS1 reference's commented-out "World A" block in
+    # start_EROAS_demo.launch (x=29 y=33 z=-54 yaw=2.82) -- the launch file's
+    # active (uncommented) defaults there are actually World B's spawn.
+    'spawn': ('29', '33', '-54', '2.82'),
     'waypoints': '29,97,-50;31,110,-55;30,90,-90;30,120,-40',
     'target_depth': '-54.0',
     'cruise_speed': 0.5,
@@ -64,7 +117,7 @@ WORLD_A = {
     'planar_waypoint_tolerance': True,
     'loop_waypoints': False,
     'green_wake': 'false',
-    'paper_controller': False,
+    'paper_controller': True,
     'paper_k_t': 0.12,
     'paper_k_v': 0.35,
     'paper_psi_max': 1.5707963267948966,
@@ -84,7 +137,7 @@ WORLD_A = {
     # original implementation.  PointCloud2 remains enabled for ST-CBF in the
     # safety-filter node, but the navigation decision itself must come from
     # the FLS profile rather than a point-cloud shortcut.
-    'use_raw_sonar': False,
+    'use_raw_sonar': True,
     'use_point_cloud_sonar': True,
     'prefer_point_cloud_sonar': True,
     'min_detection_range': 0.45,
@@ -93,7 +146,7 @@ WORLD_A = {
     'point_cloud_body_clearance_x': 0.60,
     'point_cloud_body_clearance_y': 1.20,
     'point_cloud_body_clearance_z': 1.00,
-    'point_cloud_max_abs_z': 2.50,
+    'point_cloud_max_abs_z': 0.0,
     'xz_context_lateral_window': 2.0,
     'hover_lock_enabled': False,
     'depth_deadband': 0.15,
@@ -102,17 +155,40 @@ WORLD_A = {
     'safety_radius_xy': 2.0,
     'safety_radius_xz': 2.0,
     'safety_radius_sonar_pivot': 2.0,
-    'max_active_constraints': 1,
+    # _scg_constraints (velocity_cbf.py) now emits one real constraint per
+    # detected obstacle sector instead of a single guessed point (see that
+    # function's docstring). A pinch with obstacles flanking both sides of
+    # the gap -- e.g. cube_6_1/cube_7 -- needs both visible at once, or the
+    # QP only ever sees one wall and has no way to represent the corridor.
+    'max_active_constraints': 3,
     # Algorithm 1 uses a complete elevation sweep and then accepts a vertical
-    # corridor only from a length-30 run.  Harmonic validation showed the
-    # paper-style World A gap sits above +0.7 rad, so keep the full 81-sample
-    # sweep but include the upward branch of the FLS pivot.
-    'pivot_min_angle': -0.8,
-    'pivot_max_angle': 0.8,
+    # corridor only from a length-30 run. Headless validation against the
+    # cube_5/cube_6/cube_6_1/cube_7 cluster (best_run vs required=88-of-300
+    # beams, logged per angle) showed genuinely wide-open corridors exist at
+    # only a few, scattered elevations within the old +/-0.8 rad range --
+    # not enough to sustain a 30-consecutive-angle run. Widened toward the
+    # sonar_vertical_joint's actual limit (+/-1.5708 rad, rexrov2_sensors.xacro)
+    # with a small margin, giving the sweep more elevations to find a
+    # sustained clear run at this specific pinch.
+    'pivot_min_angle': -1.4,
+    'pivot_max_angle': 1.4,
     'pivot_sample_count': 81,
-    'pivot_sample_timeout': 5.0,
+    # Sonar pivot joint has an 8 rad/s velocity limit (rexrov2_sensors.xacro),
+    # so even the largest step (+/-0.8 rad) settles in well under 0.1s -- 5.0s
+    # per sample meant the full 81-sample sweep took 405s, far longer than
+    # any test window and effectively making vertical avoidance never finish.
+    'pivot_sample_timeout': 0.3,
     'pivot_sample_retries': 4,
-    'vertical_gap_run_length': 30,
+    # vertical_gap_run_length is a *sample count*, not an angle. With the
+    # original +/-0.8 rad range over 81 samples, 30 samples was a ~0.59 rad
+    # (~34deg) corridor requirement -- the number the paper's Algorithm 1
+    # was effectively calibrated against. Widening the range to +/-1.4 rad
+    # without changing pivot_sample_count coarsened resolution, so leaving
+    # this at 30 would have silently demanded a ~1.04 rad (~59deg) corridor
+    # instead: a stricter requirement even though the search got broader.
+    # Scaled down to keep the same ~34deg corridor requirement over the
+    # wider search range: 30 * (1.6/2.8) ~= 17.
+    'vertical_gap_run_length': 17,
     # The 30-angle corridor is point-clear. Move to another valid midpoint
     # 0.12 rad farther inside it so the full REXROV hull retains d_min=2 m.
     'vertical_gap_safety_margin_rad': 0.12,
@@ -125,6 +201,19 @@ WORLD_A = {
     'gz_update_rate': 60,
     # ST-CBF should minimally project the SPD2C reference.  The additional
     # fixed-speed wall-slide is reserved for an actual near-collision.
+    # (barrier_slide is dead weight here regardless of its value: WORLD_A
+    # sets paper_controller=True, which routes velocity_cbf.py through
+    # _process_data_paper_cbf / _opt_xy_paper -- a pure min-norm CBF-QP
+    # projection with no barrier-slide/hover-lock/stall-recovery hooks at
+    # all, per that method's own docstring. Headless testing on 2026-08-07
+    # confirmed enabling this had zero effect on a reproducible SPD2C/CBF
+    # deadlock at cube_6_1: only_gap.py's gap search has no safety-radius
+    # inflation and commits to headings the CBF's inflated SCG model treats
+    # as fully blocked (obstacle_boundaries spanning the whole FOV,
+    # context_h<0); the min-norm projection then has ~zero tangential
+    # component to work with since the requested velocity is nearly all
+    # forward, and there is no fallback heuristic on this code path to
+    # nudge it free. Net displacement was <2m over 100s in both cases.)
     'barrier_slide_trigger_h': -1.0,
     'barrier_slide_speed': 0.20,
     'barrier_slide_enabled': False,
@@ -143,7 +232,7 @@ WORLD_A = {
     # radius. The complete Harmonic pivot takes over two minutes, so a 7 s
     # timeout erased cube_7 before the vertical CBF maneuver began.
     'spatial_memory_timeout': 8.0,
-    'spatial_memory_radius': 7.0,
+    'spatial_memory_radius': 15.0,
     'spatial_memory_voxel_size': 0.35,
     'spatial_memory_max_points': 3500,
     # Gazebo Classic used a low-level PID to keep the hovering AUV level.
@@ -161,7 +250,7 @@ WORLD_A_FIGURE5 = {
     'waypoints': '28,59,-56;34,62,-56;44,65,-56;55,66,-56;62,75,-56;61,88,-56;55,92,-56',
     'target_depth': '-56.0',
     'cruise_speed': 0.38,
-    'use_raw_sonar': False,
+    'use_raw_sonar': True,
     'use_point_cloud_sonar': True,
     'prefer_point_cloud_sonar': True,
     'green_wake': 'true',
@@ -169,7 +258,7 @@ WORLD_A_FIGURE5 = {
     'depth_hold_kp': 0.14,
     'max_vertical_speed': 0.16,
     'spatial_memory_timeout': 8.0,
-    'spatial_memory_radius': 7.0,
+    'spatial_memory_radius': 15.0,
 }
 
 WORLD_CONFIGS = {
@@ -327,6 +416,16 @@ def _setup(context, *args, **kwargs):
     use_velocity_control_plugin = 'true'
     physics_args = '--physics-engine gz-physics-bullet-featherstone-plugin'
     gz_args = f'{physics_args} -r {world_path}' if gui else f'-s {physics_args} -r {world_path}'
+    # The <sensor> tag is authored on blueview_p900_link (a fixed child of
+    # the pivoting rexrov2/sonar_link -- see multibeam_blueview_p900_macro in
+    # multibeam_sonar_blueview_p900.xacro), but multibeam_sonar_joint is a
+    # `type="fixed"` joint, so sdformat's URDF->SDF conversion lumps
+    # blueview_p900_link into its fixed-joint parent during flattening.  The
+    # sensor keeps its own name but ends up scoped under the *parent* link in
+    # gz-sim's auto-generated topic (verified against the live `gz topic -l`
+    # output), so the path must name rexrov2/sonar_link here, not
+    # blueview_p900_link -- otherwise this bridge subscribes to a gz topic
+    # that is never published and the point cloud never reaches ROS2.
     sonar_points_gz_topic = (
         f'/world/{gz_world_name}/model/rexrov2/link/rexrov2/sonar_link/'
         'sensor/blueview_p900_sensor/scan/points'
@@ -419,6 +518,13 @@ def _setup(context, *args, **kwargs):
                 '/rexrov2/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
                 f'{sonar_points_gz_topic}@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
                 f'/world/{gz_world_name}/create@ros_gz_interfaces/srv/SpawnEntity',
+                # gz-sim's own VisualizeLidar GUI plugin has no SDF-configurable
+                # default topic (see obstacle_avoidance.world's <gui> comment) --
+                # it only shows rays after a manual per-launch click. Bridging the
+                # ray-visual sensor's LaserScan to ROS 2 lets RViz2 display it
+                # instead, pre-configured and already enabled (navigator_auv/rviz/
+                # sonar_rays.rviz), so no GUI interaction is required.
+                '/rexrov2/sonar_visual_rays@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
             ],
             remappings=[
                 (f'/world/{gz_world_name}/clock', '/clock'),
@@ -494,7 +600,7 @@ def _setup(context, *args, **kwargs):
                 'pivot_min_angle': cfg.get('pivot_min_angle', -0.8),
                 'pivot_max_angle': cfg.get('pivot_max_angle', 0.8),
                 'pivot_sample_count': cfg.get('pivot_sample_count', 81),
-                'pivot_sample_timeout': cfg.get('pivot_sample_timeout', 2.0),
+                'pivot_sample_timeout': cfg.get('pivot_sample_timeout', 0.3),
                 'pivot_sample_retries': cfg.get('pivot_sample_retries', 3),
                 'vertical_gap_run_length': cfg.get('vertical_gap_run_length', 30),
                 'vertical_gap_safety_margin_rad': cfg.get('vertical_gap_safety_margin_rad', 0.0),
@@ -504,6 +610,13 @@ def _setup(context, *args, **kwargs):
                 'vertical_escape_min_planar_distance': cfg.get('vertical_escape_min_planar_distance', 0.0),
                 'post_vertical_resume_duration': cfg.get('post_vertical_resume_duration', 35.0),
                 'vertical_detection_threshold': cfg.get('vertical_detection_threshold', 15.0),
+                'paper_controller': bool(cfg.get('paper_controller', False)),
+                'paper_k_t': cfg.get('paper_k_t', 0.12),
+                'paper_k_v': cfg.get('paper_k_v', 0.35),
+                'paper_psi_max': cfg.get('paper_psi_max', 1.5707963267948966),
+                'paper_vx_max': cfg.get('paper_vx_max', 1.0),
+                'paper_max_yaw_rate': cfg.get('paper_max_yaw_rate', 0.26),
+                'paper_convexity_threshold': cfg.get('paper_convexity_threshold', 0.02),
             }],
             output='screen',
             condition=IfCondition(_enabled_and_not_waypoint_hover('start_navigator')),
@@ -534,18 +647,27 @@ def _setup(context, *args, **kwargs):
             name='obstacle_avoidance_node',
             parameters=[{
                 'use_sim_time': False,
+                'paper_controller': bool(cfg.get('paper_controller', False)),
                 'target_depth': float(cfg['target_depth']),
                 'depth_hold_kp': cfg.get('depth_hold_kp', 0.14),
                 'depth_deadband': cfg.get('depth_deadband', 0.12),
                 'max_vertical_speed': cfg.get('max_vertical_speed', 0.16),
                 'max_vertical_delta': cfg.get('max_vertical_delta', 0.025),
-                'use_point_cloud_obstacles': True,
+                'use_point_cloud_obstacles': bool(cfg.get('use_point_cloud_obstacles', True)),
                 'use_analytical_obstacles': bool(cfg.get('use_analytical_obstacles', True)),
                 'point_cloud_points_are_local': True,
                 'cbf_influence_distance': 3.0,
                 'cbf_blend_distance': 1.4,
-                'cbf_gain_xy': 0.10,
-                'cbf_gain_xz': 0.14,
+                # CBF constraint is hdot >= -kappa*(h - min_clearance). At a
+                # typical ~2.5m standoff from a 2m safety radius (h~2,
+                # gradient magnitude ~2*distance~5), kappa=0.10 only permits
+                # ~0.03 m/s of closing velocity before throttling -- so the
+                # vehicle crawled to a near-stop whenever any part of its
+                # path pointed toward a nearby obstacle, even far from the
+                # true safety boundary. Raised so normal cruise speeds are
+                # permitted until much closer to the boundary.
+                'cbf_gain_xy': cfg.get('cbf_gain_xy', 0.5),
+                'cbf_gain_xz': cfg.get('cbf_gain_xz', 0.6),
                 'max_active_constraints': cfg.get('max_active_constraints', 6),
                 'max_xy_speed': cfg.get('cruise_speed', 0.38),
                 'max_xy_delta': cfg.get('max_xy_delta', 0.06),
@@ -561,9 +683,9 @@ def _setup(context, *args, **kwargs):
                 'point_cloud_body_clearance_x': cfg.get('point_cloud_body_clearance_x', 0.60),
                 'point_cloud_body_clearance_y': cfg.get('point_cloud_body_clearance_y', 1.20),
                 'point_cloud_body_clearance_z': cfg.get('point_cloud_body_clearance_z', 1.00),
-                'point_cloud_max_abs_z': cfg.get('point_cloud_max_abs_z', 2.50),
+                'point_cloud_max_abs_z': cfg.get('point_cloud_max_abs_z', 0.0),
                 'spatial_memory_timeout': cfg.get('spatial_memory_timeout', 8.0),
-                'spatial_memory_radius': cfg.get('spatial_memory_radius', 7.0),
+                'spatial_memory_radius': cfg.get('spatial_memory_radius', 15.0),
                 'spatial_memory_voxel_size': cfg.get('spatial_memory_voxel_size', 0.35),
                 'spatial_memory_max_points': cfg.get('spatial_memory_max_points', 3500),
                 'min_avoid_forward_speed': cfg.get('min_forward_speed', 0.12),
@@ -613,6 +735,13 @@ def _setup(context, *args, **kwargs):
             }],
             output='screen',
             condition=IfCondition(_enabled_and_not_hover('start_waypoint_hover')),
+        ),
+
+        Node(
+            package='navigator_auv',
+            executable='sonar_ray_markers.py',
+            name='sonar_ray_markers',
+            output='screen',
         ),
 
         Node(
@@ -685,7 +814,7 @@ def _setup(context, *args, **kwargs):
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('world_name', default_value='world_a',
+        DeclareLaunchArgument('world_name', default_value='blue_blocks',
                               description='World configuration: world_a (paper Figure 8), world_a_figure5 (paper Figure 5 SPD2C path), blue_blocks, world_b'),
         DeclareLaunchArgument('gui', default_value='true'),
         DeclareLaunchArgument('x', default_value='auto'),

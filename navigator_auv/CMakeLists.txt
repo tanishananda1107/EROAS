@@ -6,27 +6,15 @@ find_package(ament_cmake REQUIRED)
 
 
 install(PROGRAMS
-  scripts/sonar_heading_node.py
-  scripts/move_sonar.py
-  scripts/local_planner_heading.py
-  scripts/altitude_control.py
-  scripts/contour_heading.py
   scripts/sonar_reconstruction.py
   scripts/helper\ nodes/image_saver.py
-  scripts/euler_calculator.py
-  scripts/move_obstacle.py
-  scripts/cbf_implementation.py
-  scripts/just_gap.py
-  scripts/just_cbf.py
-  scripts/obstacle_draw.py
   scripts/only_gap.py
   scripts/sonar_frame_converter.py
-  scripts/pose_plotter.py
   scripts/hover_hold.py
   scripts/pose_gt_to_odom.py
+  scripts/sonar_ray_markers.py
   scripts/spawner.py
   scripts/trail_marker.py
-  scripts/hover_patrol.py
   scripts/velocity_cbf.py
   scripts/waypoint_hover.py
   DESTINATION lib/${PROJECT_NAME}
@@ -35,6 +23,9 @@ install(PROGRAMS
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(navigator_auv_paper_function_tests test/test_paper_functions.py)
 endif()
 
 ament_package()

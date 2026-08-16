@@ -1,6 +1,10 @@
 # FLS Avoidance System - Root Cause Diagnostic
 
-**Status**: DIAGNOSED - velocity_cbf.py not integrating SCG data into CBF constraints
+**Status**: RESOLVED - fixed by commit ec380e9 ("Integrate FLS-based SCG data
+into velocity_cbf CBF constraints"). Kept as a historical record of the
+diagnosis; the pipeline and file names below (e.g. `sonar_heading_node.py`)
+reflect the state at diagnosis time and have since changed -- see
+`only_gap.py` and `start_EROAS_demo.launch.py` for the current pipeline.
 
 ## Diagnostic Run
 - **Date**: 2025-07-08

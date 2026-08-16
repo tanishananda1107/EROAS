@@ -159,6 +159,8 @@ class ObstacleAvoidanceNode(Node):
                 self.scg_obstacle_count_cb, 10),
             self.create_subscription(
                 Float64, self.scg_gap_count_topic, self.scg_gap_count_cb, 10),
+            self.create_subscription(
+                Float64, '/rexrov2/nav/target_depth', self.nav_target_depth_cb, 10),
         ]
         for thruster_index in range(len(self.latest_thruster_inputs)):
             self.subscription_handles.append(
@@ -207,13 +209,22 @@ class ObstacleAvoidanceNode(Node):
         self.declare_parameter('point_cloud_body_clearance_x', 0.60)
         self.declare_parameter('point_cloud_body_clearance_y', 1.20)
         self.declare_parameter('point_cloud_body_clearance_z', 1.00)
+        # Paper eq. 28: SCG memory is an isotropic 3D ball (||po-pv||<=ro),
+        # with no separate vertical cutoff. Left at 0.0 (disabled) by default
+        # so spatial_memory_radius alone governs what the CBF can see, per
+        # the paper; set > 0 explicitly to re-enable this z-band pre-filter
+        # (e.g. to suppress floor/surface sonar noise) at the cost of hiding
+        # real obstacles further than this many meters above/below the
+        # vehicle even when well within spatial_memory_radius.
+        self.declare_parameter('point_cloud_max_abs_z', 0.0)
         self.declare_parameter('spatial_memory_timeout', 7.0)
-        self.declare_parameter('spatial_memory_radius', 7.0)
+        self.declare_parameter('spatial_memory_radius', 15.0)
         self.declare_parameter('spatial_memory_voxel_size', 0.35)
         self.declare_parameter('spatial_memory_max_points', 3500)
         self.declare_parameter('min_avoid_forward_speed', 0.10)
         self.declare_parameter('max_reverse_speed', 0.0)
         self.declare_parameter('reverse_allowed_distance', 0.75)
+        self.declare_parameter('paper_controller', False)
         self.declare_parameter('planner_cmd_timeout', 1.0)
         self.declare_parameter('cbf_stall_speed_threshold', 0.06)
         self.declare_parameter('planner_influence_fov_deg', 40.0)
@@ -260,6 +271,8 @@ class ObstacleAvoidanceNode(Node):
         self.emergency_collision_distance = self.collision_stop_distance
         self.hold_depth_without_planner = bool(
             self.get_parameter('hold_depth_without_planner').value)
+        self.paper_controller = bool(
+            self.get_parameter('paper_controller').value)
         self.R_o     = self.safety_radius_xy
         self.radius  = 15.0
         self.kappa   = float(self.get_parameter('cbf_gain_xy').value)
@@ -293,6 +306,8 @@ class ObstacleAvoidanceNode(Node):
             self.get_parameter('point_cloud_body_clearance_y').value)
         self.point_cloud_body_clearance_z = float(
             self.get_parameter('point_cloud_body_clearance_z').value)
+        self.point_cloud_max_abs_z = float(
+            self.get_parameter('point_cloud_max_abs_z').value)
         self.spatial_memory_timeout = float(
             self.get_parameter('spatial_memory_timeout').value)
         self.spatial_memory_radius = float(
@@ -484,6 +499,15 @@ class ObstacleAvoidanceNode(Node):
             self.xy_cbf = True
             self.R_o = self.safety_radius_xy
 
+    def nav_target_depth_cb(self, msg):
+        # Keeps depth-hold tracking only_gap.py's active waypoint instead of
+        # staying pinned to the static target_depth this node was launched
+        # with -- otherwise a vertical escape that correctly climbs to a
+        # shallower waypoint's depth gets immediately undone as soon as
+        # control returns to normal navigation, since depth-hold would keep
+        # pulling back toward the original launch-time value.
+        self.target_depth = float(msg.data)
+
     def scg_h_cb(self, msg):
         self.scg_h = float(msg.data)
 
@@ -588,6 +612,12 @@ class ObstacleAvoidanceNode(Node):
         if pts.size == 0:
             self.filtered_points = np.empty((0, 3))
             return
+
+        if self.point_cloud_points_are_local and self.point_cloud_max_abs_z > 0.0:
+            pts = pts[np.abs(pts[:, 2]) <= self.point_cloud_max_abs_z]
+            if pts.size == 0:
+                self.filtered_points = np.empty((0, 3))
+                return
 
         if self.point_cloud_points_are_local:
             body_mask = np.logical_and.reduce((
@@ -795,44 +825,47 @@ class ObstacleAvoidanceNode(Node):
         return count
 
     def _scg_constraints(self, vp):
-        """Build CBF constraints from FLS-based SCG data (only_gap.py output).
-        
-        When scg_obstacle_count > 0, we have obstacles detected by sonar.
-        Convert the SCG gap information into constraint points at the
-        obstacle boundaries near the selected gap.
+        """Build CBF constraints from FLS-based SCG data.
+
+        Uses this node's own live `local_scg_obstacle_boundaries` (recomputed
+        every cycle in `_update_scg_stage`), NOT the `/rexrov2/scg/*` topics
+        published by only_gap.py: with `paper_controller` active, only_gap.py's
+        `_process_data_paper` branch returns before ever calling
+        `_publish_context`, so those topics -- and this node's
+        `self.scg_h`/`self.scg_selected_gap_angle`/`self.scg_obstacle_count`
+        subscriptions to them -- freeze at whatever they last held before
+        paper mode took over (typically a wide-open startup reading) and
+        never update again. Building constraints from that meant the
+        "obstacle" was a phantom point at a fixed bearing/range that simply
+        rode along with the vehicle, disconnected from any real obstacle --
+        while the real sonar picture (already computed live right here for
+        logging) went unused for safety. This also fixes a second, related
+        issue: the old code always placed a single synthetic wall at
+        `gap_angle + 90deg`, guessing which side the obstacle was on. A
+        symmetric two-sided pinch (obstacle flanking the gap on *both*
+        sides, e.g. cube_6_1/cube_7) produced one constraint on an
+        arbitrary side, leaving the min-norm CBF-QP with ~zero tangential
+        room whenever the guess was wrong -- one real, documented cause of
+        the vehicle stalling in front of that pinch instead of threading it.
+        One constraint point per real detected obstacle sector (boundary)
+        naturally covers both sides when both are present.
         """
         constraints = []
-        
-        if self.scg_obstacle_count == 0 or not np.isfinite(self.scg_h):
-            return constraints
-        
-        # SCG h value is the CBF barrier function from only_gap.py
-        # If h >= 0, no constraint violation. If h < 0, obstacle too close.
-        # Map scg_h to a pseudo-distance for constraint building.
-        scg_distance = np.sqrt(self.scg_h + self.R_o**2) if self.scg_h >= -self.R_o**2 else self.R_o
-        
-        # If too far away, don't add constraint
-        if scg_distance > self.radius:
-            return constraints
-        
-        # Create a synthetic constraint point in the direction of the
-        # selected gap angle (where the obstacle is relative to us)
-        # The gap_angle points to the free space; obstacle is perpendicular.
-        obstacle_angle = self.scg_selected_gap_angle + np.pi / 2.0
-        
-        # Generate 2-3 constraint points around the obstacle direction
-        # to properly blockade this direction
-        for angle_offset in [-0.3, 0.0, 0.3]:
-            angle = obstacle_angle + angle_offset
-            cp_xy = vp[:2] + scg_distance * np.array([np.cos(angle), np.sin(angle)])
-            cp_z = vp[2]  # Keep obstacle at vehicle Z for XY plane constraint
-            
+        for start_angle, end_angle, nearest_range in self.local_scg_obstacle_boundaries:
+            if not np.isfinite(nearest_range) or nearest_range > self.radius:
+                continue
+
+            bearing = 0.5 * (start_angle + end_angle)
+            local_x = nearest_range * math.cos(bearing)
+            local_y = nearest_range * math.sin(bearing)
+            global_dx, global_dy = self._tf_l2g_xy(local_x, local_y)
+
             constraints.append({
                 'source': 'scg_fls',
-                'point': np.array([cp_xy[0], cp_xy[1], cp_z]),
-                'distance': scg_distance,
+                'point': np.array([vp[0] + global_dx, vp[1] + global_dy, vp[2]]),
+                'distance': float(nearest_range),
             })
-        
+
         return constraints
 
     def _scg_beam_to_angle(self, beam):
@@ -1213,7 +1246,14 @@ class ObstacleAvoidanceNode(Node):
         self.local_scg_convergence = convergence
         self.local_scg_convergence_reason = convergence_reason
 
-        if recovery_scan_requested:
+        if recovery_scan_requested and not self.paper_controller:
+            # only_gap.py's _advance_vertical_pivot state machine owns
+            # sequencing the sonar pivot joint on this same topic when
+            # paper_controller is active (its own per-angle timed sweep) --
+            # publishing here too would race it. local_scg_* still gets
+            # recomputed either way, since _recovery_yaw_rate_for_heading's
+            # last-resort tie-breaker depends on a fresh
+            # local_scg_selected_gap_angle regardless of paper_controller.
             self.sonar_move_pub.publish(Float64(data=2.0))
 
         nearest_text = f'{nearest:.2f}' if np.isfinite(nearest) else 'inf'
@@ -1262,9 +1302,10 @@ class ObstacleAvoidanceNode(Node):
             constraints.extend(self._analytical_constraints(vp))
         if self._point_cloud_is_fresh() or self._spatial_memory_has_points():
             constraints.extend(self._point_cloud_constraints(vp))
-        # Integrate FLS-based SCG constraints when available
-        if self.scg_obstacle_count > 0 and np.isfinite(self.scg_h):
-            constraints.extend(self._scg_constraints(vp))
+        # Integrate FLS-based SCG constraints (see _scg_constraints docstring
+        # for why this reads local_scg_obstacle_boundaries directly rather
+        # than gating on self.scg_obstacle_count/self.scg_h).
+        constraints.extend(self._scg_constraints(vp))
 
         if not constraints:
             self.closest_point = None
@@ -2337,7 +2378,71 @@ class ObstacleAvoidanceNode(Node):
         filtered.angular.z = self._recovery_yaw_rate_for_heading(heading, raw)
         return filtered
 
+    def _opt_xy_paper(self, v):
+        """Paper-faithful ST-CBF projection: min (1/2)||V-VR||^2 subject to
+        hdot >= -k*h (eq. 33-35). No hover-lock, oscillation scoring,
+        barrier-sliding, or stall-recovery heuristics -- those are legacy
+        additions built around the old planner and actively fight the
+        paper-accurate SPD2C output, holding the vehicle near-stationary
+        even when a clear gap exists."""
+        dgx, dgy = self._tf_l2g_xy(v.linear.x, v.linear.y)
+        desired = np.array([dgx, dgy], dtype=float)
+        constraints = self._xy_projection_constraints_with_request(v)
+        safe = (
+            self._project_to_cbf_constraints(desired, constraints)
+            if constraints else desired)
+        speed = float(np.linalg.norm(safe))
+        if speed > self.max_xy_speed:
+            safe = safe * (self.max_xy_speed / speed)
+        self.last_safe_xy = safe
+        return np.array(self._tf_g2l_xy(safe[0], safe[1]))
+
+    def _process_data_paper_cbf(self, v):
+        self.last_cbf_action = 'paper_cbf'
+        if self.current_h != float('inf'):
+            try:
+                safe = self._opt_xy_paper(v)
+            except Exception as exc:
+                self.get_logger().error(
+                    f'[CBF] paper XY projection failed, holding position: {exc}')
+                safe = np.zeros(2, dtype=float)
+        else:
+            safe = np.array([v.linear.x, v.linear.y])
+        tw = Twist()
+        tw.angular.z = v.angular.z
+        tw.linear.x = safe[0]
+        tw.linear.y = safe[1]
+
+        # Paper eq. 24-27: SPD2C hands ST-CBF a genuine vertical reference
+        # vz,R = vx,R*tan(Theta_cl) whenever it selects a vertical maneuver
+        # (the a=0,b=1 XZ-plane case of eq. 35). only_gap.py's paper_controller
+        # sets v.linear.z to exactly this during vertical_escape_active; it
+        # must be CBF-filtered in the XZ-plane and passed through here, not
+        # silently replaced by plain depth-hold, or the pivot-driven
+        # ascend/descend maneuver from Sec. III-C1 never reaches the vehicle.
+        if self.xz_cbf or abs(v.linear.z) > 1e-6:
+            depth_cmd = self._depth_hold_velocity()
+            requested_z = v.linear.z if abs(v.linear.z) > 1e-6 else depth_cmd
+            try:
+                z_safe = (
+                    self._opt_xz(v, requested_z)
+                    if self.current_h != float('inf')
+                    else np.array([v.linear.x, requested_z]))
+                tw.linear.z = float(z_safe[1])
+            except Exception as exc:
+                self.get_logger().error(
+                    f'[CBF] paper XZ projection failed, falling back to depth hold: {exc}')
+                tw.linear.z = depth_cmd
+        else:
+            tw.linear.z = self._depth_hold_velocity()
+
+        self.h_pub.publish(Float64(data=float(self.current_h)))
+        self._publish_cmd(v, tw, tw, 'paper_cbf')
+
     def process_data(self, v):
+        if self.paper_controller:
+            self._process_data_paper_cbf(v)
+            return
         published = False
         if self.xy_cbf:
             if self.current_h != float('inf'):
@@ -2516,9 +2621,26 @@ class ObstacleAvoidanceNode(Node):
                 'external planner is reference/fallback only; SPD2C will plan from SCG')
 
         self._update_point_cloud_obstacles()
-        self._update_obstacle_state()
+        # Must run before _update_obstacle_state(): that reads
+        # local_scg_obstacle_boundaries (via _scg_constraints) and would
+        # otherwise use the previous cycle's boundaries.
         self._update_scg_stage()
-        desired = self._spd2c_command()
+        self._update_obstacle_state()
+        if self.paper_controller:
+            # only_gap.py's paper-faithful SPD2C path computes VR directly and
+            # never publishes to the legacy SCG topics this node's own
+            # _spd2c_command() depends on, so that reimplementation would run
+            # on stale/frozen obstacle state. The paper architecture has
+            # SPD2C hand VR straight to the CBF filter below.
+            planner_fresh = self._planner_cmd_is_fresh()
+            desired = self._copy_twist(self.v_alg) if planner_fresh else Twist()
+            self.get_logger().info(
+                '[SPD2C_PAPER_PASSTHROUGH] '
+                f'planner_fresh={planner_fresh} '
+                f'desired=({desired.linear.x:.3f},{desired.linear.y:.3f},'
+                f'{desired.linear.z:.3f};{desired.angular.z:.3f})')
+        else:
+            desired = self._spd2c_command()
         self.process_data(desired)
 
 

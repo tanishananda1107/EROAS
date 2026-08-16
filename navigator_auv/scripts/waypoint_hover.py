@@ -8,7 +8,24 @@ heading tolerance (TURN) or elapsed wall-time (FORWARD).
 Additionally publishes RViz markers showing the FLS field-of-view cone in real-time,
 and logs which obstacles enter the FOV as the vehicle moves.
 
-Spawn at: x≈5, y≈15, z=-50, yaw≈0  (close to cube_6 pillar, pointing east)
+Spawn at: x=8, y=6, z=-59, yaw=1.5708rad/90deg (south of cube_6, the tall
+pillar, pointing north/+y so it's dead ahead within sonar range). Launch
+with (the launch file's `yaw` arg is radians, matching WORLD_A's own
+spawn dict -- passing a bare "90" spawns at ~116.6deg, i.e. 90rad mod
+2*pi, not 90deg):
+  ros2 launch rexrov2_gazebo start_EROAS_demo.launch.py \
+      world_name:=world_a start_waypoint_hover:=true \
+      x:=8 y:=6 z:=-59 yaw:=1.5708
+
+The previous x≈5,y≈15,z=-50,yaw≈0 docstring spawn was never validated: at
+z=-50 the vehicle flies ~9-10m above the real obstacle field (obstacles
+sit at z=-58..-60 per obstacle_avoidance.world), so no obstacle ever
+entered the FLS FOV (confirmed via headless run: zero [FOV] detections
+over a full run). The STEPS below were re-derived offline against the
+obstacles' real oriented-box geometry (ported from velocity_cbf.py's
+OBSTACLE_MODEL_BOXES/WORLD_A_OBSTACLE_SPECS) to thread past cube_6,
+cube_5 and cube_6_1 with a few meters of real clearance, tracing an
+S-curve comparable to the paper's Figure 8.
 
 FLS Sensor Parameters (Blueview P900):
   - Horizontal FOV: 90°, Vertical FOV: 90°
@@ -57,32 +74,32 @@ OBSTACLES = [
 #   For 'fwd' :  duration (s)
 #   For 'turn': angle_deg (+CCW / -CW),  yaw_rate (rad/s)
 # ---------------------------------------------------------------------------
-SPEED = 0.25          # m/s forward speed for all FWD steps
+SPEED = 0.40          # m/s forward speed for all FWD steps
 YAW_RATE = 0.20       # rad/s rotation rate for all TURN steps
 
 STEPS = [
-    # 1. Move east toward pillar's right edge
-    {'type': 'fwd',  'duration': 12.0,  'label': 'fwd — approach pillar right edge'},
-    # 2. Turn right ~35° to curve around pillar
-    {'type': 'turn', 'angle_deg': -35.0, 'label': 'turn R 35° — angle away from pillar'},
-    # 3. Forward past pillar corner
-    {'type': 'fwd',  'duration': 8.0,   'label': 'fwd — past pillar corner'},
-    # 4. Turn left ~18° to level toward disc/hex cluster
-    {'type': 'turn', 'angle_deg': 18.0,  'label': 'turn L 18° — level toward small cluster'},
-    # 5. Forward past disc+hex cluster (stay below their top edge)
-    {'type': 'fwd',  'duration': 10.0,  'label': 'fwd — under small disc+hex cluster'},
-    # 6. Turn right ~12° to dip into the gap
-    {'type': 'turn', 'angle_deg': -12.0, 'label': 'turn R 12° — dip into gap'},
-    # 7. Forward through the gap (lowest point of curve)
-    {'type': 'fwd',  'duration': 8.0,   'label': 'fwd — through gap (lowest point)'},
-    # 8. Turn left ~22° to curve back upward
-    {'type': 'turn', 'angle_deg': 22.0,  'label': 'turn L 22° — curve back up'},
-    # 9. Forward rising away from hooks
-    {'type': 'fwd',  'duration': 8.0,   'label': 'fwd — rising away from large hooks'},
-    # 10. Turn left ~10° final approach
-    {'type': 'turn', 'angle_deg': 10.0,  'label': 'turn L 10° — final approach'},
-    # 11. Short forward to final resting position
-    {'type': 'fwd',  'duration': 5.0,   'label': 'fwd — final stop position'},
+    # 1. Close in on cube_6 (the tall pillar) from the south, straight ahead
+    {'type': 'fwd',  'duration': 30.0, 'label': 'fwd — approach cube_6 pillar from the south'},
+    # 2. Turn left ~62 deg to curve around the pillar's west side
+    {'type': 'turn', 'angle_deg': 62.0, 'label': 'turn L 62deg — curve west around the pillar'},
+    # 3. Forward past the pillar, climbing over its top (Fig. 8b hump, rising leg)
+    {'type': 'fwd',  'duration': 15.0, 'vz': 0.15,
+     'label': 'fwd — past pillar, climbing over its top'},
+    # 4. Turn right ~75 deg to resume heading north
+    {'type': 'turn', 'angle_deg': -75.0, 'label': 'turn R 75deg — resume heading north'},
+    # 5. Push north toward the cube_5 / cube_6_1 pair, still climbing
+    {'type': 'fwd',  'duration': 18.0, 'vz': 0.10,
+     'label': 'fwd — north toward cube_5/cube_6_1, still climbing'},
+    # 6. Turn left ~25 deg to thread the gap between them
+    {'type': 'turn', 'angle_deg': 25.0, 'label': 'turn L 25deg — thread the gap'},
+    # 7. Forward through the gap, descending back down (Fig. 8b hump, falling leg)
+    {'type': 'fwd',  'duration': 12.0, 'vz': -0.15,
+     'label': 'fwd — through gap, descending'},
+    # 8. Turn right ~20 deg for the final approach
+    {'type': 'turn', 'angle_deg': -20.0, 'label': 'turn R 20deg — final approach'},
+    # 9. Forward to final resting position, leveling off depth
+    {'type': 'fwd',  'duration': 8.0, 'vz': -0.20,
+     'label': 'fwd — final stop position, leveling off'},
 ]
 
 CMD_TOPIC  = "/rexrov2/cmd_vel"
@@ -351,6 +368,7 @@ class SequentialNav(Node):
                 self._advance_step()
             else:
                 cmd.linear.x = SPEED
+                cmd.linear.z = step.get('vz', 0.0)
 
         # ---- TURN step ----
         elif step['type'] == 'turn':

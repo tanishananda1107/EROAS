@@ -18,6 +18,11 @@ from std_msgs.msg import Float64
 FOV_DEG = 90.0
 FOV_RAD = math.radians(FOV_DEG)
 
+# Eq. 8-9: paper's fixed gap cardinality (L=150 beams out of its N_B=512
+# BlueView P900 array).
+PAPER_GAP_BEAMS = 150
+PAPER_REFERENCE_BEAM_COUNT = 512
+
 
 def clamp(value, lower, upper):
     return max(lower, min(upper, value))
@@ -58,6 +63,7 @@ class SonarHeadingNode(Node):
         self.declare_parameter('point_cloud_topic', '/rexrov2/blueview_p900_point_cloud')
         self.declare_parameter('use_raw_sonar', False)
         self.declare_parameter('use_point_cloud_sonar', True)
+        self.declare_parameter('prefer_point_cloud_sonar', True)
         self.declare_parameter('waypoints', '29,97,-50;31,110,-55;30,90,-90;30,120,-40')
         self.declare_parameter('sonar_timeout', 1.0)
         self.declare_parameter('cruise_speed', 0.55)
@@ -67,6 +73,9 @@ class SonarHeadingNode(Node):
         self.declare_parameter('fallback_lateral_gain', 0.65)
         self.declare_parameter('fallback_min_forward_fraction', 0.20)
         self.declare_parameter('loop_waypoints', False)
+        self.declare_parameter('waypoint_tolerance', 5.0)
+        self.declare_parameter('final_waypoint_tolerance', 5.0)
+        self.declare_parameter('planar_waypoint_tolerance', False)
 
         self.declare_parameter('sonar_max_range', 15.0)
         self.declare_parameter('detection_threshold', 2.0)
@@ -97,6 +106,96 @@ class SonarHeadingNode(Node):
         self.declare_parameter('progress_recovery_release_distance', 0.55)
         self.declare_parameter('point_cloud_parse_interval', 0.25)
         self.declare_parameter('stale_sonar_timeout', 3.0)
+        self.declare_parameter('startup_hover_duration', 0.0)
+        self.declare_parameter('startup_sensor_wait_timeout', 0.0)
+        self.declare_parameter('pivot_min_angle', -0.8)
+        self.declare_parameter('pivot_max_angle', 0.8)
+        self.declare_parameter('pivot_sample_count', 81)
+        self.declare_parameter('pivot_sample_timeout', 0.3)
+        self.declare_parameter('pivot_sample_retries', 3)
+        self.declare_parameter('vertical_gap_run_length', 30)
+        self.declare_parameter('vertical_gap_safety_margin_rad', 0.0)
+        self.declare_parameter('vertical_escape_duration', 4.0)
+        self.declare_parameter('vertical_depth_tolerance', 0.5)
+        self.declare_parameter('vertical_escape_min_duration', 0.0)
+        self.declare_parameter('vertical_escape_min_planar_distance', 0.0)
+        self.declare_parameter('post_vertical_resume_duration', 35.0)
+        self.declare_parameter('vertical_detection_threshold', 15.0)
+        # Last-resort fallback for a fully-boxed pocket: gap_follow,
+        # boundedness_turn, convexity_turn and even a completed vertical
+        # escape can all keep firing without ever producing real net
+        # displacement when the CBF's min-norm QP sees obstacle-derived
+        # constraints on every bearing at once (observed in World A: a tight
+        # cluster where the horizontal scan reports free_beams=0 on every
+        # side, so *every* direction the planner tries gets projected down
+        # toward zero -- there is no unconstrained direction for a min-norm
+        # projection to find). Track real odometry displacement independent
+        # of decision state; if the vehicle hasn't covered
+        # stuck_recovery_distance_threshold in stuck_recovery_timeout
+        # seconds, stop trying more 2D/vertical maneuvers and reverse
+        # straight back for stuck_recovery_duration -- directly away from
+        # whatever it's been pressed up against is the one direction the
+        # CBF constraint gradient (2*(vehicle - obstacle), see
+        # velocity_cbf.py's _xy_projection_constraints_with_request) always
+        # treats as safe, so it passes through un-throttled and actually
+        # opens some real clearance instead of oscillating in place.
+        self.declare_parameter('stuck_recovery_timeout', 45.0)
+        self.declare_parameter('stuck_recovery_distance_threshold', 2.5)
+        self.declare_parameter('stuck_recovery_reverse_speed', 0.3)
+        # 6s (~1.8m of backup) raised nearest_obstacle from 2.05m to only
+        # 3.28m in World A -- CBF still throttled the subsequent vertical
+        # escape's climb rate near that cluster before it reached enough
+        # height. ~15s (~4.5m) gives the follow-up climb attempt
+        # meaningfully more room to actually work with.
+        self.declare_parameter('stuck_recovery_duration', 15.0)
+        # Backing straight out and letting gap_follow/convexity_turn re-aim
+        # at the goal just re-approaches the identical corridor it was
+        # already stuck in -- observed in World A: recovery genuinely opened
+        # clearance (nearest_obstacle 2.05m -> 3.9m) but net position was
+        # unchanged two minutes later because it drove straight back to the
+        # same spot. Yawing while backing away points the vehicle at a
+        # different heading before 2D nav resumes, so each attempt actually
+        # samples a different direction instead of retrying the one that
+        # just failed. Alternates side per attempt so it doesn't overshoot
+        # into a mirror-image loop between just two headings.
+        self.declare_parameter('stuck_recovery_yaw_bias', 0.5)
+
+        # Paper-faithful SPD2C controller (arXiv 2411.05516 Algorithm 1 /
+        # AIRLabIISc/EROAS reference only_gap.py). Kept behind a flag so
+        # other world configs can keep the pre-existing heuristic.
+        self.declare_parameter('paper_controller', False)
+        self.declare_parameter('paper_k_t', 0.12)
+        self.declare_parameter('paper_k_v', 0.35)
+        self.declare_parameter('paper_psi_max', FOV_RAD)
+        self.declare_parameter('paper_vx_max', 1.0)
+        self.declare_parameter('paper_max_yaw_rate', 0.26)
+        self.declare_parameter('paper_convexity_threshold', 0.02)
+        # Paper text states Ithr=15, but the AIRLabIISc/EROAS reference
+        # only_gap.py that actually produced the paper's figures uses
+        # threshold=2 for the horizontal scan (threshold=15 is only used in
+        # its vertical process_3d_data). Matching the verified reference.
+        self.declare_parameter('paper_intensity_threshold', 2.0)
+        # The vertical pivot's process_3d_data equivalent (see
+        # _paper_central_sector_free) needs its own threshold per the
+        # comment above -- it was reusing paper_intensity_threshold (2.0,
+        # the horizontal value) instead, and over that check's much wider
+        # ~52deg central band, any weak return (noise/scattering) at that
+        # low a threshold marks the whole sector blocked at every sampled
+        # elevation, so the pivot search always came back empty even when a
+        # real vertical opening existed.
+        self.declare_parameter('paper_vertical_intensity_threshold', 15.0)
+        # If no horizontal gap_follow beam has been found for this long,
+        # escalate straight to the vertical pivot search regardless of the
+        # convexity/boundedness classification. Observed in World A: right
+        # at a tight pinch (e.g. cube_6_1/cube_7), gap_follow and
+        # convexity_turn can alternate forever without either resolving --
+        # gap_follow finds a marginal bcl, turning toward it shrinks the
+        # corridor further, convexity_turn (whose fitted curvature `a`
+        # doesn't reliably read as convex enough) turns back the other way,
+        # repeat. That is exactly the situation Sec III-C1's vertical pivot
+        # exists for (paper Fig 8b's climb-over "hump"), so once stuck this
+        # long we stop trusting the 2D convexity gate and pivot.
+        self.declare_parameter('paper_stuck_timeout', 3.0)
 
         cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
         pose_topic = self.get_parameter('pose_topic').value
@@ -121,6 +220,15 @@ class SonarHeadingNode(Node):
             Float64, '/rexrov2/scg/obstacle_count', 10)
         self.gap_count_pub = self.create_publisher(
             Float64, '/rexrov2/scg/gap_count', 10)
+        # velocity_cbf.py's own depth-hold target was a static per-world
+        # value that never tracked waypoint progression -- e.g. a vertical
+        # escape that correctly climbs to a shallower waypoint's depth got
+        # immediately undone because the CBF kept pulling back toward the
+        # original static target. This node is the authority on which
+        # waypoint (and therefore which depth) is currently active, so it
+        # publishes that live target for velocity_cbf.py to hold instead.
+        self.target_depth_pub = self.create_publisher(
+            Float64, '/rexrov2/nav/target_depth', 10)
 
         self.subscription_handles = [
             self.create_subscription(Odometry, pose_topic, self.pose_callback, 10),
@@ -184,6 +292,12 @@ class SonarHeadingNode(Node):
         self.fallback_min_forward_fraction = float(
             self.get_parameter('fallback_min_forward_fraction').value)
         self.loop_waypoints = bool(self.get_parameter('loop_waypoints').value)
+        self.waypoint_tolerance = float(
+            self.get_parameter('waypoint_tolerance').value)
+        self.final_waypoint_tolerance = float(
+            self.get_parameter('final_waypoint_tolerance').value)
+        self.planar_waypoint_tolerance = bool(
+            self.get_parameter('planar_waypoint_tolerance').value)
 
         self.sonar_max_range = float(self.get_parameter('sonar_max_range').value)
         self.detection_threshold = float(
@@ -239,6 +353,57 @@ class SonarHeadingNode(Node):
         self.stale_sonar_timeout_ns = int(
             float(self.get_parameter('stale_sonar_timeout').value) * 1e9)
 
+        self.pivot_min_angle = float(self.get_parameter('pivot_min_angle').value)
+        self.pivot_max_angle = float(self.get_parameter('pivot_max_angle').value)
+        self.pivot_sample_count = int(self.get_parameter('pivot_sample_count').value)
+        self.pivot_sample_timeout = float(
+            self.get_parameter('pivot_sample_timeout').value)
+        self.pivot_sample_retries = int(
+            self.get_parameter('pivot_sample_retries').value)
+        self.vertical_gap_run_length = int(
+            self.get_parameter('vertical_gap_run_length').value)
+        self.vertical_gap_safety_margin_rad = float(
+            self.get_parameter('vertical_gap_safety_margin_rad').value)
+        self.vertical_escape_duration = float(
+            self.get_parameter('vertical_escape_duration').value)
+        self.vertical_depth_tolerance = float(
+            self.get_parameter('vertical_depth_tolerance').value)
+        self.vertical_escape_min_duration = float(
+            self.get_parameter('vertical_escape_min_duration').value)
+        self.vertical_escape_min_planar_distance = float(
+            self.get_parameter('vertical_escape_min_planar_distance').value)
+        self.post_vertical_resume_duration = float(
+            self.get_parameter('post_vertical_resume_duration').value)
+        self.vertical_detection_threshold = float(
+            self.get_parameter('vertical_detection_threshold').value)
+        self.stuck_recovery_timeout = float(
+            self.get_parameter('stuck_recovery_timeout').value)
+        self.stuck_recovery_distance_threshold = float(
+            self.get_parameter('stuck_recovery_distance_threshold').value)
+        self.stuck_recovery_reverse_speed = float(
+            self.get_parameter('stuck_recovery_reverse_speed').value)
+        self.stuck_recovery_duration = float(
+            self.get_parameter('stuck_recovery_duration').value)
+        self.stuck_recovery_yaw_bias = float(
+            self.get_parameter('stuck_recovery_yaw_bias').value)
+
+        self.paper_controller = bool(self.get_parameter('paper_controller').value)
+        self.paper_k_t = float(self.get_parameter('paper_k_t').value)
+        self.paper_k_v = float(self.get_parameter('paper_k_v').value)
+        self.paper_psi_max = float(self.get_parameter('paper_psi_max').value)
+        self.paper_vx_max = float(self.get_parameter('paper_vx_max').value)
+        self.paper_max_yaw_rate = float(
+            self.get_parameter('paper_max_yaw_rate').value)
+        self.paper_convexity_threshold = float(
+            self.get_parameter('paper_convexity_threshold').value)
+        self.paper_intensity_threshold = float(
+            self.get_parameter('paper_intensity_threshold').value)
+        self.paper_vertical_intensity_threshold = float(
+            self.get_parameter('paper_vertical_intensity_threshold').value)
+        self.paper_stuck_timeout = float(
+            self.get_parameter('paper_stuck_timeout').value)
+        self.paper_beam_stride = 5
+
         self.last_cmd = Twist()
         self.last_commanded_speed = 0.0
         self.last_selected_beam = None
@@ -254,6 +419,31 @@ class SonarHeadingNode(Node):
         self.mission_complete = False
         self.last_context_h = float('inf')
         self.gap_history = {}
+
+        # Vertical pivot-search state machine (paper Sec III-C1 "Pivoting the
+        # Sonar" / ROS1 reference's navigate_3d+move_sonar+process_3d_data).
+        self.vpivot_active = False
+        self.vpivot_sample_index = 0
+        self.vpivot_angle_commanded_time = None
+        self.vpivot_retries_left = 0
+        self.vpivot_accepted = []
+        self.vertical_escape_active = False
+        self.vertical_escape_until = None
+        self.vertical_escape_elevation = 0.0
+        self.vertical_escape_started_at = None
+        self.vertical_escape_start_xy = None
+        self.vertical_resume_until = 0.0
+        self.no_horizontal_gap_since = None
+        self.stuck_recovery_active = False
+        self.stuck_recovery_until = None
+        self.stuck_recovery_count = 0
+        self.stuck_recovery_best_run = -1
+        self.stuck_recovery_best_yaw = None
+        self.stuck_recovery_start_yaw = 0.0
+        self.stuck_recovery_turn_active = False
+        self.stuck_recovery_turn_until = None
+        self.progress3d_anchor_xyz = None
+        self.progress3d_anchor_time = None
 
     def _parse_waypoints(self, value):
         waypoints = []
@@ -306,7 +496,12 @@ class SonarHeadingNode(Node):
 
         d_xy = math.hypot(self.target_x - x, self.target_y - y)
         d = math.hypot(d_xy, self.target_z - z)
-        if not self.mission_complete and d < 5.0:
+        tolerance = (
+            self.final_waypoint_tolerance
+            if self.current_goal_index >= len(self.waypoints) - 1
+            else self.waypoint_tolerance)
+        progress_distance = d_xy if self.planar_waypoint_tolerance else d
+        if not self.mission_complete and progress_distance < tolerance:
             self.update_goal()
 
     def sonar_image_raw_callback(self, data):
@@ -1046,10 +1241,581 @@ class SonarHeadingNode(Node):
                 '[NAVIGATION_DECISION] No fresh sonar frames; following waypoints using pose fallback')
             self.fallback_announced = True
 
+    # ------------------------------------------------------------------
+    # Paper-faithful SPD2C controller (arXiv 2411.05516 Algorithm 1 /
+    # AIRLabIISc/EROAS reference only_gap.py + velocity_cbf.py), active
+    # when the 'paper_controller' parameter is true. Operates on the raw
+    # sonar intensity matrix (as the reference does), not the elaborate
+    # gap-scoring heuristic used by the pre-existing path below.
+    # ------------------------------------------------------------------
+
+    def _paper_classify_beams(self, data, stride):
+        range_count, beam_count = data.shape
+        start_bin = min(10, max(0, range_count - 1))
+        end_bin = max(start_bin + 1, range_count - 40)
+        band = data[start_bin:end_bin, :].astype(float)
+        free_mask = ~np.any(band > self.paper_intensity_threshold, axis=0)
+        return [i for i in range(0, beam_count, stride) if free_mask[i]]
+
+    def _paper_gap_candidates(self, free_beams, stride, required_beams):
+        # A window of `required_beams` consecutive free_beams entries spans
+        # indices i .. i+required_beams-1 (required_beams-1 strides), not
+        # i .. i+required_beams (required_beams strides) -- the previous
+        # off-by-one silently demanded one extra free beam, so a corridor
+        # exactly at the paper's L=150-beam threshold (the common case right
+        # at a gap's edge) was rejected as "no gap", falling through to
+        # convexity_turn, which doesn't grow the corridor and just
+        # oscillates the vehicle in place at that boundary indefinitely.
+        mids = []
+        n = len(free_beams)
+        span = required_beams - 1
+        for i in range(n - span):
+            if free_beams[i + span] - free_beams[i] == stride * span:
+                mids.append(free_beams[i + span // 2])
+        return mids
+
+    def _paper_boundedness_turn(self, free_beams, beam_count, stride):
+        """Mirrors the reference check_for_boundedness: if the obstacle
+        field is open on exactly one FOV edge, aim toward that edge (BO ->
+        toward the goal side; LUBO/RUBO -> toward whichever edge is free).
+        Beam index 0 is the physically-rightmost beam and beam_count-1 is
+        the physically-leftmost beam (see sonar_frame_converter.py's
+        atan2(y,x)-based beam assignment), so "aim toward the goal" means
+        aiming at the high-index end when the goal is to the left
+        (goal_yaw_error >= 0) and the low-index end when it's to the
+        right."""
+        edge_span = 40
+        free_set = set(free_beams)
+        right_phys_edge = set(range(0, edge_span, stride))
+        left_phys_edge = set(range(max(0, beam_count - edge_span), beam_count, stride))
+        right_open = right_phys_edge.issubset(free_set)
+        left_open = left_phys_edge.issubset(free_set)
+        if not left_open and not right_open:
+            return None
+        if left_open and not right_open:
+            return beam_count - 1 - stride * 2
+        if right_open and not left_open:
+            return stride * 2
+        goal_left = self.goal_yaw_error >= 0.0
+        if goal_left:
+            return beam_count - 1 - stride * 2
+        return stride * 2
+
+    def _paper_contour_points(self, data, ranges, stride):
+        range_count, beam_count = data.shape
+        start_bin = min(10, max(0, range_count - 1))
+        end_bin = max(start_bin + 1, range_count - 40)
+        angle_per_beam = FOV_RAD / max(1, beam_count - 1)
+        max_range = float(ranges[-1]) if len(ranges) else self.sonar_max_range
+        points = []
+        for i in range(0, beam_count, stride):
+            column = data[start_bin:end_bin, i]
+            hit_idx = int(np.argmax(column > self.paper_intensity_threshold))
+            if column[hit_idx] <= self.paper_intensity_threshold:
+                continue
+            j = start_bin + hit_idx
+            angle_rad = i * angle_per_beam + math.pi / 4.0
+            distance = j * max_range / range_count
+            points.append((distance * math.cos(angle_rad), distance * math.sin(angle_rad)))
+        return points
+
+    def _paper_convexity(self, points):
+        if len(points) < 3:
+            return None, 0.0, 0.0
+        pts = sorted(points, key=lambda p: p[0])
+        xs, ys = [], []
+        for x, y in pts:
+            if not xs or x > xs[-1] + 1e-6:
+                xs.append(x)
+                ys.append(y)
+        if len(xs) < 3:
+            return None, 0.0, 0.0
+        try:
+            a, b, _ = np.polyfit(xs, ys, 2)
+        except (np.linalg.LinAlgError, ValueError):
+            return None, 0.0, 0.0
+        left_slopes = [2 * a * x + b for x in xs if x < 0]
+        right_slopes = [2 * a * x + b for x in xs if x > 0]
+        avg_left = float(np.mean(left_slopes)) if left_slopes else 0.0
+        avg_right = float(np.mean(right_slopes)) if right_slopes else 0.0
+        return float(a), avg_left, avg_right
+
+    def _paper_heading_command_for_angle(self, heading_error):
+        cmd = Twist()
+        desired_yaw = clamp(
+            self.paper_k_t * heading_error,
+            -self.paper_max_yaw_rate, self.paper_max_yaw_rate)
+        desired_speed = clamp(
+            self.paper_k_v * (self.paper_psi_max - abs(heading_error)),
+            0.0, self.paper_vx_max)
+        cmd.angular.z = self._slew(
+            desired_yaw, self.last_cmd.angular.z, self.max_yaw_delta)
+        cmd.linear.x = self._slew(
+            desired_speed, self.last_cmd.linear.x, self.max_speed_delta)
+        cmd.linear.y = 0.0
+        return cmd
+
+    def _paper_heading_command(self, bcl, beam_count):
+        heading_error = self._beam_to_angle(bcl, beam_count)
+        return self._paper_heading_command_for_angle(heading_error)
+
+    def _paper_pivot_angles(self):
+        if self.pivot_sample_count <= 1:
+            return [self.pivot_min_angle]
+        return np.linspace(
+            self.pivot_min_angle, self.pivot_max_angle,
+            self.pivot_sample_count).tolist()
+
+    def _paper_central_sector_free(self, data):
+        """Is there a navigable corridor at this elevation?
+
+        Previously required *zero* pixels above threshold anywhere in the
+        ~52deg x range central band (tens of thousands of pixels) -- in any
+        realistically cluttered scene that's essentially never true even
+        when a genuinely clear corridor exists dead ahead, since a single
+        strong return anywhere in that huge area (a different obstacle off
+        to the side, seafloor scatter, etc.) fails the whole elevation.
+        Matches the horizontal scan's approach instead: classify beams
+        free/hit and require a contiguous free run at least as wide as the
+        paper's own L=150/512-beam gap cardinality (eq. 8-9), rather than
+        demanding the whole swath be pristine.
+        """
+        range_count, beam_count = data.shape
+        lo = int(beam_count * 100 / 512)
+        hi = int(beam_count * 400 / 512)
+        hi = max(lo + 1, min(hi, beam_count))
+        start_bin = min(10, max(0, range_count - 1))
+        end_bin = max(start_bin + 1, range_count - 40)
+        band = data[start_bin:end_bin, lo:hi]
+        free_mask = ~np.any(band > self.paper_vertical_intensity_threshold, axis=0)
+        required = max(1, int(round(
+            (PAPER_GAP_BEAMS / PAPER_REFERENCE_BEAM_COUNT) * (hi - lo))))
+        run = 0
+        best_run = 0
+        for is_free in free_mask:
+            run = run + 1 if is_free else 0
+            best_run = max(best_run, run)
+        return best_run >= required
+
+    def _goal_elevation_angle(self):
+        if self.pose is None or self.target_z is None:
+            return 0.0
+        x, y, z = self.pose.position.x, self.pose.position.y, self.pose.position.z
+        dz = self.target_z - z
+        dxy = math.hypot(self.target_x - x, self.target_y - y)
+        return math.atan2(dz, max(1e-3, dxy))
+
+    def _advance_vertical_pivot(self, data):
+        """One tick of the elevation sweep. Returns (done, chosen_elevation)."""
+        now = self._now_sec()
+        angles = self._paper_pivot_angles()
+
+        if self.vpivot_sample_index >= len(angles):
+            run_len = max(1, self.vertical_gap_run_length)
+            accepted = self.vpivot_accepted
+            mids = []
+            for i in range(len(accepted) - run_len + 1):
+                if all(accepted[i:i + run_len]):
+                    mids.append((angles[i] + angles[i + run_len - 1]) / 2.0)
+            self.vpivot_active = False
+            self.vpivot_sample_index = 0
+            self.vpivot_accepted = []
+            self.vpivot_angle_commanded_time = None
+            if not mids:
+                return True, None
+            goal_elevation = self._goal_elevation_angle()
+            chosen = min(mids, key=lambda a: abs(a - goal_elevation))
+            return True, chosen
+
+        angle = angles[self.vpivot_sample_index]
+        if self.vpivot_angle_commanded_time is None:
+            self.joint_pub.publish(Float64(data=float(angle)))
+            self.sonar_move_pub.publish(Float64(data=2.0))
+            self.vpivot_angle_commanded_time = now
+            return False, None
+
+        if now - self.vpivot_angle_commanded_time < self.pivot_sample_timeout:
+            return False, None
+
+        free = self._paper_central_sector_free(data)
+        self.vpivot_accepted.append(free)
+        range_count, beam_count = data.shape
+        lo = int(beam_count * 100 / 512)
+        hi = max(lo + 1, min(int(beam_count * 400 / 512), beam_count))
+        start_bin = min(10, max(0, range_count - 1))
+        end_bin = max(start_bin + 1, range_count - 40)
+        band = data[start_bin:end_bin, lo:hi]
+        free_mask = ~np.any(band > self.paper_vertical_intensity_threshold, axis=0)
+        run = 0
+        best_run = 0
+        for is_free in free_mask:
+            run = run + 1 if is_free else 0
+            best_run = max(best_run, run)
+        required = max(1, int(round(
+            (PAPER_GAP_BEAMS / PAPER_REFERENCE_BEAM_COUNT) * (hi - lo))))
+        self.get_logger().info(
+            '[VPIVOT_DEBUG] '
+            f'angle={angle:.3f} free={free} '
+            f'best_run={best_run} required={required} band_width={hi - lo} '
+            f'frac_above={float(np.mean(band > self.paper_vertical_intensity_threshold)):.3f}')
+        self.vpivot_sample_index += 1
+        self.vpivot_angle_commanded_time = None
+        return False, None
+
+    def _widest_free_run(self, data):
+        """Widest contiguous corridor (in beams) visible in the current
+        forward-facing 90deg sonar window, at whatever heading the vehicle
+        is at right now."""
+        free_beams = self._paper_classify_beams(data, self.paper_beam_stride)
+        free_set = set(free_beams)
+        beam_count = data.shape[1]
+        stride = self.paper_beam_stride
+        run = 0
+        best = 0
+        for i in range(0, beam_count, stride):
+            if i in free_set:
+                run += 1
+                best = max(best, run)
+            else:
+                run = 0
+        return best
+
+    def _update_stuck_recovery(self, now, data):
+        """Detect a fully-boxed deadlock, back away while scanning for the
+        most open heading, then turn onto it before resuming navigation.
+
+        gap_follow/boundedness_turn/convexity_turn and a completed vertical
+        escape can all keep firing, each producing a nonzero commanded
+        velocity, without ever moving the vehicle: when the horizontal scan
+        reports free_beams=0 on every bearing (observed in World A at a
+        tight obstacle cluster), velocity_cbf.py's min-norm CBF-QP has an
+        obstacle-derived constraint pushing back from every direction at
+        once, so whatever direction the planner tries gets projected down
+        toward zero. There is no 2D or vertical-pivot decision that fixes
+        this -- the corridor those maneuvers are trying to find may not
+        exist within the current safety margin from the vehicle's current
+        heading. Reversing straight back is the one direction the CBF's
+        constraint gradient (2*(vehicle - obstacle)) always treats as safe,
+        so it passes through un-throttled and actually opens real
+        clearance -- but backing out and then just letting gap_follow
+        re-aim at the goal re-approaches the identical corridor it was
+        already stuck in (confirmed: net position unchanged minutes later
+        despite real clearance gains). The sonar only ever looks at
+        whatever's currently dead ahead within its fixed 90deg FOV, so
+        finding out what's actually open in *other* directions requires
+        physically yawing the vehicle -- there's no separate yaw-scanning
+        joint the way there is for elevation. Turning while backing away
+        samples the sonar across a wide arc for free, and remembering the
+        heading with the widest corridor seen (not just count of free
+        beams, which rewards scattered noise over one real opening) gives
+        2D nav something genuinely different to try instead of repeating
+        the failed approach.
+        """
+        if self.stuck_recovery_turn_active:
+            current_yaw = (
+                yaw_from_quaternion(self.pose.orientation)
+                if self.pose is not None else self.stuck_recovery_best_yaw)
+            yaw_error = math.atan2(
+                math.sin(self.stuck_recovery_best_yaw - current_yaw),
+                math.cos(self.stuck_recovery_best_yaw - current_yaw))
+            if abs(yaw_error) <= 0.12 or now >= self.stuck_recovery_turn_until:
+                self.stuck_recovery_turn_active = False
+                self.vertical_resume_until = now + self.post_vertical_resume_duration
+                self.progress3d_anchor_xyz = None
+                self.progress3d_anchor_time = None
+                self.get_logger().info(
+                    '[STUCK_RECOVERY] turned onto best heading '
+                    f'(run={self.stuck_recovery_best_run} beams); resuming navigation')
+                return False
+            cmd = Twist()
+            cmd.angular.z = clamp(1.2 * yaw_error, -self.max_yaw_rate, self.max_yaw_rate)
+            self._publish_cmd(cmd, 'stuck_recovery_turning_to_best_heading')
+            return True
+
+        if self.stuck_recovery_active:
+            if self.pose is not None:
+                sample_yaw = yaw_from_quaternion(self.pose.orientation)
+                # A reading near the heading we were just stuck facing looks
+                # clear for the wrong reason -- backing away increases
+                # standoff distance from the *same* wall, which alone can
+                # push it from "blocked" to "reads free" at longer range,
+                # without there being an actual corridor there. Confirmed:
+                # the very first post-trigger sample (heading barely
+                # changed yet) reported the scan's full width as free, and
+                # turning back onto it just re-approached the identical
+                # spot. Only trust a candidate once the vehicle has
+                # actually turned a meaningful amount away from where it
+                # started, so "best" reflects a genuinely different
+                # direction, not residual standoff on the old one.
+                yaw_delta = abs(math.atan2(
+                    math.sin(sample_yaw - self.stuck_recovery_start_yaw),
+                    math.cos(sample_yaw - self.stuck_recovery_start_yaw)))
+                run = self._widest_free_run(data)
+                if yaw_delta >= 0.6 and run > self.stuck_recovery_best_run:
+                    self.stuck_recovery_best_run = run
+                    self.stuck_recovery_best_yaw = sample_yaw
+            if now >= self.stuck_recovery_until:
+                self.stuck_recovery_active = False
+                if self.stuck_recovery_best_yaw is not None:
+                    self.stuck_recovery_turn_active = True
+                    self.stuck_recovery_turn_until = now + 8.0
+                    self.get_logger().info(
+                        '[STUCK_RECOVERY] backed away; turning onto widest '
+                        f'corridor seen (run={self.stuck_recovery_best_run} beams)')
+                    return True
+                self.vertical_resume_until = now + self.post_vertical_resume_duration
+                self.progress3d_anchor_xyz = None
+                self.progress3d_anchor_time = None
+                self.get_logger().info('[STUCK_RECOVERY] backing-away complete; resuming navigation')
+                return False
+            cmd = Twist()
+            cmd.linear.x = -self.stuck_recovery_reverse_speed
+            cmd.angular.z = self._stuck_recovery_yaw_sign() * self.stuck_recovery_yaw_bias
+            self._publish_cmd(cmd, 'stuck_recovery_backing_away')
+            self.get_logger().warning(
+                '[STUCK_RECOVERY] backing away, remaining='
+                f'{self.stuck_recovery_until - now:.1f}s best_run={self.stuck_recovery_best_run}')
+            return True
+
+        if self.pose is None:
+            return False
+
+        xyz = (self.pose.position.x, self.pose.position.y, self.pose.position.z)
+        if self.progress3d_anchor_xyz is None:
+            self.progress3d_anchor_xyz = xyz
+            self.progress3d_anchor_time = now
+            return False
+
+        moved = math.dist(xyz, self.progress3d_anchor_xyz)
+        if moved >= self.stuck_recovery_distance_threshold:
+            self.progress3d_anchor_xyz = xyz
+            self.progress3d_anchor_time = now
+            return False
+
+        if now - self.progress3d_anchor_time < self.stuck_recovery_timeout:
+            return False
+
+        # Genuinely stuck: abandon whatever 2D/vertical maneuver was in
+        # progress (it's had stuck_recovery_timeout seconds and produced
+        # under stuck_recovery_distance_threshold of net movement) and back
+        # away instead.
+        self.vpivot_active = False
+        self.vertical_escape_active = False
+        self.joint_pub.publish(Float64(data=0.0))
+        self.sonar_move_pub.publish(Float64(data=0.0))
+        self.stuck_recovery_active = True
+        self.stuck_recovery_until = now + self.stuck_recovery_duration
+        self.stuck_recovery_count += 1
+        self.stuck_recovery_best_run = -1
+        self.stuck_recovery_best_yaw = None
+        self.stuck_recovery_start_yaw = (
+            yaw_from_quaternion(self.pose.orientation) if self.pose is not None else 0.0)
+        self.get_logger().warning(
+            '[STUCK_RECOVERY] no net progress in '
+            f'{self.stuck_recovery_timeout:.0f}s (moved {moved:.2f}m); '
+            f'backing away (attempt {self.stuck_recovery_count})')
+        cmd = Twist()
+        cmd.linear.x = -self.stuck_recovery_reverse_speed
+        cmd.angular.z = self._stuck_recovery_yaw_sign() * self.stuck_recovery_yaw_bias
+        self._publish_cmd(cmd, 'stuck_recovery_backing_away')
+        return True
+
+    def _stuck_recovery_yaw_sign(self):
+        return 1.0 if self.stuck_recovery_count % 2 == 1 else -1.0
+
+    def _process_data_paper(self, data, ranges, beam_count):
+        now = self._now_sec()
+        stride = self.paper_beam_stride
+
+        if self._update_stuck_recovery(now, data):
+            return
+
+        if self.vertical_escape_active:
+            # world_a's vertical_depth_tolerance is documented ("finish the
+            # climb tightly around the first waypoint's safe depth") but was
+            # never actually checked here -- only the flat duration timer
+            # was, so a long duration (world_a: 180s) had nothing to stop
+            # the vehicle climbing straight through any sane target depth
+            # and toward the surface once a real escape elevation was found.
+            #
+            # But that depth check alone is a trap for a *horizontal* pinch:
+            # target_z is the current waypoint's depth, which the vehicle is
+            # already sitting at when it gets wedged (the obstacle blocks it
+            # at the same depth it's trying to hold, not a different one).
+            # abs(current_z - target_z) is then already inside
+            # vertical_depth_tolerance on the very first tick after
+            # "beginning escape", so reached_target_depth fired true before
+            # any actual climbing happened -- the escape cancelled itself
+            # out for zero net elevation change, fell through to gap_follow
+            # on stale/wide-open SCG defaults, and drove straight back into
+            # the same obstacle. vertical_escape_min_duration/
+            # _min_planar_distance exist for exactly this (documented,
+            # passed in via launch params) but were never actually read
+            # here. Gate the depth check on them so the escape has to
+            # actually run for a bit -- and/or move the vehicle -- before
+            # "at target depth" is trusted as "climb complete" rather than
+            # "never left".
+            elapsed_since_start = (
+                now - self.vertical_escape_started_at
+                if self.vertical_escape_started_at is not None else float('inf'))
+            min_duration_met = elapsed_since_start >= self.vertical_escape_min_duration
+            planar_progress = 0.0
+            if self.pose is not None and self.vertical_escape_start_xy is not None:
+                planar_progress = math.hypot(
+                    self.pose.position.x - self.vertical_escape_start_xy[0],
+                    self.pose.position.y - self.vertical_escape_start_xy[1])
+            min_planar_met = planar_progress >= self.vertical_escape_min_planar_distance
+            reached_target_depth = (
+                min_duration_met and min_planar_met and
+                self.pose is not None and self.target_z is not None and
+                abs(self.pose.position.z - self.target_z) <= self.vertical_depth_tolerance)
+            if reached_target_depth or (
+                    self.vertical_escape_until is not None and now >= self.vertical_escape_until):
+                self.vertical_escape_active = False
+                self.vertical_resume_until = now + self.post_vertical_resume_duration
+            else:
+                cmd = Twist()
+                forward = min(0.5, self.paper_vx_max)
+                cmd.linear.x = forward
+                cmd.linear.z = forward * math.tan(self.vertical_escape_elevation)
+                self._publish_cmd(cmd, 'vertical_escape')
+                self.get_logger().info(
+                    '[VERTICAL_PIVOT] '
+                    f'escaping elevation={self.vertical_escape_elevation:.3f}rad '
+                    f'remaining={self.vertical_escape_until - now:.1f}s')
+                return
+
+        if self.vpivot_active:
+            done, chosen = self._advance_vertical_pivot(data)
+            cmd = Twist()
+            cmd.linear.x = self.min_forward_speed
+            self._publish_cmd(cmd, 'vertical_pivot_scan')
+            self.get_logger().info(
+                '[VERTICAL_PIVOT] '
+                f'sweeping sample={self.vpivot_sample_index}/{self.pivot_sample_count} '
+                f'accepted={sum(1 for a in self.vpivot_accepted if a)}')
+            if done:
+                self.joint_pub.publish(Float64(data=0.0))
+                self.sonar_move_pub.publish(Float64(data=0.0))
+                if chosen is None:
+                    self.get_logger().warning(
+                        '[VERTICAL_PIVOT] no vertical gap found; resuming 2D navigation')
+                else:
+                    self.vertical_escape_active = True
+                    self.vertical_escape_elevation = chosen
+                    self.vertical_escape_until = now + self.vertical_escape_duration
+                    self.vertical_escape_started_at = now
+                    self.vertical_escape_start_xy = (
+                        (self.pose.position.x, self.pose.position.y)
+                        if self.pose is not None else None)
+                    self.get_logger().info(
+                        f'[VERTICAL_PIVOT] selected elevation={chosen:.3f}rad; beginning escape')
+            return
+
+        free_beams = self._paper_classify_beams(data, stride)
+        target_beam = self._target_beam(beam_count)
+        deg_per_beam = FOV_DEG / max(1, beam_count - 1)
+        # Eq. 8-9: fixed gap cardinality L=150 beams out of the paper's
+        # N_B=512-beam array (~26.4 deg). Expressed as a fraction of the FOV
+        # rather than a hardcoded beam count so it stays correct at this
+        # sonar model's fidelity (~500 beams) instead of the paper's 512.
+        paper_gap_deg = (PAPER_GAP_BEAMS / PAPER_REFERENCE_BEAM_COUNT) * FOV_DEG
+        required_beams = max(1, int(round(paper_gap_deg / (deg_per_beam * stride))))
+        mid_beams = self._paper_gap_candidates(free_beams, stride, required_beams)
+
+        bcl = None
+        if mid_beams:
+            bcl = min(mid_beams, key=lambda b: abs(b - target_beam))
+
+        if bcl is not None:
+            cmd = self._paper_heading_command(bcl, beam_count)
+            decision = 'gap_follow'
+            self.no_horizontal_gap_since = None
+        else:
+            if self.no_horizontal_gap_since is None:
+                self.no_horizontal_gap_since = now
+            in_vertical_cooldown = now < self.vertical_resume_until
+            # gap_follow and convexity_turn can otherwise alternate forever
+            # right at a tight pinch: gap_follow commits to a marginal bcl,
+            # turning toward it shrinks the corridor further, convexity_turn
+            # (whose fitted curvature doesn't reliably read as convex there)
+            # turns back the other way, repeat -- see paper_stuck_timeout's
+            # declare_parameter comment. Once that's gone on too long, stop
+            # trying more 2D turns and escalate straight to the vertical
+            # pivot search (paper Fig 8b's climb-over "hump").
+            stuck_too_long = (
+                not in_vertical_cooldown and
+                now - self.no_horizontal_gap_since >= self.paper_stuck_timeout)
+
+            edge_beam = None
+            if not in_vertical_cooldown and not stuck_too_long:
+                edge_beam = self._paper_boundedness_turn(free_beams, beam_count, stride)
+            if edge_beam is not None:
+                cmd = self._paper_heading_command(edge_beam, beam_count)
+                decision = 'boundedness_turn'
+            elif stuck_too_long:
+                self.vpivot_active = True
+                self.vpivot_sample_index = 0
+                self.vpivot_accepted = []
+                self.vpivot_angle_commanded_time = None
+                cmd = Twist()
+                cmd.linear.x = self.min_forward_speed
+                decision = 'vertical_pivot_triggered_stuck'
+                self.no_horizontal_gap_since = None
+            else:
+                hit_points = self._paper_contour_points(data, ranges, stride)
+                a, avg_left, avg_right = self._paper_convexity(hit_points)
+                if a is None:
+                    _, hit_ranges_full, _ = self._classify_beams(data, ranges)
+                    cmd = self._command_for_scan(hit_ranges_full, target_beam, beam_count)
+                    decision = 'no_contour_scan'
+                elif a < self.paper_convexity_threshold and not in_vertical_cooldown:
+                    self.vpivot_active = True
+                    self.vpivot_sample_index = 0
+                    self.vpivot_accepted = []
+                    self.vpivot_angle_commanded_time = None
+                    cmd = Twist()
+                    cmd.linear.x = self.min_forward_speed
+                    decision = 'vertical_pivot_triggered'
+                    self.no_horizontal_gap_since = None
+                else:
+                    # Paper eq. 24-27: every SPD2C heading decision keeps
+                    # moving forward (speed scaled by how far off-heading it
+                    # is), it doesn't stop dead to turn in place. This branch
+                    # previously hardcoded linear.x=0 with an ad-hoc yaw gain,
+                    # which -- since convexity_turn fires on essentially every
+                    # cycle near a convex obstacle -- meant the vehicle spent
+                    # most of its time near an obstacle fully stopped instead
+                    # of progressing along the "exploits the narrowing
+                    # geometry" path the paper describes.
+                    goal_left = self.goal_yaw_error >= 0.0
+                    slope = avg_left if goal_left else avg_right
+                    heading_error = clamp(
+                        math.atan(slope), -self.paper_psi_max, self.paper_psi_max)
+                    cmd = self._paper_heading_command_for_angle(heading_error)
+                    decision = 'convexity_turn'
+
+        self.last_selected_beam = bcl
+        self._publish_cmd(cmd, decision)
+        self.get_logger().info(
+            '[SPD2C_PAPER] '
+            f'decision={decision} bcl={bcl} target_beam={target_beam} '
+            f'free_beams={len(free_beams)} required_run={required_beams} '
+            f'cmd=({cmd.linear.x:.3f},{cmd.linear.y:.3f},{cmd.linear.z:.3f};{cmd.angular.z:.3f})')
+
     def process_data(self):
+        if self.target_z is not None:
+            self.target_depth_pub.publish(Float64(data=float(self.target_z)))
+
         source = 'raw_sonar'
         data, ranges, beam_count = self._sonar_matrix()
-        if data is not None and self._raw_sonar_is_fresh():
+        raw_fresh = data is not None and self._raw_sonar_is_fresh()
+
+        if self.paper_controller and raw_fresh:
+            self._process_data_paper(data, ranges, beam_count)
+            return
+
+        if raw_fresh:
             free_mask, hit_ranges, has_hit = self._classify_beams(data, ranges)
         elif self._refresh_point_cloud_scan() or self._point_cloud_is_fresh():
             free_mask = self.pc_free_mask
