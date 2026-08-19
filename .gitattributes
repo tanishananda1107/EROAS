@@ -1,0 +1,19 @@
+# Normalize line endings for all text files so the WSL/Linux toolchain
+# (colcon, xacro, and every shebang script under */scripts/) always sees
+# LF, regardless of core.autocrlf on any given checkout. Without this,
+# a Windows checkout can silently rewrite LF -> CRLF, which breaks
+# `#!/usr/bin/env python3` shebangs on extensionless installed scripts
+# (exit 127: "python3\r: No such file or directory").
+* text=auto eol=lf
+
+# Known binary formats: never touch these regardless of content-sniffing.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.dae binary
+*.stl binary
+*.obj binary
+*.mtl binary
+*.blend binary
+*.bag binary
+*.pyc binary
