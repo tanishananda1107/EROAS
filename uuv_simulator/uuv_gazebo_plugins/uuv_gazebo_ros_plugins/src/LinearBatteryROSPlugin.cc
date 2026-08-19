@@ -70,7 +70,8 @@ void LinearBatteryROSPlugin::Update(
       batteryStateMsg.percentage = static_cast<float>(soc->Data());
   }
   // Spin ros callbacks (timer fires PublishBatteryState)
-  rclcpp::spin_some(rosNode);
+  if (rclcpp::ok())
+    rclcpp::spin_some(rosNode);
 }
 
 /////////////////////////////////////////////////

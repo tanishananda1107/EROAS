@@ -136,7 +136,7 @@ void ThrusterROSPlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
 {
   uuv_gz_plugins::ThrusterPlugin::PreUpdate(_info, _ecm);
 
-  if (this->rosNode)
+  if (this->rosNode && rclcpp::ok())
   {
     rclcpp::spin_some(this->rosNode);
     this->RosPublishStates();

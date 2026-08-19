@@ -81,7 +81,7 @@ void UnderwaterObjectROSPlugin::PreUpdate(
     gz::sim::EntityComponentManager &_ecm)
 {
   uuv_gz_plugins::UnderwaterObjectPlugin::PreUpdate(_info, _ecm);
-  if (this->rosNode)
+  if (this->rosNode && rclcpp::ok())
     rclcpp::spin_some(this->rosNode);
 }
 
