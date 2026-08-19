@@ -12,10 +12,16 @@ trapped it in every prior run -- but revealed a new problem: once loose in
 open water, the same blacklist can prevent it turning back toward the goal
 if that heading overlaps one blacklisted earlier, and the vehicle was
 observed travelling 60+m away from the obstacle cluster without clearly
-recovering toward the goal. The vehicle now handles World A's obstacle
-clusters *safely* (bounded depth, real motion throughout, no runaway) but
-does not reliably reach the goal. Do not treat World A as reliably
-completing end-to-end.
+recovering toward the goal. Fix #8 gives `known_bad_headings` positional
+scoping to address that specific mechanism and is now **confirmed via a
+15-minute headless run**: bounded excursions (x within [0.6, 44.5], no
+60+m runaway) and real net goal-ward progress (dist_to_goal 62.2m ->
+33.8m at one point), reaching y=77.7 -- further than any prior run. The
+vehicle now handles World A's obstacle clusters *safely* (bounded depth,
+real motion throughout, no runaway) and makes real progress, but still
+does not reliably reach the goal -- the same run was still cycling through
+stuck-recovery, short of the first waypoint (y=97), when the 900s test
+window ended. Do not treat World A as reliably completing end-to-end.
 
 ## What was fixed (confirmed via headless log capture, not just code review)
 
@@ -193,17 +199,57 @@ the same episode (different place, coincidentally similar bearing), the
 filter still excludes it -- blocking the vehicle from turning back even
 though that specific direction is no longer actually blocked by anything.
 
+### 8. `known_bad_headings` blocking goal-ward turns far from where it was recorded (FIXED, not yet re-verified)
+
+Implemented the fix predicted at the end of fix #7: `known_bad_headings`
+entries are now recorded as `(yaw, x, y)` at the vehicle's position when the
+dead end was confirmed, not just a bare yaw. `_is_known_bad_heading` takes
+the vehicle's *current* position and only excludes a candidate if it's
+within `bad_heading_position_radius` (new parameter, default 20.0m) of
+where that heading was recorded, in addition to the existing yaw-tolerance
+check. Both call sites (`_update_stuck_recovery`'s frontier scan and
+`gap_follow`'s own `mid_beams` filter) now pass the vehicle's current `(x,
+y)`. This directly targets the fix #7 regression: a heading recorded near
+one obstacle cluster no longer suppresses a coincidentally-similar,
+genuinely-clear bearing once the vehicle has moved on to different terrain.
+
+**Confirmed via a 15-minute headless run** (2026-08-19, `world_a`, spawn
+(29,33,-54), goal-ward waypoint at y=97):
+
+- Real, sustained goal-ward progress, not just local wandering:
+  dist_to_goal shrank 62.2m -> 58.1m -> ... -> 33.8m across the run (two
+  `known_bad_headings` clears logged with those numbers). The vehicle
+  reached y=77.7 (max), well past the y=56-68 cluster that trapped every
+  prior run, and further than any previous attempt.
+- No runaway divergence: x stayed within [0.6, 44.5] the whole run --
+  bounded detouring around the obstacle cluster, not the unbounded 60+m
+  drift (x reaching -30 against spawn x=29) that fix #7 alone produced.
+  Depth stayed within ~0.3m of the -50 target throughout; no errors or
+  crashes in 52k+ log lines.
+- **Not fully resolved**: the vehicle was still in `stuck_recovery_backing_away`
+  when the run's 900s timeout hit (attempt 10, 8 bad headings accumulated
+  since the last clear at attempt 3). It did not reach y=97 or any later
+  waypoint. Bad-heading accumulation resumed after attempt 3's clear and
+  didn't clear again through attempt 10 -- consistent with the vehicle
+  working through a harder stretch of the course later on, not yet
+  understood. A longer run (and/or comparing against a fix-#7-only run
+  under the same seed) would help isolate how much of the improvement is
+  attributable to fix #8 specifically vs. run-to-run variance.
+
+Net: fix #8 is a real, verified improvement over the fix #7 baseline
+(bounded excursions, confirmed net goal-ward progress) but does not by
+itself make World A complete reliably. Still open: whether fix #6's
+goal-progress-gated clearing still helps now that positional scoping does
+most of that job; whether `bad_heading_position_radius` (20.0m, a first
+guess) needs tuning; and what's actually blocking progress past y~77-97.
+
 ## Known open issue: vehicle does not reliably reach the goal
 
 With fixes #4-#7, the vehicle no longer gets permanently stuck or dives
 unsafely, and it does break out of the local obstacle cluster that trapped
 every prior run -- but it has not been observed reaching later waypoints
-(y=97+) or the goal. The likely next fix (not yet implemented or verified):
-give `known_bad_headings` either a time-based expiry or a positional radius
-(only exclude a heading while the vehicle is still within some distance of
-where it was recorded), so the blacklist stops applying once the vehicle
-has genuinely moved on to different terrain, instead of it staying globally
-in effect for the rest of the run. Also still open: whether fix #6's
+(y=97+) or the goal. Fix #8 (above) targets the specific mechanism behind
+that but is unverified. Also still open: whether fix #6's
 goal-progress-gated clearing helps or hurts (unverified), and whether
 `bad_heading_tolerance` needs tuning for how many similar-width dead ends
 this specific area has.

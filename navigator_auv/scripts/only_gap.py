@@ -180,6 +180,19 @@ class SonarHeadingNode(Node):
         # goal-ward progress (distance-to-goal shrinking by this much)
         # before forgetting them instead.
         self.declare_parameter('bad_heading_clear_progress', 3.0)
+        # known_bad_headings was a pure world-frame yaw blacklist with no
+        # positional scoping: confirmed via a 15-minute headless run that
+        # once loose of the obstacle cluster it can end up blocking the
+        # correct goal-ward heading somewhere the vehicle has genuinely
+        # moved on to, just because that direction coincidentally shares a
+        # bearing with a dead end recorded far away (vehicle diverged 60+m
+        # off course, x reaching -30 against a spawn x of ~29, without
+        # turning back). Scope each entry to the position it was recorded
+        # at: it only excludes candidates while the vehicle is still within
+        # this radius of that position, so the blacklist naturally stops
+        # applying once the vehicle has moved to different terrain instead
+        # of staying globally in effect for the rest of the run.
+        self.declare_parameter('bad_heading_position_radius', 20.0)
 
         # Paper-faithful SPD2C controller (arXiv 2411.05516 Algorithm 1 /
         # AIRLabIISc/EROAS reference only_gap.py). Kept behind a flag so
@@ -417,6 +430,8 @@ class SonarHeadingNode(Node):
             self.get_parameter('bad_heading_tolerance').value)
         self.bad_heading_clear_progress = float(
             self.get_parameter('bad_heading_clear_progress').value)
+        self.bad_heading_position_radius = float(
+            self.get_parameter('bad_heading_position_radius').value)
 
         self.paper_controller = bool(self.get_parameter('paper_controller').value)
         self.paper_k_t = float(self.get_parameter('paper_k_t').value)
@@ -1602,8 +1617,9 @@ class SonarHeadingNode(Node):
                 # onto a different, unproven heading instead of re-deriving
                 # the same wrong answer.
                 run = self._widest_free_run(data)
+                sample_xy = (self.pose.position.x, self.pose.position.y)
                 if (yaw_delta >= 0.6 and run > self.stuck_recovery_best_run
-                        and not self._is_known_bad_heading(sample_yaw)):
+                        and not self._is_known_bad_heading(sample_yaw, sample_xy)):
                     self.stuck_recovery_best_run = run
                     self.stuck_recovery_best_yaw = sample_yaw
             if now >= self.stuck_recovery_until:
@@ -1727,7 +1743,7 @@ class SonarHeadingNode(Node):
         if not self.known_bad_headings and self.target_x is not None:
             self.known_bad_headings_goal_anchor = math.hypot(
                 self.target_x - xyz[0], self.target_y - xyz[1])
-        self.known_bad_headings.append(bad_yaw)
+        self.known_bad_headings.append((bad_yaw, xyz[0], xyz[1]))
         self.stuck_recovery_last_turn_yaw = None
         if narrowing_trap:
             self.get_logger().warning(
@@ -1750,11 +1766,14 @@ class SonarHeadingNode(Node):
     def _stuck_recovery_yaw_sign(self):
         return 1.0 if self.stuck_recovery_count % 2 == 1 else -1.0
 
-    def _is_known_bad_heading(self, yaw):
-        for bad_yaw in self.known_bad_headings:
+    def _is_known_bad_heading(self, yaw, position_xy):
+        for bad_yaw, bad_x, bad_y in self.known_bad_headings:
             delta = abs(math.atan2(math.sin(yaw - bad_yaw), math.cos(yaw - bad_yaw)))
-            if delta <= self.bad_heading_tolerance:
-                return True
+            if delta > self.bad_heading_tolerance:
+                continue
+            if math.dist(position_xy, (bad_x, bad_y)) > self.bad_heading_position_radius:
+                continue
+            return True
         return False
 
     def _has_horizontal_gap(self, data, beam_count, stride):
@@ -1889,10 +1908,11 @@ class SonarHeadingNode(Node):
         # other indefinitely.
         if mid_beams and self.known_bad_headings and self.pose is not None:
             current_yaw = yaw_from_quaternion(self.pose.orientation)
+            current_xy = (self.pose.position.x, self.pose.position.y)
             mid_beams = [
                 b for b in mid_beams
                 if not self._is_known_bad_heading(
-                    current_yaw + self._beam_to_angle(b, beam_count))
+                    current_yaw + self._beam_to_angle(b, beam_count), current_xy)
             ]
 
         bcl = None
