@@ -309,12 +309,16 @@ source ~/eroas_ws/install/local_setup.bash
 
 # Update the repository
 cd ~/eroas_ws/src/uuv_simulator
+
 git pull origin fix/eroas-world-a-navigation
 
 # Build the workspace
 cd ~/eroas_ws
+
 source /opt/ros/jazzy/setup.bash
+
 colcon build
+
 source install/local_setup.bash
 
 # Launch World A
@@ -328,5 +332,6 @@ rviz2 -d ~/eroas_ws/src/navigator_auv/rviz/sonar_rays.rviz
 
 For small changes limited to `uuv_assistants`, use:
 colcon build --packages-select uuv_assistants
+
 source install/local_setup.bash
 
